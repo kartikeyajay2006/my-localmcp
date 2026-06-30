@@ -8,6 +8,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from . import __version__
 from . import repo_memory
 from .config import CONFIG_PATH, ensure_config, load_config, save_config
 from .identity import IDENTITY
@@ -246,7 +247,7 @@ def _mcp_tiny_context_text(data: dict[str, Any]) -> str:
     interp = data.get("interpreted_query") or {}
     lines: list[str] = []
     lines.append("neo-localmcp context_prepare")
-    lines.append("version: 1.0.0")
+    lines.append(f"version: {__version__}")
     lines.append(f"repo_root: {data.get('repo_root')}")
     if git:
         lines.append(f"git: branch={git.get('branch')} commit={str(git.get('commit') or '')[:12]} dirty={git.get('dirty_files')}")
@@ -587,7 +588,12 @@ def context_prepare(task: str, repo_root: str = "auto", max_files: int | None = 
             target = str(hit.get("target", ""))
             path = target.split(":", 1)[0]
             if path:
-                _add_candidate(candidates, path, f"index hit for '{term}': {target}", _term_score(term, interpreted, 7, 4), intent)
+                score = _term_score(term, interpreted, 7, 4)
+                if term.lower() in path.lower():
+                    # A query token embedded in a filename is much stronger evidence
+                    # than repeated prose/reference matches elsewhere in the repo.
+                    score += _term_score(term, interpreted, 80, 15)
+                _add_candidate(candidates, path, f"index hit for '{term}': {target}", score, intent)
         for sym in lookup_data.get("symbols", []):
             symbol_hits.append(sym)
             path = sym.get("file_path")
@@ -617,9 +623,17 @@ def context_prepare(task: str, repo_root: str = "auto", max_files: int | None = 
                         if record not in followed_references:
                             followed_references.append(record)
 
+    explicit_paths: set[str] = set()
+    for reference in extract_file_references(task):
+        explicit_paths.update(_resolve_reference(reference, indexed_files))
+
     for term in terms:
         for resolved in _resolve_reference(term, indexed_files):
-            _add_candidate(candidates, resolved, f"direct file reference '{term}'", 18, intent, allow_reason_line_hint=False)
+            explicit_paths.add(resolved)
+            _add_candidate(candidates, resolved, f"direct file reference '{term}'", 120, intent, allow_reason_line_hint=False)
+
+    for resolved in sorted(explicit_paths):
+        _add_candidate(candidates, resolved, "explicit path in task", 120, intent, allow_reason_line_hint=False)
 
     for item in candidates.values():
         item["reasons"] = sorted(item.get("reasons", []))
@@ -628,7 +642,15 @@ def context_prepare(task: str, repo_root: str = "auto", max_files: int | None = 
     ranked = sorted(candidates.values(), key=lambda item: (-int(item.get("score", 0)), str(item.get("category", "")), str(item.get("path", ""))))
     ranked = ranked[:max(limit, 1)]
     read_limit = min(max(1, int(limit)), max(1, int(max_files or limit)), 6)
-    read_first = [item for item in ranked if item.get("category") in {"source", "test", "config"}][:read_limit]
+    # Explicit user paths are authoritative even for feature/debug tasks. The
+    # source-first policy applies after those requested files, not instead of them.
+    read_first = [item for item in ranked if item.get("path") in explicit_paths][:read_limit]
+    if intent in {"debug", "feature", "refactor", "test"}:
+        for item in ranked:
+            if len(read_first) >= read_limit:
+                break
+            if item not in read_first and item.get("category") in {"source", "test", "config"}:
+                read_first.append(item)
     if len(read_first) < read_limit:
         for item in ranked:
             if item not in read_first:

@@ -12,6 +12,7 @@ from typing import Any
 
 from .config import APP_DIR, CONFIG_PATH, ensure_config
 from .identity import IDENTITY
+from .utils import hidden_subprocess_kwargs
 
 
 def _command_templates() -> list[tuple[str, str]]:
@@ -94,7 +95,7 @@ def setup_claude_code(apply: bool = True) -> dict[str, Any]:
             cmd = [claude, "mcp", "add", "--scope", "user", IDENTITY.mcp_server_name, "--", _server_command()]
             configured = False
             for _ in range(3):
-                existing = subprocess.run([claude, "mcp", "get", IDENTITY.mcp_server_name], capture_output=True, text=True, errors="replace")
+                existing = subprocess.run([claude, "mcp", "get", IDENTITY.mcp_server_name], stdin=subprocess.DEVNULL, capture_output=True, text=True, errors="replace", **hidden_subprocess_kwargs())
                 combined = f"{existing.stdout}\n{existing.stderr}".lower()
                 if existing.returncode != 0:
                     break
@@ -105,14 +106,14 @@ def setup_claude_code(apply: bool = True) -> dict[str, Any]:
                 existing_scope = "local" if "scope: local" in combined else ("user" if "scope: user" in combined else ("project" if "scope: project" in combined else None))
                 if not existing_scope:
                     break
-                removed = subprocess.run([claude, "mcp", "remove", IDENTITY.mcp_server_name, "--scope", existing_scope], capture_output=True, text=True, errors="replace")
+                removed = subprocess.run([claude, "mcp", "remove", IDENTITY.mcp_server_name, "--scope", existing_scope], stdin=subprocess.DEVNULL, capture_output=True, text=True, errors="replace", **hidden_subprocess_kwargs())
                 actions.append(f"removed existing {existing_scope}-scope registration for migration: exit {removed.returncode}")
                 if removed.returncode != 0:
                     break
-            result = subprocess.run(cmd, capture_output=True, text=True, errors="replace") if not configured else existing
+            result = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True, errors="replace", **hidden_subprocess_kwargs()) if not configured else existing
             if not configured and result.returncode != 0:
                 fallback = [claude, "mcp", "add", IDENTITY.mcp_server_name, "--", _server_command()]
-                result = subprocess.run(fallback, capture_output=True, text=True, errors="replace")
+                result = subprocess.run(fallback, stdin=subprocess.DEVNULL, capture_output=True, text=True, errors="replace", **hidden_subprocess_kwargs())
                 actions.append(f"ran claude mcp add fallback: exit {result.returncode}")
             elif not configured:
                 actions.append(f"ran claude mcp add --scope user: exit {result.returncode}")

@@ -5,8 +5,4 @@ argument-hint: "<symbol-or-query>"
 
 Use the `neo-localmcp` MCP server for this command.
 
-Rules:
-- neo-localmcp retrieves, indexes, summarizes, ranks, and applies exact approved patches only.
-- It does not generate source code or make engineering decisions.
-- Prefer `context_prepare` before broad repo search. Context is deterministic/no-Ollama by default in V4.2.
-- Treat cached context as a way to narrow reads; current source remains truth.
+Call `repo_lookup` once with the user's query, explicit `repo_root`, and a limit of 10 unless they request otherwise. Report exact path/symbol hits. If it returns no hits, say so; do not substitute fuzzy guesses.

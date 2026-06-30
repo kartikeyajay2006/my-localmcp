@@ -3,10 +3,4 @@ description: Build or rebuild the current repository index
 argument-hint: "[repo-path]"
 ---
 
-Use the `neo-localmcp` MCP server for this command.
-
-Rules:
-- neo-localmcp retrieves, indexes, summarizes, ranks, and applies exact approved patches only.
-- It does not generate source code or make engineering decisions.
-- Prefer `context_prepare` before broad repo search. Context is deterministic/no-Ollama by default in V4.2.
-- Treat cached context as a way to narrow reads; current source remains truth.
+Call the `refresh_index` MCP tool with explicit `repo_root`. Use `force=true` only when the user asks to rebuild or reindex; otherwise use `force=false`. Report completeness and file counts.

@@ -312,7 +312,10 @@ def refresh(repo_root: str | Path | None = None, force: bool = False, max_files:
 def lookup(query: str, repo_root: str | Path | None = None, limit: int = 20) -> dict[str, Any]:
     root = repo_root_or_cwd(repo_root)
     conn = connect()
-    rid = upsert_repo(conn, root)
+    # Lookup is a hot, read-only path. The indexer owns repository metadata;
+    # probing branch/remote/status here can turn a millisecond FTS query into a
+    # client timeout on a large or network-backed worktree.
+    rid = repo_id(root)
     q = query.strip().replace('"', " ")
     rows: list[dict[str, Any]] = []
     if q:
@@ -381,10 +384,15 @@ def file_excerpts(ranges: list[dict[str, Any]], repo_root: str | Path | None = N
             excerpts.append({"path": path, "exists": False})
             continue
         lines = read_text_file(p, 1_000_000).splitlines()
-        start = max(1, int(item.get("start_line") or 1))
-        end = min(len(lines), int(item.get("end_line") or start + 39))
-        if end < start:
-            start, end = end, start
+        if not lines:
+            excerpts.append({"path": rel(p, root), "exists": True, "start_line": 0, "end_line": 0, "sha256": sha256_file(p), "text": ""})
+            continue
+        requested_start = int(item.get("start_line") or 1)
+        requested_end = int(item.get("end_line") or requested_start + 39)
+        if requested_end < requested_start:
+            requested_start, requested_end = requested_end, requested_start
+        start = min(len(lines), max(1, requested_start))
+        end = min(len(lines), max(start, requested_end))
         text = "\n".join(f"{i}: {lines[i-1]}" for i in range(start, end + 1))
         if len(text) > remaining:
             text = text[:remaining].rsplit("\n", 1)[0] + "\n...[budget exhausted]"
@@ -441,14 +449,14 @@ def record_change(summary: str, paths: list[str], repo_root: str | Path | None =
 def list_indexed_files(repo_root: str | Path | None = None) -> list[str]:
     root = repo_root_or_cwd(repo_root)
     conn = connect()
-    rid = upsert_repo(conn, root)
+    rid = repo_id(root)
     return [str(row["path"]) for row in conn.execute("SELECT path FROM files WHERE repo_id=? ORDER BY path", (rid,)).fetchall()]
 
 
 def symbols_for_files(paths: list[str], repo_root: str | Path | None = None, max_per_file: int = 12) -> dict[str, list[dict[str, Any]]]:
     root = repo_root_or_cwd(repo_root)
     conn = connect()
-    rid = upsert_repo(conn, root)
+    rid = repo_id(root)
     out: dict[str, list[dict[str, Any]]] = {}
     for path in paths:
         out[path] = [dict(row) for row in conn.execute(

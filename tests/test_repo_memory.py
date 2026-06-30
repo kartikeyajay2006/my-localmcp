@@ -73,3 +73,24 @@ def test_repo_identity_separates_clones(tmp_path, isolated_config):
     one.mkdir()
     two.mkdir()
     assert repo_memory.repo_id(one) != repo_memory.repo_id(two)
+
+
+def test_lookup_does_not_probe_git_metadata(tmp_path, isolated_config, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "module.py").write_text("def MainViewModel():\n    pass\n", encoding="utf-8")
+    repo_memory.index_repo(repo)
+    monkeypatch.setattr(repo_memory, "git_info", lambda *_: (_ for _ in ()).throw(AssertionError("lookup must stay read-only")))
+    result = repo_memory.lookup("MainViewModel", repo)
+    assert result["hits"] or result["symbols"]
+
+
+def test_file_excerpts_clamps_stale_line_hint_to_eof(tmp_path, isolated_config):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "short.md").write_text("one\ntwo\n", encoding="utf-8")
+    result = repo_memory.file_excerpts([{"path": "short.md", "start_line": 100, "end_line": 140}], repo)
+    excerpt = result["excerpts"][0]
+    assert excerpt["start_line"] == 2
+    assert excerpt["end_line"] == 2
+    assert excerpt["text"] == "2: two"

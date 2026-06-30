@@ -15,6 +15,8 @@ FILLER_WORDS = {
     "diagnose", "issue", "problem", "trace", "add", "build", "create", "implement", "feature", "support", "new",
     "extend", "refactor", "cleanup", "simplify", "rename", "split", "move", "rework", "test", "tests",
     "coverage", "assert", "spec", "unit", "integration", "overview", "understand", "summarize", "describe", "architecture", "map",
+    # Planning nouns describe the requested answer shape, not repository entities.
+    "goal", "goals", "decision", "decisions", "implementation", "phase", "phases", "constraint", "constraints", "breakdown", "entry-point",
 }
 
 INTENT_KEYWORDS: list[tuple[str, set[str]]] = [
@@ -45,6 +47,7 @@ def _is_symbol_like(token: str) -> bool:
     return bool(
         re.search(r"[A-Z][a-z0-9]+[A-Z_]", token)
         or re.search(r"[A-Za-z_][A-Za-z0-9_]*Async\b", token)
+        or re.fullmatch(r"[A-Za-z]\d+(?:\.\d+)*", token)
         or "." in token
         or "/" in token
         or "\\" in token
@@ -85,14 +88,16 @@ def normalize_query(task: str) -> dict[str, Any]:
     strong_terms: list[str] = []
 
     for term in raw_focus:
-        if term and term not in strong_terms:
+        # A colon is a useful focus hint, but prose after it is still prose. Do not
+        # turn filler words such as "and" into high-weight repository searches.
+        if term and (term.lower() not in FILLER_WORDS or _is_symbol_like(term)) and term not in strong_terms:
             strong_terms.append(term)
 
     for term in raw_natural:
         if not term:
             continue
         lw = term.lower()
-        if lw in FILLER_WORDS or len(term) < 3:
+        if lw in FILLER_WORDS or (len(term) < 3 and not _is_symbol_like(term)):
             if term not in ignored:
                 ignored.append(term)
             continue

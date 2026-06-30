@@ -115,7 +115,7 @@ neo-localmcp record-change "Fixed model readiness" neo_localmcp/ollama_client.py
 
 Administration remains CLI-only: `doctor`, `where`, `index`, `refresh`, `reindex`, `reset-repo`, `reset-all`, `test-determinism`, `setup`, `set-ollama`, `summarize`, and exact approved `apply-patch`.
 
-The MCP surface is intentionally smaller: `prepare_context`, compatibility alias `context_prepare`, `file_excerpts`, `repo_lookup`, `record_change`, `ollama_status`, and `ollama_ensure`.
+The MCP surface includes `prepare_context`, compatibility alias `context_prepare`, `file_excerpts`, `repo_lookup`, `repo_status`, `doctor`, `refresh_index`, `summarize_file`, safe-by-default `apply_patch`, `record_change`, `ollama_status`, and `ollama_ensure`. Patch application defaults to check-only and requires `check_only=false` for an exact developer-approved diff.
 
 ## Verification
 

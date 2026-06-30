@@ -3,10 +3,4 @@ description: Summarize one file with the configured Ollama model
 argument-hint: "<file-path>"
 ---
 
-Use the `neo-localmcp` MCP server for this command.
-
-Rules:
-- neo-localmcp retrieves, indexes, summarizes, ranks, and applies exact approved patches only.
-- It does not generate source code or make engineering decisions.
-- Prefer `context_prepare` before broad repo search. Context is deterministic/no-Ollama by default in V4.2.
-- Treat cached context as a way to narrow reads; current source remains truth.
+Call the `summarize_file` MCP tool with the exact file path and explicit `repo_root`. It reads the file with the configured summary model and stores the result. Do not emulate it with `prepare_context`, which ranks candidates but does not summarize file contents.

@@ -11,9 +11,23 @@ from typing import Any, Iterable
 from .config import load_config
 
 
+def hidden_subprocess_kwargs() -> dict[str, int]:
+    """Keep short-lived helpers from allocating console hosts on Windows."""
+    if os.name == "nt":
+        return {"creationflags": int(subprocess.CREATE_NO_WINDOW)}
+    return {}
+
+
 def run_command(args: list[str], cwd: Path | None = None, timeout: int = 30) -> dict[str, Any]:
     try:
-        proc = subprocess.run(args, cwd=str(cwd) if cwd else None, capture_output=True, text=True, errors="replace", timeout=timeout)
+        # Never let Git or another helper inherit the MCP server's protocol stdin.
+        # On stdio transports an inherited handle can consume or retain JSON-RPC
+        # traffic, making a completed tool handler appear to hang forever.
+        proc = subprocess.run(
+            args, cwd=str(cwd) if cwd else None, stdin=subprocess.DEVNULL,
+            capture_output=True, text=True, errors="replace", timeout=timeout,
+            **hidden_subprocess_kwargs(),
+        )
         return {"returncode": proc.returncode, "stdout": proc.stdout, "stderr": proc.stderr, "cmd": args}
     except FileNotFoundError:
         return {"returncode": 127, "stdout": "", "stderr": f"Command not found: {args[0]}", "cmd": args}

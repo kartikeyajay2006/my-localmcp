@@ -72,3 +72,20 @@ def test_warm_timeout_is_not_reported_as_lock_contention(monkeypatch, isolated_c
     result = ollama_client.warm(purpose="ranking")
     assert result["state"] == "timed_out"
     assert result["action"] == "warm_timed_out"
+
+
+def test_status_resolves_omitted_latest_tag(monkeypatch, isolated_config):
+    def fake(path, **kwargs):
+        if path == "/api/version":
+            return 200, {"version": "1.2.3"}
+        if path == "/api/tags":
+            return 200, {"models": [{"name": "qwen3-coder:latest"}]}
+        if path == "/api/ps":
+            return 200, {"models": []}
+        raise AssertionError(path)
+
+    monkeypatch.setattr(ollama_client, "_request_json", fake)
+    result = ollama_client.status("qwen3-coder")
+    assert result["state"] == "model_cold"
+    assert result["model"] == "qwen3-coder:latest"
+    assert result["requested_model"] == "qwen3-coder"

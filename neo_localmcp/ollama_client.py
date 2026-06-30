@@ -63,6 +63,17 @@ def _model_for(purpose: str, override: str | None = None) -> str:
     return str(cfg.get("fast_model") if purpose in {"ranking", "query"} else cfg.get("summary_model") or cfg.get("fast_model") or "qwen3:8b")
 
 
+def _resolve_installed_model(requested: str, installed: list[str]) -> str:
+    """Resolve Ollama's conventional omitted ``:latest`` tag without guessing tags."""
+    if requested in installed or ":" in requested:
+        return requested
+    latest = f"{requested}:latest"
+    if latest in installed:
+        return latest
+    matches = [name for name in installed if name.rsplit(":", 1)[0] == requested]
+    return matches[0] if len(matches) == 1 else requested
+
+
 def _is_local(base_url: str) -> bool:
     host = (urlparse(base_url).hostname or "").lower()
     return host in {"localhost", "127.0.0.1", "::1"}
@@ -130,6 +141,11 @@ def status(model: str | None = None, purpose: str = "ranking") -> dict[str, Any]
             raise RuntimeError(tags.get("error") or f"HTTP {code}")
         ps_code, running = _request_json("/api/ps", timeout=float(cfg.get("health_timeout_seconds", 5)))
         installed_models = [str(item.get("name") or item.get("model") or "") for item in tags.get("models", [])]
+        resolved = _resolve_installed_model(chosen, installed_models)
+        if resolved != chosen:
+            result["requested_model"] = chosen
+            chosen = resolved
+            result["model"] = chosen
         loaded_models = running.get("models", []) if ps_code == 200 else []
         loaded = next((item for item in loaded_models if chosen in {item.get("name"), item.get("model")}), None)
         result.update({
@@ -239,7 +255,7 @@ def ensure(model: str | None = None, purpose: str = "ranking", auto_start: bool 
                 if current.get("ok"):
                     current = status(model, purpose)
             if current.get("state") == "model_cold":
-                current = warm(model, purpose)
+                current = warm(str(current.get("model") or model or ""), purpose)
             ok = current.get("state") == "ready"
             if ok:
                 preserved = {key: value for key, value in _read_state().items() if key in {"owned_pid", "base_url", "started_at"}}
@@ -263,6 +279,7 @@ def chat(prompt: str, model: str | None = None, purpose: str = "summary") -> dic
     cfg = _cfg()
     chosen = _model_for(purpose, model)
     readiness = ensure(chosen, purpose)
+    chosen = str(readiness.get("model") or chosen)
     timeout_seconds = int(cfg.get("fast_timeout_seconds", 60) if purpose in {"ranking", "query"} else cfg.get("summary_timeout_seconds", 200))
     if not readiness.get("ok"):
         return {"ok": False, "model": chosen, "purpose": purpose, "error": readiness.get("error") or readiness.get("state"), "timed_out": readiness.get("state") == "timed_out", "timeout_seconds": timeout_seconds, "ollama_status": readiness}

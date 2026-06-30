@@ -3,10 +3,4 @@ description: Check Neo LocalMCP, repository, and Ollama health
 argument-hint: "[repo-path]"
 ---
 
-Use the `neo-localmcp` MCP server for this command.
-
-Rules:
-- neo-localmcp retrieves, indexes, summarizes, ranks, and applies exact approved patches only.
-- It does not generate source code or make engineering decisions.
-- Prefer `context_prepare` before broad repo search. Context is deterministic/no-Ollama by default in V4.2.
-- Treat cached context as a way to narrow reads; current source remains truth.
+Call the `doctor` MCP tool with an explicit `repo_root`. This is the full read-only health check; `ollama_status` alone is not `/doctor`. Summarize failures and recommended actions without changing configuration.

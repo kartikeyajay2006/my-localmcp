@@ -14,12 +14,15 @@ from mcp.server.fastmcp import Context, FastMCP
 from . import tools
 from .config import load_config
 from .identity import IDENTITY
+from .utils import hidden_subprocess_kwargs
 
 SERVER_INSTRUCTIONS = (
     "Use prepare_context before broad repository search. It returns bounded, current source excerpts; source remains authoritative. "
     "Pass repo_root explicitly when possible. If omitted, neo-localmcp uses MCP workspace roots and refuses ambiguous scope. "
     "Ollama is optional: deterministic context must still be used when Ollama is unavailable, missing, cold, busy, or timed out. "
-    "Use file_excerpts only for additional exact ranges, repo_lookup for precise symbols/paths, and record_change after verified edits."
+    "Use file_excerpts only for additional exact ranges and repo_lookup for precise symbols/paths. "
+    "Repository status, doctor, refresh, exact-file summarization, and approved patch validation/application have dedicated tools. "
+    "apply_patch defaults to check_only=true; set it false only for a developer-approved exact diff. Record verified edits with record_change."
 )
 
 mcp = FastMCP(IDENTITY.mcp_server_name, instructions=SERVER_INSTRUCTIONS)
@@ -76,7 +79,8 @@ def _context_prepare_worker(task: str, repo_root: str, max_files: int, token_bud
         proc = subprocess.run(
             [sys.executable, "-m", "neo_localmcp.context_worker"], input=json.dumps(payload),
             text=True, encoding="utf-8", errors="replace", capture_output=True,
-            timeout=timeout_seconds, env=worker_env,
+            timeout=timeout_seconds, env=worker_env, stdin=None,
+            **hidden_subprocess_kwargs(),
         )
     except subprocess.TimeoutExpired:
         return json.dumps({"ok": False, "error": "context worker timed out", "repo_root": repo_root, "use_ollama": use_ollama, "timeout_seconds": timeout_seconds, "fallback": "Retry with use_ollama=false; deterministic context remains available."}, indent=2)
@@ -127,6 +131,51 @@ async def record_change(summary: str, paths: list[str], ctx: Context, repo_root:
     """Record a verified logical change and refresh affected paths."""
     try:
         return tools.record_change(summary, paths, await _resolve_repo_root(repo_root, ctx))
+    except Exception as exc:
+        return json.dumps({"ok": False, "error": str(exc)}, indent=2)
+
+
+@mcp.tool()
+async def repo_status(ctx: Context, repo_root: str = "auto") -> str:
+    """Report repository index, configuration, Git, and Ollama status without mutation."""
+    try:
+        return tools.status(await _resolve_repo_root(repo_root, ctx))
+    except Exception as exc:
+        return json.dumps({"ok": False, "error": str(exc)}, indent=2)
+
+
+@mcp.tool()
+async def doctor(ctx: Context, repo_root: str = "auto") -> str:
+    """Run the full read-only neo-localmcp, repository, configuration, and Ollama health check."""
+    try:
+        return tools.doctor(await _resolve_repo_root(repo_root, ctx))
+    except Exception as exc:
+        return json.dumps({"ok": False, "error": str(exc)}, indent=2)
+
+
+@mcp.tool()
+async def refresh_index(ctx: Context, repo_root: str = "auto", max_files: Optional[int] = None, force: bool = False) -> str:
+    """Refresh changed, stale, or missing files in the persistent repository index."""
+    try:
+        return tools.repo_refresh(await _resolve_repo_root(repo_root, ctx), max_files, force)
+    except Exception as exc:
+        return json.dumps({"ok": False, "error": str(exc)}, indent=2)
+
+
+@mcp.tool()
+async def summarize_file(path: str, ctx: Context, repo_root: str = "auto", model: Optional[str] = None) -> str:
+    """Summarize one exact current file with the configured Ollama summary model and cache it by source hash."""
+    try:
+        return tools.summarize_file(path, await _resolve_repo_root(repo_root, ctx), model)
+    except Exception as exc:
+        return json.dumps({"ok": False, "error": str(exc)}, indent=2)
+
+
+@mcp.tool()
+async def apply_patch(patch_text: str, ctx: Context, repo_root: str = "auto", check_only: bool = True) -> str:
+    """Check or apply an exact developer-approved unified diff; defaults to validation without mutation."""
+    try:
+        return tools.apply_unified_patch(patch_text, await _resolve_repo_root(repo_root, ctx), check_only)
     except Exception as exc:
         return json.dumps({"ok": False, "error": str(exc)}, indent=2)
 
