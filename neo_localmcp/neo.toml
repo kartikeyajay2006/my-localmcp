@@ -1,0 +1,13 @@
+[identity]
+product_name = "neo-localmcp"
+display_name = "neo-localmcp"
+cli_name = "neo-localmcp"
+slash_prefix = "neo-localmcp"
+mcp_server_name = "neo-localmcp"
+package_name = "neo-localmcp"
+
+[defaults]
+ollama_base_url = "http://127.0.0.1:11434"
+summary_model = "qwen3-coder:30b"
+fast_model = "qwen3:8b"
+num_ctx = 32768

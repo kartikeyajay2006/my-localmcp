@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "neo-localmcp"
+version = "0.4.2.5"
+description = "Agent-ready deterministic repo context for Claude/Codex with local Ollama-assisted preprocessing."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "neo-localmcp" }]
+license = { text = "MIT" }
+dependencies = [
+  "mcp[cli]>=1.9.0"
+]
+
+[project.scripts]
+neo-localmcp = "neo_localmcp.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["neo_localmcp*"]
+
+[tool.setuptools.package-data]
+neo_localmcp = ["neo.toml", "templates/claude-code/commands/neo-localmcp/*.md"]

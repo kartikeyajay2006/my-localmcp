@@ -1,0 +1,10 @@
+# neo-localmcp Codex CLI/Desktop example
+# Generated setup writes this block to ~/.codex/config.toml for Codex CLI
+# and to the platform Codex app-support config path for Codex Desktop.
+
+[mcp_servers.neo-localmcp]
+command = "C:\\Users\\Neel\\.neo-localmcp\\venv\\Scripts\\python.exe"
+args = ["-m", "neo_localmcp.server"]
+
+[mcp_servers.neo-localmcp.env]
+NEO_LOCALMCP_CONFIG = "C:\\Users\\Neel\\.neo-localmcp\\config.yaml"
