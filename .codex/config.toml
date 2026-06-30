@@ -1,0 +1,44 @@
+# Keep this repository focused on developing and testing neo-localmcp.
+# Project-scoped config is loaded only when the repository is trusted.
+
+[mcp_servers.node_repl]
+enabled = false
+
+[mcp_servers.neo-localmcp]
+enabled = true
+
+[plugins."browser@openai-bundled"]
+enabled = false
+
+[plugins."computer-use@openai-bundled"]
+enabled = false
+
+[plugins."documents@openai-primary-runtime"]
+enabled = false
+
+[plugins."spreadsheets@openai-primary-runtime"]
+enabled = false
+
+[plugins."presentations@openai-primary-runtime"]
+enabled = false
+
+[plugins."pdf@openai-primary-runtime"]
+enabled = false
+
+[plugins."template-creator@openai-primary-runtime"]
+enabled = false
+
+[plugins."figma@openai-curated"]
+enabled = false
+
+[plugins."github@openai-curated"]
+enabled = false
+
+[plugins."gmail@openai-curated"]
+enabled = false
+
+[plugins."notion@openai-curated"]
+enabled = false
+
+[plugins."airtable@openai-curated"]
+enabled = false
