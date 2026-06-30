@@ -18,6 +18,7 @@ def main() -> int:
         use_ollama = bool(payload.get("use_ollama"))
         model = payload.get("model")
         output_format = payload.get("output_format") or "mcp_text"
+        token_budget = int(payload.get("token_budget") or 3000)
         if not task.strip():
             print("neo-localmcp context_prepare error: missing task")
             return 2
@@ -29,6 +30,7 @@ def main() -> int:
             use_ollama=use_ollama,
             model=model,
             output_format=output_format,
+            token_budget=token_budget,
         )
         # Keep worker stdout as the tool payload only. Diagnostics belong on stderr.
         sys.stdout.write(result)

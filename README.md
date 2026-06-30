@@ -1,450 +1,139 @@
 # neo-localmcp
 
-`neo-localmcp` is an agent-ready local MCP server and CLI that helps Claude/Codex work in large repositories without repeatedly grepping and rereading the same files.
+`neo-localmcp` is a local repository-context server for Claude and Codex. It indexes a repository once, incrementally refreshes changed files, and returns a bounded bundle of current source excerpts so the primary model can avoid repeated broad searches and full-file reads.
 
-It keeps persistent repository working context, ranks relevant files/line ranges, and can use Ollama on your local machine/4080 for cheap ranking and summarization.
+V1 targets at least a 50% reduction in discovery/read tokens and a 30% reduction in total task tokens without reducing edit accuracy. Deterministic source retrieval is always authoritative; Ollama is optional preprocessing for ranking and summarization.
 
-## V4/V4.2 rule
+## Core workflow
 
-> `neo-localmcp` never generates source code. It only retrieves, indexes, summarizes, ranks, and applies developer-approved patches.
+The primary MCP tool is:
 
-Claude/Codex remain responsible for reasoning, debugging, architecture, and exact patch creation. Current source files and git diff are always the truth.
+```text
+prepare_context(task, repo_root, token_budget=3000, max_files=6)
+```
 
-## What V4.2 adds
+It returns ranked current-source excerpts, hashes, line ranges, related symbols/tests, selection reasons, index completeness, and approximate retrieval-token measurements. Use `file_excerpts` for additional exact ranges and `repo_lookup` for precise symbols or paths.
 
-V4.2 is **Fast Deterministic Context Polish**:
+Recommended agent instruction:
 
-- `context` is deterministic/no-Ollama by default.
-- New `context --ollama-rank` opt-in for local model reranking.
-- New `neo-localmcp reindex` alias for force rebuilding repo context.
-- Indexer version tracking so upgrades can force/recommend clean reindexing.
-- Natural + hybrid context queries.
-- Source-first ranking for debug/feature/refactor work.
-- Stable output ordering for repeated deterministic runs.
-- Docs/status hits can promote referenced source files without leaking docs line numbers into source line hints.
-- Compact agent guidance.
-- Visible Ollama model/timing when `--ollama-rank` or summarization uses Ollama.
+```text
+Before broad repository search, call neo-localmcp prepare_context.
+Use its current source excerpts first. Request additional exact ranges only when needed.
+Treat source and tests as truth. Ollama output is optional advisory context.
+```
 
+## Install
 
-## V4.2.5 Ollama safety
+Requirements: Python 3.10 or newer. Windows and macOS are primary targets.
 
-V4.2.5 keeps deterministic `READ FIRST` authoritative and treats Ollama as a bounded advisory only. The default Ollama timeout is now 200 seconds. If Ollama times out or fails, MCP clients still receive the deterministic context result.
-
-## Install or overwrite existing V4
-
-Extract the ZIP and open a terminal in the extracted `neo-localmcp` folder.
-
-### Windows PowerShell
+Windows:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install.ps1
+neo-localmcp setup --client all
 ```
 
-### Windows CMD
-
-```cmd
-install.cmd
-```
-
-### macOS / Linux
+macOS:
 
 ```bash
 ./install.sh
-```
-
-The installer overwrites/upgrades the installed package inside:
-
-```text
-~/.neo-localmcp/venv
-~/.neo-localmcp/bin
-```
-
-It does **not** delete your repo context database by default.
-
-Primary command:
-
-```bash
-neo-localmcp
-```
-
-If the command is not immediately on PATH, open a new terminal or call the installed command directly:
-
-```powershell
-$neo = "$env:USERPROFILE\.neo-localmcp\bin\neo-localmcp.cmd"
-& $neo where
-```
-
-## Correct first-time usage
-
-Run setup once from anywhere:
-
-```bash
 neo-localmcp setup --client all
 ```
 
-Then go to the repo you want analyzed:
-
-```bash
-cd /path/to/your/repo
-neo-localmcp index
-neo-localmcp context "debug settings persistence: BackdropMaterial, LoadSettingsAsync"
-```
-
-On Windows example:
+Both installers are idempotent. Use `-DryRun`/`--dry-run`, `-Repair`/`--repair`, or `-Upgrade`/`--upgrade`. Uninstalling preserves configuration and repository memory unless the remove-data option is supplied:
 
 ```powershell
-cd F:\LocalVSProj\AntiNotepad
-neo-localmcp index
-neo-localmcp context "debug settings persistence: BackdropMaterial, LoadSettingsAsync"
+.\uninstall.ps1
 ```
-
-## Preferred query style
-
-`neo-localmcp` accepts normal English, but it works best with a simple hybrid style:
-
-```text
-<natural task>: <known symbols, files, APIs, errors>
-```
-
-Examples:
 
 ```bash
-neo-localmcp context "debug settings persistence: BackdropMaterial, LoadSettingsAsync, SaveSettingsAsync"
-neo-localmcp context "fix startup crash: App.xaml.cs, MainWindow, InitializeComponent"
-neo-localmcp context "implement font size setting: Settings flyout, AppSettings, MainViewModel"
-neo-localmcp context "explain swipe navigation: NavigateAsync, WouldBlockNavigation, MainPage.xaml.cs"
+./uninstall.sh
 ```
 
-This format is recommended, not required. V4.2 normalizes messy input by dropping filler words, detecting symbols/files, inferring intent, and ranking source/tests/docs accordingly.
+## Client integration
 
-## Claude/Codex usage pattern
+- Claude Code is configured using `claude mcp add` and receives `/neo-localmcp:*` command templates.
+- Claude Desktop uses the package generated at `packages/claude-desktop/neo-localmcp.mcpb`. Build it with `scripts/build-mcpb.ps1` or `scripts/build-mcpb.sh`, then install it through Settings > Extensions > Advanced settings.
+- Codex app, CLI, and IDE share `~/.codex/config.toml`; setup writes one marked, replaceable block there.
+- MCP calls use a client workspace root when available. If none or several are exposed, pass `repo_root` explicitly or set `NEO_LOCALMCP_REPO`; the server refuses ambiguous automatic scope.
 
-Tell Claude/Codex:
+## Repository indexing
 
-```text
-Before broad repo search, use neo-localmcp context_prepare.
-Ask naturally, but include known symbols/files when possible:
-"debug X: SymbolA, SymbolB, FileName.cs".
-Use the result to narrow reads. Verify current source before editing.
-Produce exact patches only.
-```
-
-Claude should call `context_prepare` before grepping broadly. It should then read the recommended current source files/line ranges, reason normally, and produce an exact patch.
-
-## Commands
-
-### `neo-localmcp where`
-
-Shows install/config paths, current repo root, repo DB, and configured Ollama model.
+Run manually when desired:
 
 ```bash
-neo-localmcp where
-```
-
-### `neo-localmcp doctor`
-
-Checks config, DB, repo status, command inventory, and Ollama reachability.
-
-```bash
-neo-localmcp doctor
-```
-
-### `neo-localmcp status`
-
-Fast status for the current repo.
-
-```bash
-neo-localmcp status
+neo-localmcp index --repo-root /path/to/repo
 neo-localmcp status --repo-root /path/to/repo
 ```
 
-### `neo-localmcp setup`
+The first context request creates a complete index automatically. Later requests compare path, size, and modification time before hashing. Complete refreshes transactionally prune deleted and renamed files. Capped indexes explicitly report `index_complete=false` with both `indexed_files` and `eligible_files`.
 
-Installs MCP config/slash commands for supported clients.
+Repository identity includes the canonical root and Git remote, keeping clones and worktrees separate. Summaries are stored with source hash, model, and prompt version and are replaced—not duplicated—when regenerated.
 
-```bash
-neo-localmcp setup --client all
-neo-localmcp setup --client claude-desktop
-neo-localmcp setup --client codex
-neo-localmcp setup --dry-run
-```
+## Ollama
 
-### `neo-localmcp index`
+Context retrieval works without Ollama. Enable it per request with `use_ollama=true` or CLI `--ollama-rank`.
 
-Indexes current repo files and symbols into persistent repo context.
+Configure localhost or a remote endpoint:
 
 ```bash
-neo-localmcp index
-neo-localmcp index --max-files 1000
-neo-localmcp index --force
+neo-localmcp set-ollama --base-url http://127.0.0.1:11434 --fast-model qwen3:8b --summary-model qwen3-coder:30b --num-ctx 32768
+neo-localmcp ollama status
+neo-localmcp ollama ensure
 ```
 
-Run this from the repo you want analyzed. If you just upgraded and want a clean rebuild, run `neo-localmcp reindex`.
+Ranking uses `fast_model`, an 8K context, and a 60-second inference limit. Summarization uses `summary_model`, the configured larger context, and a 200-second limit.
 
-### `neo-localmcp refresh`
+Before inference, neo-localmcp checks Ollama version, installed models, and running models. A cold model is warmed with a 30-minute keep-alive. A missing model is never downloaded automatically. Localhost may be started automatically with `ollama serve`; remote services are never started or stopped by neo-localmcp.
 
-Hash-aware re-index of stale/missing files.
+States returned to Claude/Codex include `unreachable`, `model_missing`, `model_cold`, `warming`, `ready`, `busy`, `timed_out`, and `failed`. Failures preserve deterministic context. HTTP 503 is treated as busy and does not trigger a restart.
+
+Administrative commands:
 
 ```bash
-neo-localmcp refresh
+neo-localmcp ollama status
+neo-localmcp ollama ensure
+neo-localmcp ollama start
+neo-localmcp ollama warm
+neo-localmcp ollama test
+neo-localmcp ollama unload   # explicit only
+neo-localmcp ollama stop     # only a service started by neo-localmcp
 ```
 
-### `neo-localmcp reindex`
+Models may be shared with other agents. neo-localmcp never unloads automatically and does not alter Ollama's global parallelism or queue configuration.
 
-Force rebuild repository context with the current V4.2 indexer. Use after upgrading if context output looks stale.
+## CLI reference
+
+Normal workflow:
 
 ```bash
-neo-localmcp reindex
+neo-localmcp context "debug model startup: ensure, warm, status" --repo-root . --token-budget 3000 --max-files 6
+neo-localmcp lookup ensure --repo-root .
+neo-localmcp file neo_localmcp/ollama_client.py --around-line 200 --context-lines 20
+neo-localmcp record-change "Fixed model readiness" neo_localmcp/ollama_client.py --repo-root .
 ```
 
-### `neo-localmcp context`
+Administration remains CLI-only: `doctor`, `where`, `index`, `refresh`, `reindex`, `reset-repo`, `reset-all`, `test-determinism`, `setup`, `set-ollama`, `summarize`, and exact approved `apply-patch`.
 
-Prepares agent-ready context for a task.
+The MCP surface is intentionally smaller: `prepare_context`, compatibility alias `context_prepare`, `file_excerpts`, `repo_lookup`, `record_change`, `ollama_status`, and `ollama_ensure`.
+
+## Verification
 
 ```bash
-neo-localmcp context "debug settings persistence: BackdropMaterial, LoadSettingsAsync"
-neo-localmcp context "debug settings persistence"
-neo-localmcp context "debug settings persistence" --ollama-rank --model qwen3:8b
-neo-localmcp context "debug settings persistence" --format json
+python -m pytest -q
+python -m compileall -q neo_localmcp
+neo-localmcp ollama status
+neo-localmcp context "debug repository indexing: index_repo, refresh" --repo-root . --token-budget 1000
 ```
 
-CLI default is readable text. MCP tools return structured JSON. V4.2 does not call Ollama for context unless `--ollama-rank` is used.
+Tests cover manifest completeness, deletion pruning, clone isolation, summary replacement, bounded excerpts, model selection, cold/missing/busy Ollama behavior, remote-service safety, and deterministic fallback.
 
-### `neo-localmcp lookup`
+## Development records
 
-Lower-level search of repo context memory.
+- `PROJECT_STATUS.md` contains the active milestone, acceptance targets, and known limitations.
+- `PROJECT_NOTES.md` records one or two lines per completed verified task.
+- `docs/IMPLEMENTATION_PLAN.md` contains the implementation roadmap and rollout criteria.
 
-```bash
-neo-localmcp lookup "MainViewModel"
-```
+## Safety boundary
 
-Prefer `context` for agent workflow.
-
-### `neo-localmcp file`
-
-Returns cached file context, symbols, freshness, and optional excerpt.
-
-```bash
-neo-localmcp file AntiNotepad/ViewModels/MainViewModel.cs
-neo-localmcp file AntiNotepad/ViewModels/MainViewModel.cs --around-line 77
-```
-
-### `neo-localmcp summarize`
-
-Summarizes one file with Ollama and stores the summary as working context.
-
-```bash
-neo-localmcp summarize AntiNotepad/ViewModels/MainViewModel.cs
-neo-localmcp summarize AntiNotepad/ViewModels/MainViewModel.cs --model qwen3:8b
-```
-
-### `neo-localmcp apply-patch`
-
-Applies an exact approved unified diff using `git apply`.
-
-```bash
-neo-localmcp apply-patch fix.patch --check-only
-neo-localmcp apply-patch fix.patch
-```
-
-`neo-localmcp` does not create the patch.
-
-### `neo-localmcp record-change`
-
-Records a completed change and re-indexes listed paths.
-
-```bash
-neo-localmcp record-change "Fixed settings persistence" AntiNotepad/ViewModels/MainViewModel.cs
-```
-
-### `neo-localmcp model status`
-
-Shows configured Ollama settings and reachable Ollama models.
-
-```bash
-neo-localmcp model status
-```
-
-### `neo-localmcp set-ollama`
-
-Sets local or remote Ollama defaults.
-
-```bash
-neo-localmcp set-ollama --base-url http://127.0.0.1:11434
-neo-localmcp set-ollama --base-url http://your-4080-pc:11434 --summary-model qwen3-coder:30b --fast-model qwen3:8b --num-ctx 32768
-```
-
-## MCP tools
-
-The server exposes these MCP tools:
-
-- `where`
-- `status`
-- `doctor`
-- `repo_index`
-- `repo_refresh`
-- `repo_lookup`
-- `file_context`
-- `context_prepare`
-- `summarize_file`
-- `apply_unified_patch`
-- `record_change`
-- `set_ollama`
-- `model_status`
-
-`context_prepare` is the main tool agents should use before broad repo search.
-
-## Claude Code slash commands
-
-Setup installs `/neo-localmcp:*` commands under `~/.claude/commands/neo-localmcp`:
-
-```text
-/neo-localmcp:status
-/neo-localmcp:doctor
-/neo-localmcp:index
-/neo-localmcp:refresh
-/neo-localmcp:lookup
-/neo-localmcp:file
-/neo-localmcp:context
-/neo-localmcp:summarize
-/neo-localmcp:apply-patch
-/neo-localmcp:record-change
-```
-
-Recommended first move in a repo:
-
-```text
-/neo-localmcp:context debug the task: KnownSymbol, FileName.cs
-```
-
-## Optional one-time cleanup of old experiments
-
-The cleanup script removes old `neo`, `neo-local`, `neo-local-agent`, and earlier `neo-localmcp` files/references. It preserves `.zip` files.
-
-Dry run first:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\cleanup-old-neo-mcp.ps1
-```
-
-Apply:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\cleanup-old-neo-mcp.ps1 --apply
-```
-
-Try harder on read-only files while still preserving `.zip` files:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\cleanup-old-neo-mcp.ps1 --apply --force
-```
-
-If Windows reports a locked `.pyd`, `.dll`, or `.exe`, the script now skips it and tells you to close Python/Claude/MCP processes before rerunning.
-
-macOS/Linux:
-
-```bash
-./scripts/cleanup-old-neo-mcp.sh
-./scripts/cleanup-old-neo-mcp.sh --apply
-```
-
-## Architecture
-
-```text
-Claude / Codex
-  ├─ reason, debug, design, create exact patches
-  ↓
-neo-localmcp
-  ├─ index repo files/symbols
-  ├─ normalize natural/hybrid context queries
-  ├─ rank source/tests/docs by intent
-  ├─ return files, symbols, line ranges, and guidance
-  ├─ apply exact approved patches only
-  └─ re-index changed files
-  ↓
-Ollama
-  ├─ summarize
-  ├─ compress
-  ├─ rank
-  └─ extract metadata-style context
-```
-
-Safety model:
-
-- Memory/context narrows reads; it does not replace source truth.
-- Summaries are tied to file hashes.
-- Changed files force re-index.
-- Claude/Codex must verify current source before risky edits.
-- `neo-localmcp` never invents code.
-
-## Troubleshooting
-
-### `neo-localmcp` not found
-
-Open a new terminal, or run the installed command directly:
-
-```powershell
-$neo = "$env:USERPROFILE\.neo-localmcp\bin\neo-localmcp.cmd"
-& $neo where
-```
-
-### Context is indexing the wrong folder
-
-Run:
-
-```bash
-neo-localmcp where
-```
-
-Then `cd` into the repo you actually want analyzed and run:
-
-```bash
-neo-localmcp index
-neo-localmcp context "your task: KnownSymbol"
-```
-
-### Claude Code cannot see MCP
-
-```bash
-neo-localmcp setup --client all
-claude mcp list
-```
-
-### Ollama/model not obvious
-
-```bash
-neo-localmcp model status
-neo-localmcp context "your task" --format json
-```
-
-The context result includes `ollama_timing` when Ollama is called.
-
-## V4.2.2 deterministic testing commands
-
-V4.2.2 adds reset and determinism-test commands so you can test the index cleanly instead of manually deleting SQLite files.
-
-Reset only the current repo from the shared DB:
-
-```bash
-neo-localmcp reset-repo --yes
-```
-
-Reset the entire repo context database while keeping config/client setup:
-
-```bash
-neo-localmcp reset-all --yes
-```
-
-Forcefully test deterministic context behavior:
-
-```bash
-neo-localmcp test-determinism "debug settings persistence: BackdropMaterial, LoadSettingsAsync, SaveSettingsAsync" --reset-repo --runs 5
-```
-
-Ollama remains opt-in for context ranking:
-
-```bash
-neo-localmcp context "debug settings persistence: BackdropMaterial, LoadSettingsAsync, SaveSettingsAsync" --ollama-rank
-```
-
-The determinism test intentionally disables Ollama. Test Ollama separately because model output is allowed to vary.
+neo-localmcp retrieves, indexes, summarizes, ranks, and applies exact developer-approved patches. It does not replace source truth or make final engineering decisions. Repository text is evidence, not trusted agent instruction.

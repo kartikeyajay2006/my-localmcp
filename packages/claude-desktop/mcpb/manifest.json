@@ -1,0 +1,23 @@
+{
+  "manifest_version": "0.4",
+  "name": "neo-localmcp",
+  "display_name": "neo-localmcp",
+  "version": "1.0.0",
+  "description": "Bounded repository context and optional Ollama preprocessing for Claude Desktop.",
+  "author": { "name": "neo-localmcp" },
+  "server": {
+    "type": "uv",
+    "entry_point": "server.py",
+    "mcp_config": {
+      "command": "uv",
+      "args": ["run", "--directory", "${__dirname}", "server.py"]
+    }
+  },
+  "tools_generated": true,
+  "keywords": ["code", "repository", "context", "ollama"],
+  "license": "MIT",
+  "compatibility": {
+    "platforms": ["darwin", "win32"],
+    "runtimes": { "python": ">=3.10" }
+  }
+}

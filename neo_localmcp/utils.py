@@ -112,18 +112,31 @@ def is_probably_text(path: Path) -> bool:
     return path.suffix.lower() in includes or path.name in includes or path.name in {"Dockerfile", "Makefile", "Rakefile", "Gemfile"}
 
 
-def iter_repo_files(repo_root: str | Path | None = None, folder: str = ".", max_files: int | None = None) -> list[Path]:
+def scan_repo_files(
+    repo_root: str | Path | None = None,
+    folder: str = ".",
+    max_files: int | None = None,
+) -> tuple[list[Path], int, bool]:
+    """Return selected files, total eligible files, and whether selection is complete.
+
+    Traversal always counts the full eligible manifest. This prevents a capped index
+    from looking complete merely because iteration stopped at the cap.
+    """
     cfg = load_config()
     root = repo_root_or_cwd(repo_root)
     start = safe_path(folder, root)
     exclude_dirs = set(cfg.get("repo", {}).get("exclude_dirs", []))
-    limit = max_files or int(cfg.get("repo", {}).get("max_files", 500))
+    configured_limit = cfg.get("repo", {}).get("max_files")
+    limit_value = max_files if max_files is not None else configured_limit
+    limit = int(limit_value) if limit_value not in (None, "", 0, "0") else None
     max_file_bytes = int(cfg.get("repo", {}).get("max_file_bytes", 750_000))
     if start.is_file():
-        return [start] if is_probably_text(start) else []
+        selected = [start] if is_probably_text(start) else []
+        return selected, len(selected), True
     found: list[Path] = []
+    eligible = 0
     for dirpath, dirnames, filenames in os.walk(start):
-        dirnames[:] = sorted(d for d in dirnames if d not in exclude_dirs and not d.startswith(".neo-localmcp"))
+        dirnames[:] = sorted(d for d in dirnames if d not in exclude_dirs and not d.endswith(".egg-info") and d != "__pycache__" and not d.startswith(".neo-localmcp"))
         for filename in sorted(filenames):
             p = Path(dirpath) / filename
             if not is_probably_text(p):
@@ -133,10 +146,14 @@ def iter_repo_files(repo_root: str | Path | None = None, folder: str = ".", max_
                     continue
             except OSError:
                 continue
-            found.append(p)
-            if len(found) >= limit:
-                return found
-    return found
+            eligible += 1
+            if limit is None or len(found) < limit:
+                found.append(p)
+    return found, eligible, len(found) == eligible
+
+
+def iter_repo_files(repo_root: str | Path | None = None, folder: str = ".", max_files: int | None = None) -> list[Path]:
+    return scan_repo_files(repo_root, folder=folder, max_files=max_files)[0]
 
 
 def git_info(root: Path) -> dict[str, Any]:
@@ -154,8 +171,11 @@ def git_info(root: Path) -> dict[str, Any]:
 
 def repo_id(root: Path) -> str:
     info = git_info(root)
-    base = info.get("remote") or str(root.resolve())
-    return re.sub(r"[^A-Za-z0-9_.-]+", "_", str(base)).strip("_")[-160:] or "repo"
+    canonical_root = os.path.normcase(str(root.resolve()))
+    remote = str(info.get("remote") or "")
+    digest = hashlib.sha256(f"{canonical_root}\n{remote}".encode("utf-8")).hexdigest()[:20]
+    label = re.sub(r"[^A-Za-z0-9_.-]+", "_", root.name).strip("_") or "repo"
+    return f"{label[:80]}-{digest}"
 
 
 def extract_symbols(text: str, language: str) -> list[dict[str, Any]]:

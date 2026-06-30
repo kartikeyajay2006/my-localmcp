@@ -116,7 +116,12 @@ def cmd_file(args: argparse.Namespace) -> int:
 
 def cmd_context(args: argparse.Namespace) -> int:
     use_ollama = bool(args.ollama_rank) and not bool(args.no_ollama)
-    print_json_text(tools.context_prepare(args.task, args.repo_root, max_files=args.max_files, limit=args.limit, use_ollama=use_ollama, model=args.model, output_format=args.format))
+    print_json_text(tools.prepare_context(args.task, args.repo_root, token_budget=args.token_budget, max_files=args.max_files, use_ollama=use_ollama, model=args.model, output_format=args.format))
+    return 0
+
+
+def cmd_ollama(args: argparse.Namespace) -> int:
+    print_json_text(tools.ollama_control(args.ollama_action, getattr(args, "model", None), getattr(args, "purpose", "ranking")))
     return 0
 
 
@@ -152,6 +157,15 @@ def build_parser() -> argparse.ArgumentParser:
     model_sub = p.add_subparsers(dest="model_command", required=True)
     mp = model_sub.add_parser("status", help="Show configured Ollama models and reachable models."); mp.set_defaults(func=cmd_model_status)
 
+    p = sub.add_parser("ollama", help="Inspect and manage Ollama readiness.")
+    ollama_sub = p.add_subparsers(dest="ollama_action", required=True)
+    for action in ["status", "ensure", "start", "warm", "unload", "stop", "test"]:
+        op = ollama_sub.add_parser(action, help=f"Ollama {action} operation.")
+        if action in {"status", "ensure", "warm", "unload", "test"}:
+            op.add_argument("--model")
+            op.add_argument("--purpose", choices=["ranking", "query", "summary"], default="ranking")
+        op.set_defaults(func=cmd_ollama)
+
     p = sub.add_parser("setup", help="Install MCP config/slash commands for supported clients.")
     p.add_argument("--client", action="append", choices=["all", "claude-code", "claude-desktop", "codex", "codex-cli", "codex-desktop"], help="Client to set up. Repeatable. Defaults to Claude Code, Claude Desktop, Codex CLI, and Codex Desktop.")
     p.add_argument("--dry-run", action="store_true", help="Show what would be written without changing files.")
@@ -169,7 +183,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--repo-root", default="auto"); p.add_argument("--max-files", type=int, default=None); p.add_argument("--force", action="store_true")
     p.set_defaults(func=cmd_refresh)
 
-    p = sub.add_parser("reindex", help="Force rebuild repository context with the current V4.2.5 indexer.")
+    p = sub.add_parser("reindex", help="Force rebuild repository context with the current V1 indexer.")
     p.add_argument("--repo-root", default="auto"); p.add_argument("--max-files", type=int, default=None)
     p.set_defaults(func=cmd_reindex)
 
@@ -185,8 +199,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("task")
     p.add_argument("--repo-root", default="auto")
     p.add_argument("--runs", type=int, default=5)
-    p.add_argument("--max-files", type=int, default=80)
-    p.add_argument("--limit", type=int, default=10)
+    p.add_argument("--max-files", type=int, default=6)
+    p.add_argument("--limit", type=int, default=6)
     p.add_argument("--reset-repo", action="store_true", help="Reset current repo context, then reindex before testing.")
     p.add_argument("--reindex-first", action="store_true", help="Force reindex before testing without resetting repo records first.")
     p.set_defaults(func=cmd_test_determinism)
@@ -202,12 +216,12 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("context", help="Prepare source-first files/lines for a natural or hybrid task before Claude/Codex reads broadly.")
     p.add_argument("task", help="Natural or hybrid query, e.g. 'debug settings persistence: BackdropMaterial, LoadSettingsAsync'")
     p.add_argument("--repo-root", default="auto")
-    p.add_argument("--max-files", type=int, default=80)
-    p.add_argument("--limit", type=int, default=10)
-    p.add_argument("--ollama-rank", action="store_true", help="Opt in to Ollama ranking. Context is deterministic/no-Ollama by default in V4.2.5.")
-    p.add_argument("--no-ollama", action="store_true", help="Compatibility flag: force deterministic ranking. This is already the default in V4.2.5.")
+    p.add_argument("--max-files", type=int, default=6, help="Maximum source files returned in the bounded context bundle.")
+    p.add_argument("--token-budget", type=int, default=3000, help="Approximate source-excerpt token budget.")
+    p.add_argument("--ollama-rank", action="store_true", help="Opt in to Ollama ranking. Context is deterministic/no-Ollama by default in V1.")
+    p.add_argument("--no-ollama", action="store_true", help="Compatibility flag: force deterministic ranking. This is already the default in V1.")
     p.add_argument("--model", help="Override Ollama model when --ollama-rank is used.")
-    p.add_argument("--format", choices=["text", "json", "mcp_text", "mcp_json"], default="text", help="CLI output format. MCP tools use mcp_text by default in V4.2.5.")
+    p.add_argument("--format", choices=["text", "json", "mcp_text", "mcp_json"], default="text", help="CLI output format. MCP tools use bounded mcp_text by default in V1.")
     p.set_defaults(func=cmd_context)
 
     p = sub.add_parser("summarize", help="Summarize one file with Ollama and store it as working context.")

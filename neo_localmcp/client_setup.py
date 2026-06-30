@@ -10,7 +10,7 @@ from importlib.resources import files
 from pathlib import Path
 from typing import Any
 
-from .config import CONFIG_PATH, ensure_config
+from .config import APP_DIR, CONFIG_PATH, ensure_config
 from .identity import IDENTITY
 
 
@@ -120,26 +120,16 @@ def _claude_desktop_config_path() -> Path:
 
 def setup_claude_desktop(apply: bool = True) -> dict[str, Any]:
     ensure_config()
-    path = _claude_desktop_config_path()
-    block = _mcp_server_block()
-    backup: str | None = None
-    if apply:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if path.exists():
-            backup_path = path.with_suffix(path.suffix + ".neo-localmcp.bak")
-            shutil.copy2(path, backup_path)
-            backup = str(backup_path)
-            try:
-                data = json.loads(path.read_text(encoding="utf-8"))
-            except json.JSONDecodeError:
-                bad = path.with_suffix(path.suffix + ".bad-json.bak")
-                shutil.copy2(path, bad)
-                data = {}
-        else:
-            data = {}
-        data.setdefault("mcpServers", {}).update(block)
-        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    return {"client": "claude-desktop", "applied": apply, "config_path": str(path), "backup": backup, "mcpServers": block, "restart_required": True}
+    package_path = APP_DIR / "neo-localmcp.mcpb"
+    return {
+        "client": "claude-desktop",
+        "applied": False,
+        "package_path": str(package_path),
+        "package_exists": package_path.exists(),
+        "manual_install_required": True,
+        "instructions": "In Claude Desktop open Settings > Extensions > Advanced settings > Install Extension, then select neo-localmcp.mcpb.",
+        "note": "Direct claude_desktop_config.json editing is intentionally no longer performed.",
+    }
 
 
 def _codex_cli_config_path() -> Path:
@@ -147,13 +137,8 @@ def _codex_cli_config_path() -> Path:
 
 
 def _codex_desktop_config_path() -> Path:
-    system = platform.system().lower()
-    if system == "windows":
-        base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
-        return base / "Codex" / "config.toml"
-    if system == "darwin":
-        return Path.home() / "Library" / "Application Support" / "Codex" / "config.toml"
-    return Path.home() / ".config" / "codex" / "config.toml"
+    # Codex app, CLI, and IDE share CODEX_HOME/config.toml.
+    return _codex_cli_config_path()
 
 
 def setup_codex_cli(apply: bool = True) -> dict[str, Any]:
@@ -163,13 +148,12 @@ def setup_codex_cli(apply: bool = True) -> dict[str, Any]:
 
 
 def setup_codex_desktop(apply: bool = True) -> dict[str, Any]:
-    ensure_config()
-    path = _codex_desktop_config_path()
-    return {"client": "codex-desktop", "applied": apply, **_write_codex_config(path, apply), "restart_required": True}
+    result = setup_codex_cli(apply)
+    return {**result, "client": "codex-desktop", "shared_with_cli": True, "restart_required": True}
 
 
 def setup_codex(apply: bool = True) -> dict[str, Any]:
-    return {"client": "codex", "applied": apply, "results": [setup_codex_cli(apply), setup_codex_desktop(apply)]}
+    return {"client": "codex", "applied": apply, "shared_config": True, "result": setup_codex_cli(apply)}
 
 
 def client_status() -> dict[str, Any]:
@@ -210,9 +194,9 @@ def setup_client(client: str, apply: bool = True) -> dict[str, Any]:
 
 
 def setup_clients(clients: list[str] | None = None, apply: bool = True) -> list[dict[str, Any]]:
-    selected = clients or ["claude-code", "claude-desktop", "codex-cli", "codex-desktop"]
+    selected = clients or ["claude-code", "claude-desktop", "codex"]
     if any(str(client).lower().replace("_", "-") == "all" for client in selected):
-        selected = ["claude-code", "claude-desktop", "codex-cli", "codex-desktop"]
+        selected = ["claude-code", "claude-desktop", "codex"]
     results = []
     for client in selected:
         try:

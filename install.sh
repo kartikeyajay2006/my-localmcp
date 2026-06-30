@@ -1,10 +1,26 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+DRY_RUN=0
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run) DRY_RUN=1 ;;
+    --repair|--upgrade) ;;
+    *) echo "Unknown option: $arg" >&2; exit 2 ;;
+  esac
+done
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_HOME="${NEO_LOCALMCP_HOME:-$HOME/.neo-localmcp}"
 VENV_DIR="$APP_HOME/venv"
 BIN_DIR="$APP_HOME/bin"
+
+if [[ "$DRY_RUN" == "1" ]]; then
+  echo "Would install or repair neo-localmcp from $ROOT_DIR"
+  echo "Application home: $APP_HOME"
+  echo "Virtual environment: $VENV_DIR"
+  exit 0
+fi
 
 if command -v python3 >/dev/null 2>&1; then
   PYTHON=python3
@@ -19,6 +35,9 @@ mkdir -p "$APP_HOME" "$BIN_DIR"
 "$PYTHON" -m venv "$VENV_DIR"
 "$VENV_DIR/bin/python" -m pip install --upgrade pip
 "$VENV_DIR/bin/python" -m pip install --upgrade --force-reinstall "$ROOT_DIR"
+if [[ -f "$ROOT_DIR/packages/claude-desktop/neo-localmcp.mcpb" ]]; then
+  cp "$ROOT_DIR/packages/claude-desktop/neo-localmcp.mcpb" "$APP_HOME/neo-localmcp.mcpb"
+fi
 
 cat > "$BIN_DIR/neo-localmcp" <<EOF2
 #!/usr/bin/env bash

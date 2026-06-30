@@ -1,9 +1,17 @@
+param([switch]$DryRun, [switch]$Repair, [switch]$Upgrade)
 $ErrorActionPreference = "Stop"
 
 $RootDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $AppHome = if ($env:NEO_LOCALMCP_HOME) { $env:NEO_LOCALMCP_HOME } else { Join-Path $HOME ".neo-localmcp" }
 $VenvDir = Join-Path $AppHome "venv"
 $BinDir = Join-Path $AppHome "bin"
+
+if ($DryRun) {
+    Write-Host "Would install or repair neo-localmcp from $RootDir"
+    Write-Host "Application home: $AppHome"
+    Write-Host "Virtual environment: $VenvDir"
+    exit 0
+}
 
 function Get-PythonCommand {
     $py = Get-Command py -ErrorAction SilentlyContinue
@@ -21,6 +29,8 @@ $Py = Get-PythonCommand
 $VenvPython = Join-Path $VenvDir "Scripts\python.exe"
 & $VenvPython -m pip install --upgrade pip
 & $VenvPython -m pip install --upgrade --force-reinstall $RootDir
+$McpbSource = Join-Path $RootDir "packages\claude-desktop\neo-localmcp.mcpb"
+if (Test-Path $McpbSource) { Copy-Item -Force $McpbSource (Join-Path $AppHome "neo-localmcp.mcpb") }
 
 $Cmd = Join-Path $BinDir "neo-localmcp.cmd"
 $CmdContent = "@echo off`r`n`"$VenvPython`" -m neo_localmcp.cli %*`r`n"

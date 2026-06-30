@@ -11,7 +11,7 @@ from typing import Any
 from . import repo_memory
 from .config import CONFIG_PATH, ensure_config, load_config, save_config
 from .identity import IDENTITY
-from .ollama_client import chat, ping
+from .ollama_client import chat, ensure as ensure_ollama, ping, start_service, status as ollama_state, stop_service, unload as unload_ollama, warm as warm_ollama
 from .query import category_boost, classify_path, extract_file_references, normalize_query
 from .utils import read_text_file, rel, repo_root_or_cwd, rg_search, safe_path, run_command
 
@@ -164,7 +164,7 @@ def _mcp_compact_context(data: dict[str, Any]) -> dict[str, Any]:
     compact: dict[str, Any] = {
         "product": IDENTITY.product_name,
         "mode": "mcp_compact_agent_context",
-        "mcp_response_version": "0.4.2.5",
+        "mcp_response_version": "1.0.0",
         "task": data.get("task"),
         "repo_root": data.get("repo_root"),
         "repo": {
@@ -182,6 +182,8 @@ def _mcp_compact_context(data: dict[str, Any]) -> dict[str, Any]:
         },
         "interpreted_query": data.get("interpreted_query"),
         "read_first": [compact_item(item) for item in data.get("read_first", [])],
+        "context_excerpts": data.get("context_excerpts") or [],
+        "retrieval_metrics": data.get("retrieval_metrics") or {},
         "other_candidates": [compact_item(item, reason_limit=2, hint_limit=2) for item in other_candidates[:5]],
         "agent_guidance": data.get("agent_guidance") or [],
         "instructions_for_agent": data.get("instructions_for_agent") or [],
@@ -236,7 +238,7 @@ def _mcp_tiny_context_text(data: dict[str, Any]) -> str:
     """Ultra-small plain-text context for MCP clients.
 
     Some MCP clients handle plain text more reliably than nested JSON for tool results.
-    This is the default server response in V4.2.5. It intentionally omits diagnostic
+    This is the default server response in V1. It intentionally omits diagnostic
     search payloads; the CLI JSON path remains available for full debugging.
     """
     repo = data.get("repo_status") or {}
@@ -244,7 +246,7 @@ def _mcp_tiny_context_text(data: dict[str, Any]) -> str:
     interp = data.get("interpreted_query") or {}
     lines: list[str] = []
     lines.append("neo-localmcp context_prepare")
-    lines.append(f"version: 0.4.2.5")
+    lines.append("version: 1.0.0")
     lines.append(f"repo_root: {data.get('repo_root')}")
     if git:
         lines.append(f"git: branch={git.get('branch')} commit={str(git.get('commit') or '')[:12]} dirty={git.get('dirty_files')}")
@@ -283,6 +285,17 @@ def _mcp_tiny_context_text(data: dict[str, Any]) -> str:
         lines.append("GUIDANCE")
         for item in guidance[:5]:
             lines.append(f"- {item}")
+    excerpts = data.get("context_excerpts") or []
+    if excerpts:
+        lines.append("")
+        lines.append("CURRENT SOURCE EXCERPTS")
+        for excerpt in excerpts:
+            lines.append(f"--- {excerpt.get('path')}:{excerpt.get('start_line')}-{excerpt.get('end_line')} sha256={str(excerpt.get('sha256') or '')[:12]} ---")
+            lines.append(str(excerpt.get("text") or ""))
+    metrics = data.get("retrieval_metrics") or {}
+    if metrics:
+        lines.append("")
+        lines.append(f"retrieval: estimated_tokens={metrics.get('estimated_tokens_returned')} searches={metrics.get('repository_searches')} candidates={metrics.get('candidate_files')}")
     ranking_obj = data.get("ollama_ranking") or {}
     ranking = ranking_obj.get("response") if ranking_obj.get("ok") else None
     if ranking:
@@ -349,7 +362,7 @@ def model_status() -> str:
     return json_out({
         "ollama_config": cfg.get("ollama", {}),
         "ollama_ping": ping(),
-        "note": "Context is deterministic by default in V4.2.5. Use --ollama-rank or use_ollama=true to call /api/generate for ranking.",
+        "note": "Context is deterministic by default in V1. Use --ollama-rank or use_ollama=true for optional Ollama ranking.",
     })
 
 
@@ -416,7 +429,7 @@ def _stable_hash(data: dict[str, Any]) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def test_determinism(task: str, repo_root: str = "auto", runs: int = 5, max_files: int = 80, limit: int = 10, reset_repo_first: bool = False, reindex_first: bool = False) -> str:
+def test_determinism(task: str, repo_root: str = "auto", runs: int = 5, max_files: int = 6, limit: int = 6, reset_repo_first: bool = False, reindex_first: bool = False) -> str:
     if runs < 2:
         runs = 2
     root = repo_root_or_cwd(repo_root)
@@ -424,11 +437,11 @@ def test_determinism(task: str, repo_root: str = "auto", runs: int = 5, max_file
     if reset_repo_first:
         setup_actions.append({"reset_repo": repo_memory.reset_repo(root)})
     if reindex_first or reset_repo_first:
-        setup_actions.append({"reindex": repo_memory.index_repo(root, max_files=max_files, force=True)})
+        setup_actions.append({"reindex": repo_memory.index_repo(root, max_files=None, force=True)})
     outputs: list[dict[str, Any]] = []
     hashes: list[str] = []
     for i in range(runs):
-        raw = context_prepare(task, root, max_files=max_files, limit=limit, use_ollama=False, output_format="json")
+        raw = context_prepare(task, root, max_files=None, limit=min(max_files, limit), use_ollama=False, output_format="json")
         data = json.loads(raw)
         projection = _stable_context_projection(data)
         digest = _stable_hash(data)
@@ -474,6 +487,10 @@ def repo_lookup(query: str, repo_root: str = "auto", limit: int = 20) -> str:
 
 def file_context(path: str, repo_root: str = "auto", around_line: int | None = None, context_lines: int = 40) -> str:
     return json_out(repo_memory.file_context(path, repo_root, around_line=around_line, context_lines=context_lines))
+
+
+def file_excerpts(ranges: list[dict[str, Any]], repo_root: str = "auto", max_chars: int = 20_000) -> str:
+    return json_out(repo_memory.file_excerpts(ranges, repo_root, max_chars=max_chars))
 
 
 def _resolve_reference(ref: str, indexed_files: list[str]) -> list[str]:
@@ -540,13 +557,18 @@ def _term_score(term: str, interpreted: dict[str, Any], strong: int, weak: int) 
     return strong if term in interpreted.get("strong_terms", []) else weak
 
 
-def context_prepare(task: str, repo_root: str = "auto", max_files: int = 80, limit: int = 10, use_ollama: bool = False, model: str | None = None, output_format: str = "json") -> str:
+def context_prepare(task: str, repo_root: str = "auto", max_files: int | None = None, limit: int = 6, use_ollama: bool = False, model: str | None = None, output_format: str = "json", token_budget: int = 3000) -> str:
     root = repo_root_or_cwd(repo_root)
     status_data = repo_memory.status(root)
-    if status_data["counts"].get("files", 0) == 0:
+    refreshed = False
+    if status_data["counts"].get("files", 0) == 0 or not status_data.get("index_complete", False):
         repo_memory.index_repo(root, max_files=max_files, force=False)
-    elif status_data.get("stale_files", 0) or status_data.get("missing_files", 0) or status_data.get("indexer_rebuild_recommended"):
+        refreshed = True
+    elif status_data.get("stale_files", 0) or status_data.get("missing_files", 0) or status_data.get("branch_changed") or status_data.get("indexer_rebuild_recommended"):
         repo_memory.refresh(root, max_files=max_files, force=status_data.get("indexer_rebuild_recommended", False))
+        refreshed = True
+    if refreshed:
+        status_data = repo_memory.status(root)
 
     interpreted = normalize_query(task)
     terms: list[str] = interpreted.get("search_terms") or []
@@ -571,15 +593,21 @@ def context_prepare(task: str, repo_root: str = "auto", max_files: int = 80, lim
             path = sym.get("file_path")
             if path:
                 _add_candidate(candidates, path, f"symbol '{sym.get('name')}' line {sym.get('start_line')}", _term_score(term, interpreted, 16, 10), intent)
-        rows = rg_search(term, root, max_results=30)
+    batch_terms = terms[:20]
+    if batch_terms:
+        batch_pattern = "(?:" + "|".join(re.escape(term) for term in batch_terms) + ")"
+        rows = rg_search(batch_pattern, root, max_results=max(60, limit * 12))
         rows = sorted(rows, key=lambda r: (str(r.get("path", "")), int(r.get("line") or 0), str(r.get("text", ""))))
-        search_results[term] = rows
-        for row in rows[:12]:
+        search_results["batched"] = rows
+        for row in rows:
             path = row.get("path")
             if not path:
                 continue
+            haystack = f"{path} {row.get('text', '')}".lower()
+            matched = [term for term in batch_terms if term.lower() in haystack]
+            term = matched[0] if matched else batch_terms[0]
             weight = _term_score(term, interpreted, 8, 4)
-            _add_candidate(candidates, path, f"search term '{term}' line {row.get('line')}", weight, intent)
+            _add_candidate(candidates, path, f"search term '{term}'", weight, intent, line_hint=f"around line {row.get('line')}")
             if classify_path(path) in {"docs", "status", "instructions"}:
                 for ref in extract_file_references(row.get("text", "")):
                     for resolved in _resolve_reference(ref, indexed_files):
@@ -599,12 +627,13 @@ def context_prepare(task: str, repo_root: str = "auto", max_files: int = 80, lim
 
     ranked = sorted(candidates.values(), key=lambda item: (-int(item.get("score", 0)), str(item.get("category", "")), str(item.get("path", ""))))
     ranked = ranked[:max(limit, 1)]
-    read_first = [item for item in ranked if item.get("category") in {"source", "test", "config"}][: min(READ_FIRST_MAX, limit)]
-    if len(read_first) < min(READ_FIRST_MAX, limit):
+    read_limit = min(max(1, int(limit)), max(1, int(max_files or limit)), 6)
+    read_first = [item for item in ranked if item.get("category") in {"source", "test", "config"}][:read_limit]
+    if len(read_first) < read_limit:
         for item in ranked:
             if item not in read_first:
                 read_first.append(item)
-            if len(read_first) >= min(READ_FIRST_MAX, limit):
+            if len(read_first) >= read_limit:
                 break
 
     symbol_map = repo_memory.symbols_for_files([item["path"] for item in read_first], root, max_per_file=8)
@@ -616,14 +645,34 @@ def context_prepare(task: str, repo_root: str = "auto", max_files: int = 80, lim
                 item["line_hints"].append(hint)
         item["line_hints"] = _compact_line_hints(item.get("line_hints", []))
 
+    ranges: list[dict[str, Any]] = []
+    for item in read_first:
+        center = None
+        for term in interpreted.get("strong_terms", []):
+            exact = next((sym for sym in symbol_hits if sym.get("file_path") == item["path"] and str(sym.get("name", "")).lower() == str(term).lower()), None)
+            if exact and exact.get("start_line"):
+                center = int(exact["start_line"])
+                break
+        hint_numbers = [int(match.group(1)) for hint in item.get("line_hints", []) if (match := re.search(r"(\d+)", hint))]
+        center = center or (hint_numbers[0] if hint_numbers else 1)
+        ranges.append({"path": item["path"], "start_line": max(1, center - 20), "end_line": center + 19})
+    excerpt_data = repo_memory.file_excerpts(ranges, root, max_chars=max(1000, min(int(token_budget), 8000) * 4))
     deterministic = {
         "task": task,
         "repo_root": str(root),
         "mode": "agent_ready_natural_context",
-        "repo_status": repo_memory.status(root),
+        "repo_status": status_data,
         "interpreted_query": interpreted,
         "candidate_files": ranked,
         "read_first": read_first,
+        "context_excerpts": excerpt_data.get("excerpts", []),
+        "retrieval_metrics": {
+            "token_budget": token_budget,
+            "estimated_tokens_returned": (int(excerpt_data.get("chars_returned", 0)) + 3) // 4,
+            "source_chars_returned": excerpt_data.get("chars_returned", 0),
+            "repository_searches": 1 if batch_terms else 0,
+            "candidate_files": len(ranked),
+        },
         "symbol_hits": sorted(symbol_hits[: limit * 3], key=lambda s: (str(s.get("file_path", "")), int(s.get("start_line") or 0), str(s.get("name", "")))),
         "followed_source_references": sorted(followed_references[:50], key=lambda r: (str(r.get("resolved", "")), str(r.get("from", "")), int(r.get("line") or 0))),
         "search_results_by_term": search_results,
@@ -656,12 +705,16 @@ Non-negotiable policy:
 Candidate files, scores, reasons, and line hints:
 {json.dumps(ranked[:limit], indent=2)[:12000]}
 """.strip()
-        ollama_result = chat(prompt, model=model)
+        ollama_result = chat(prompt, model=model, purpose="ranking")
 
-    result = {**deterministic, "ollama_requested": bool(use_ollama), "ollama_ranking": ollama_result, "ollama_timing": _format_model_timing(ollama_result)}
+    result = {**deterministic, "ollama_requested": bool(use_ollama), "ollama_ranking": ollama_result, "ollama_timing": _format_model_timing(ollama_result), "ollama_status": (ollama_result or {}).get("ollama_status")}
     if os.environ.get(CONTEXT_QUERY_RECORD_ENV, "").strip().lower() in {"1", "true", "yes", "on"}:
         repo_memory.record_task_query(task, result, root)
     return _format(result, output_format)
+
+
+def prepare_context(task: str, repo_root: str = "auto", token_budget: int = 3000, max_files: int = 6, use_ollama: bool = False, model: str | None = None, output_format: str = "mcp_text") -> str:
+    return context_prepare(task, repo_root, max_files=None, limit=max_files, use_ollama=use_ollama, model=model, output_format=output_format, token_budget=token_budget)
 
 
 def summarize_file(path: str, repo_root: str = "auto", model: str | None = None) -> str:
@@ -685,15 +738,10 @@ File context:
 Current source file:
 {text}
 """.strip()
-    result = chat(prompt, model=model)
+    result = chat(prompt, model=model, purpose="summary")
     if result.get("ok") and result.get("response"):
-        conn = repo_memory.connect()
-        rid = repo_memory.upsert_repo(conn, root)
-        relative = rel(p, root)
-        conn.execute("UPDATE files SET purpose_summary=?, last_summarized_at=? WHERE repo_id=? AND path=?", (result["response"][:6000], repo_memory.now_iso(), rid, relative))
-        conn.execute("INSERT INTO repo_fts(repo_id, kind, target, body) VALUES(?, 'summary', ?, ?)", (rid, relative, f"{relative}\n{result['response'][:6000]}"))
-        conn.commit()
-    return json_out({"file": rel(p, root), "context": ctx, "ollama_summary": result, "ollama_timing": _format_model_timing(result)})
+        repo_memory.store_summary(rel(p, root), result["response"], str(result.get("model") or model or ""), "file-summary-v1", root)
+    return json_out({"file": rel(p, root), "context": ctx, "ollama_summary": result, "ollama_timing": _format_model_timing(result), "ollama_status": result.get("ollama_status")})
 
 
 def apply_unified_patch(patch_text: str, repo_root: str = "auto", check_only: bool = False) -> str:
@@ -738,4 +786,27 @@ def set_ollama(base_url: str | None = None, summary_model: str | None = None, fa
     if num_ctx:
         cfg.setdefault("ollama", {})["num_ctx"] = int(num_ctx)
     save_config(cfg)
-    return json_out({"ok": True, "ollama": cfg.get("ollama", {})})
+    return json_out({"ok": True, "ollama": cfg.get("ollama", {}), "status": ollama_state()})
+
+
+def ollama_status(model: str | None = None, purpose: str = "ranking") -> str:
+    return json_out(ollama_state(model, purpose))
+
+
+def ollama_ensure(model: str | None = None, purpose: str = "ranking") -> str:
+    return json_out(ensure_ollama(model, purpose))
+
+
+def ollama_control(action: str, model: str | None = None, purpose: str = "ranking") -> str:
+    actions = {
+        "status": lambda: ollama_state(model, purpose),
+        "ensure": lambda: ensure_ollama(model, purpose),
+        "start": start_service,
+        "warm": lambda: warm_ollama(model, purpose),
+        "unload": lambda: unload_ollama(model, purpose),
+        "stop": stop_service,
+        "test": lambda: chat("Reply with exactly: ok", model=model, purpose=purpose),
+    }
+    if action not in actions:
+        return json_out({"ok": False, "error": f"unknown Ollama action: {action}"})
+    return json_out(actions[action]())

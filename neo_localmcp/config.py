@@ -20,17 +20,28 @@ TEXT_EXTENSIONS = [
 DEFAULT_CONFIG: dict[str, Any] = {
     "identity": IDENTITY.as_dict(),
     "ollama": {
+        "enabled": True,
         "base_url": "http://127.0.0.1:11434",
         "summary_model": "qwen3-coder:30b",
         "fast_model": "qwen3:8b",
-        "timeout_seconds": 200,
+        "connect_timeout_seconds": 3,
+        "health_timeout_seconds": 5,
+        "startup_timeout_seconds": 20,
+        "warm_timeout_seconds": 90,
+        "fast_timeout_seconds": 60,
+        "summary_timeout_seconds": 200,
+        "failure_cooldown_seconds": 30,
         "temperature": 0.1,
         "num_ctx": 32768,
+        "fast_num_ctx": 8192,
         "keep_alive": "30m",
+        "auto_start_local": True,
     },
     "repo": {
         "default_root": "auto",
-        "max_files": 500,
+        # Null means complete indexing. Callers may still request an explicit cap,
+        # which is reported as incomplete rather than silently appearing healthy.
+        "max_files": None,
         "max_file_bytes": 750_000,
         "summary_max_chars": 80_000,
         "exclude_dirs": [
@@ -71,11 +82,10 @@ def load_config() -> dict[str, Any]:
     ensure_config()
     raw = json.loads(CONFIG_PATH.read_text(encoding="utf-8")) if CONFIG_PATH.exists() else {}
     cfg = deep_merge(DEFAULT_CONFIG, raw or {})
-    # V4.2.5 migration: bump the previous default Ollama timeout from 180s to 200s.
-    # Preserve explicit custom values other than the old default.
     ollama_cfg = cfg.setdefault("ollama", {})
-    if int(ollama_cfg.get("timeout_seconds", 200) or 200) == 180:
-        ollama_cfg["timeout_seconds"] = 200
+    legacy_timeout = int(ollama_cfg.get("timeout_seconds", 0) or 0)
+    if legacy_timeout:
+        ollama_cfg.setdefault("summary_timeout_seconds", 200 if legacy_timeout == 180 else legacy_timeout)
     cfg["identity"] = IDENTITY.as_dict()
     return cfg
 

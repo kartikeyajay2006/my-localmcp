@@ -1,179 +1,143 @@
 from __future__ import annotations
 
-from typing import Optional
 import json
 import os
 import subprocess
 import sys
+from pathlib import Path
+from typing import Any, Optional
+from urllib.parse import unquote, urlparse
+from urllib.request import url2pathname
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 
 from . import tools
-from .client_setup import client_status
+from .config import load_config
 from .identity import IDENTITY
 
-mcp = FastMCP(IDENTITY.mcp_server_name)
+SERVER_INSTRUCTIONS = (
+    "Use prepare_context before broad repository search. It returns bounded, current source excerpts; source remains authoritative. "
+    "Pass repo_root explicitly when possible. If omitted, neo-localmcp uses MCP workspace roots and refuses ambiguous scope. "
+    "Ollama is optional: deterministic context must still be used when Ollama is unavailable, missing, cold, busy, or timed out. "
+    "Use file_excerpts only for additional exact ranges, repo_lookup for precise symbols/paths, and record_change after verified edits."
+)
+
+mcp = FastMCP(IDENTITY.mcp_server_name, instructions=SERVER_INSTRUCTIONS)
 
 
-def _context_prepare_worker(task: str, repo_root: str, max_files: int, limit: int, use_ollama: bool, model: Optional[str]) -> str:
-    """Run context_prepare in a short-lived worker process.
+async def _resolve_repo_root(repo_root: str, ctx: Context) -> str:
+    if repo_root and repo_root not in {"auto", "."}:
+        return str(Path(repo_root).expanduser().resolve())
+    env_root = os.environ.get("NEO_LOCALMCP_REPO")
+    if env_root:
+        return str(Path(env_root).expanduser().resolve())
+    configured = load_config().get("repo", {}).get("default_root")
+    if configured and configured not in {"auto", "."}:
+        return str(Path(str(configured)).expanduser().resolve())
+    try:
+        result = await ctx.request_context.session.list_roots()
+        roots = list(result.roots)
+    except Exception:
+        roots = []
+    file_roots: list[str] = []
+    for root in roots:
+        parsed = urlparse(str(root.uri))
+        if parsed.scheme == "file":
+            path = Path(url2pathname(unquote(parsed.path)))
+            if parsed.netloc and parsed.netloc not in {"", "localhost"}:
+                path = Path(f"//{parsed.netloc}{url2pathname(unquote(parsed.path))}")
+            file_roots.append(str(path.resolve()))
+    if len(file_roots) == 1:
+        return file_roots[0]
+    if not file_roots:
+        raise ValueError("No repository root was supplied and the MCP client exposed no filesystem root. Pass repo_root explicitly or set NEO_LOCALMCP_REPO.")
+    raise ValueError(f"Multiple MCP workspace roots are active: {file_roots}. Pass repo_root explicitly.")
 
-    Claude Code/Desktop can leave long-running MCP stdio server processes wedged if a
-    context tool call stalls. V4.2.5 isolates context_prepare in a subprocess, returns
-    ultra-small plain text by default, and kills the worker on timeout.
-    """
+
+def _context_prepare_worker(task: str, repo_root: str, max_files: int, token_budget: int, use_ollama: bool, model: Optional[str]) -> str:
     payload = {
         "task": task,
         "repo_root": repo_root,
-        "max_files": int(max_files or 80),
-        "limit": int(limit or 5),
+        "max_files": None,
+        "limit": int(max_files or 6),
+        "token_budget": int(token_budget or 3000),
         "use_ollama": bool(use_ollama),
         "model": model,
         "output_format": "mcp_text",
     }
-    timeout_seconds = 230 if use_ollama else 25
+    ollama_cfg = load_config().get("ollama", {})
+    timeout_seconds = 30
+    if use_ollama:
+        timeout_seconds = int(ollama_cfg.get("startup_timeout_seconds", 20)) + int(ollama_cfg.get("warm_timeout_seconds", 90)) + int(ollama_cfg.get("fast_timeout_seconds", 60)) + 10
     try:
         proc = subprocess.run(
-            [sys.executable, "-m", "neo_localmcp.context_worker"],
-            input=json.dumps(payload),
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            capture_output=True,
-            timeout=timeout_seconds,
-            env=os.environ.copy(),
+            [sys.executable, "-m", "neo_localmcp.context_worker"], input=json.dumps(payload),
+            text=True, encoding="utf-8", errors="replace", capture_output=True,
+            timeout=timeout_seconds, env=os.environ.copy(),
         )
     except subprocess.TimeoutExpired:
-        return (
-            "neo-localmcp context_prepare timed out.\n"
-            f"version: 0.4.2.5\nrepo_root: {repo_root}\n"
-            f"task: {task}\nuse_ollama: {use_ollama}\n"
-            "No source code was changed. Try CLI `neo-localmcp context ...` or run `neo-localmcp doctor`."
-        )
+        return json.dumps({"ok": False, "error": "context worker timed out", "repo_root": repo_root, "use_ollama": use_ollama, "timeout_seconds": timeout_seconds, "fallback": "Retry with use_ollama=false; deterministic context remains available."}, indent=2)
     if proc.returncode != 0:
-        stderr = (proc.stderr or "").strip()[-3000:]
-        stdout = (proc.stdout or "").strip()[-3000:]
-        return (
-            "neo-localmcp context_prepare worker failed.\n"
-            f"version: 0.4.2.5\nexit_code: {proc.returncode}\nrepo_root: {repo_root}\n"
-            f"task: {task}\nstdout:\n{stdout}\nstderr:\n{stderr}"
-        )
+        return json.dumps({"ok": False, "error": "context worker failed", "exit_code": proc.returncode, "repo_root": repo_root, "stdout": (proc.stdout or "")[-2000:], "stderr": (proc.stderr or "")[-2000:]}, indent=2)
     out = proc.stdout or ""
-    max_chars = 9000 if use_ollama else 8000
-    if len(out) > max_chars:
-        out = out[:max_chars] + "\n...[truncated by neo-localmcp MCP safety cap]"
-    return out
+    max_chars = min(40_000, max(8_000, int(token_budget) * 4 + 4_000))
+    return out if len(out) <= max_chars else out[:max_chars] + "\n...[truncated by MCP safety cap]"
 
 
 @mcp.tool()
-def status(repo_root: str = "auto") -> str:
-    """Fast status: config path, repo context DB counts, stale files, and Ollama reachability."""
-    return tools.status(repo_root)
+async def prepare_context(task: str, ctx: Context, repo_root: str = "auto", token_budget: int = 3000, max_files: int = 6, use_ollama: bool = False, model: Optional[str] = None) -> str:
+    """Return bounded current-source excerpts for a task before broad search."""
+    try:
+        root = await _resolve_repo_root(repo_root, ctx)
+        return _context_prepare_worker(task, root, max_files, token_budget, use_ollama, model)
+    except Exception as exc:
+        return json.dumps({"ok": False, "error": str(exc), "action": "provide repo_root"}, indent=2)
 
 
 @mcp.tool()
-def doctor(repo_root: str = "auto") -> str:
-    """Health check and command/tool inventory for neo-localmcp."""
-    return tools.doctor(repo_root)
-
-
-
-
-@mcp.tool()
-def where(repo_root: str = "auto") -> str:
-    """Show install/config paths, current repo root, repo context DB, and configured Ollama defaults."""
-    return tools.where(repo_root)
+async def context_prepare(task: str, ctx: Context, repo_root: str = "auto", token_budget: int = 3000, max_files: int = 6, use_ollama: bool = False, model: Optional[str] = None) -> str:
+    """Compatibility alias for prepare_context; retained for one release."""
+    return await prepare_context(task, ctx, repo_root, token_budget, max_files, use_ollama, model)
 
 
 @mcp.tool()
-def model_status() -> str:
-    """Show configured Ollama models and currently reachable Ollama model list."""
-    return tools.model_status()
+async def file_excerpts(ranges: list[dict[str, Any]], ctx: Context, repo_root: str = "auto", max_chars: int = 20_000) -> str:
+    """Read several exact current-source ranges in one bounded response."""
+    try:
+        root = await _resolve_repo_root(repo_root, ctx)
+        return tools.file_excerpts(ranges, root, max_chars)
+    except Exception as exc:
+        return json.dumps({"ok": False, "error": str(exc)}, indent=2)
 
 
 @mcp.tool()
-def clients_status() -> str:
-    """Show detected Claude Code, Claude Desktop, Codex CLI, and Codex Desktop config paths and MCP blocks."""
-    import json
-    return json.dumps(client_status(), indent=2, ensure_ascii=False)
+async def repo_lookup(query: str, ctx: Context, repo_root: str = "auto", limit: int = 20) -> str:
+    """Perform precise persistent lookup for a symbol or path."""
+    try:
+        return tools.repo_lookup(query, await _resolve_repo_root(repo_root, ctx), limit)
+    except Exception as exc:
+        return json.dumps({"ok": False, "error": str(exc)}, indent=2)
 
 
 @mcp.tool()
-def repo_index(repo_root: str = "auto", max_files: Optional[int] = None, force: bool = False) -> str:
-    """Hash-aware index of repository files and symbols. Does not generate or change source code."""
-    return tools.repo_index(repo_root, max_files=max_files, force=force)
+async def record_change(summary: str, paths: list[str], ctx: Context, repo_root: str = "auto") -> str:
+    """Record a verified logical change and refresh affected paths."""
+    try:
+        return tools.record_change(summary, paths, await _resolve_repo_root(repo_root, ctx))
+    except Exception as exc:
+        return json.dumps({"ok": False, "error": str(exc)}, indent=2)
 
 
 @mcp.tool()
-def repo_refresh(repo_root: str = "auto", max_files: Optional[int] = None, force: bool = False) -> str:
-    """Refresh stale repository context entries by file hash."""
-    return tools.repo_refresh(repo_root, max_files=max_files, force=force)
+def ollama_status(model: Optional[str] = None, purpose: str = "ranking") -> str:
+    """Report endpoint, installed/loaded model state, and readiness without mutation."""
+    return tools.ollama_status(model, purpose)
 
 
 @mcp.tool()
-def repo_reindex(repo_root: str = "auto", max_files: Optional[int] = None) -> str:
-    """Force rebuild repository context with the current indexer version. Use after upgrading neo-localmcp if context output looks stale."""
-    return tools.repo_reindex(repo_root, max_files=max_files)
-
-
-@mcp.tool()
-def reset_repo(repo_root: str = "auto") -> str:
-    """Delete only the current repo's indexed context from the shared DB. Keeps config and other repos. CLI requires --yes; MCP call is explicit by tool name."""
-    return tools.reset_repo(repo_root)
-
-
-@mcp.tool()
-def test_determinism(task: str, repo_root: str = "auto", runs: int = 5, reset_repo_first: bool = False, reindex_first: bool = False) -> str:
-    """Run a deterministic/no-Ollama context query multiple times and report whether read order, evidence, and guidance are stable."""
-    return tools.test_determinism(task, repo_root, runs=runs, reset_repo_first=reset_repo_first, reindex_first=reindex_first)
-
-
-@mcp.tool()
-def repo_lookup(query: str, repo_root: str = "auto", limit: int = 20) -> str:
-    """Search persistent repository context for files and symbols. Prefer context_prepare before broad repo search because it normalizes natural/hybrid tasks and ranks source files by intent."""
-    return tools.repo_lookup(query, repo_root, limit)
-
-
-@mcp.tool()
-def file_context(path: str, repo_root: str = "auto", around_line: Optional[int] = None, context_lines: int = 40) -> str:
-    """Return cached context and symbols for one file, with optional line excerpt from current source. Use after context_prepare identifies high-value files/line ranges."""
-    return tools.file_context(path, repo_root, around_line, context_lines)
-
-
-@mcp.tool()
-def context_prepare(task: str, repo_root: str = "auto", max_files: int = 80, limit: int = 5, use_ollama: bool = False, model: Optional[str] = None) -> str:
-    """Use before broad repo search. Fast deterministic/no-Ollama by default. V4.2.5 returns ultra-small plain text through an isolated worker process for Claude/Codex MCP safety. Accepts natural language or hybrid input, e.g. 'debug settings persistence: BackdropMaterial, LoadSettingsAsync, MainViewModel'. Set use_ollama=true only when optional local Ollama reranking is worth the latency. Verify current source before edits. neo-localmcp never generates source code."""
-    return _context_prepare_worker(task, repo_root, max_files, limit, use_ollama, model)
-
-
-@mcp.tool()
-def context_prepare_json(task: str, repo_root: str = "auto", max_files: int = 80, limit: int = 5, use_ollama: bool = False, model: Optional[str] = None) -> str:
-    """Diagnostic context_prepare variant returning compact JSON. Prefer context_prepare for normal Claude/Codex work."""
-    return tools.context_prepare(task, repo_root, max_files=max_files, limit=limit, use_ollama=use_ollama, model=model, output_format="mcp_json")
-
-
-@mcp.tool()
-def summarize_file(path: str, repo_root: str = "auto", model: Optional[str] = None) -> str:
-    """Use Ollama to summarize one file into repository working context. Does not write source code."""
-    return tools.summarize_file(path, repo_root, model)
-
-
-@mcp.tool()
-def apply_unified_patch(patch_text: str, repo_root: str = "auto", check_only: bool = False) -> str:
-    """Apply an exact approved unified diff via git apply. neo-localmcp does not generate the patch."""
-    return tools.apply_unified_patch(patch_text, repo_root, check_only=check_only)
-
-
-@mcp.tool()
-def record_change(summary: str, paths: list[str], repo_root: str = "auto") -> str:
-    """Record a completed change and re-index the listed paths."""
-    return tools.record_change(summary, paths, repo_root)
-
-
-@mcp.tool()
-def set_ollama(base_url: Optional[str] = None, summary_model: Optional[str] = None, fast_model: Optional[str] = None, num_ctx: Optional[int] = None) -> str:
-    """Update Ollama URL/model defaults used by summarization/ranking."""
-    return tools.set_ollama(base_url, summary_model, fast_model, num_ctx)
+def ollama_ensure(model: Optional[str] = None, purpose: str = "ranking") -> str:
+    """Ensure local Ollama and the requested model are ready; remote services are never started."""
+    return tools.ollama_ensure(model, purpose)
 
 
 def main() -> None:

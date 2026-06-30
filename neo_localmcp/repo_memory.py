@@ -8,8 +8,8 @@ from typing import Any
 
 from .config import db_path, load_config
 
-INDEXER_VERSION = "0.4.2.5"
-from .utils import extract_symbols, git_info, iter_repo_files, language_for_path, read_text_file, rel, repo_id, repo_root_or_cwd, safe_path, sha256_file, simple_terms
+INDEXER_VERSION = "1.0.0"
+from .utils import extract_symbols, git_info, language_for_path, read_text_file, rel, repo_id, repo_root_or_cwd, safe_path, scan_repo_files, sha256_file, simple_terms
 
 
 def now_iso() -> str:
@@ -94,6 +94,14 @@ def init_db(conn: sqlite3.Connection) -> None:
         CREATE VIRTUAL TABLE IF NOT EXISTS repo_fts USING fts5(repo_id, kind, target, body);
         """
     )
+    existing_columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(files)").fetchall()}
+    for column, definition in {
+        "summary_source_hash": "TEXT",
+        "summary_model": "TEXT",
+        "summary_prompt_version": "TEXT",
+    }.items():
+        if column not in existing_columns:
+            conn.execute(f"ALTER TABLE files ADD COLUMN {column} {definition}")
     conn.commit()
 
 
@@ -144,14 +152,21 @@ def upsert_repo(conn: sqlite3.Connection, root: Path) -> str:
 def index_file(conn: sqlite3.Connection, root: Path, path: Path, rid: str | None = None, force: bool = False) -> dict[str, Any]:
     rid = rid or upsert_repo(conn, root)
     relative = rel(path, root)
+    stat = path.stat()
+    existing = conn.execute("SELECT sha256, size_bytes, modified_at FROM files WHERE repo_id=? AND path=?", (rid, relative)).fetchone()
+    if existing and not force and int(existing["size_bytes"] or -1) == stat.st_size and float(existing["modified_at"] or -1) == stat.st_mtime:
+        return {"path": relative, "changed": False, "indexed": False}
     current_hash = sha256_file(path)
-    existing = conn.execute("SELECT sha256 FROM files WHERE repo_id=? AND path=?", (rid, relative)).fetchone()
     if existing and existing["sha256"] == current_hash and not force:
+        conn.execute(
+            "UPDATE files SET size_bytes=?, modified_at=? WHERE repo_id=? AND path=?",
+            (stat.st_size, stat.st_mtime, rid, relative),
+        )
+        conn.commit()
         return {"path": relative, "changed": False, "indexed": False}
 
     text = read_text_file(path, int(load_config().get("repo", {}).get("summary_max_chars", 80_000)))
     lang = language_for_path(path)
-    stat = path.stat()
     line_count = len(text.splitlines())
     ts = now_iso()
     conn.execute(
@@ -164,7 +179,12 @@ def index_file(conn: sqlite3.Connection, root: Path, path: Path, rid: str | None
             sha256=excluded.sha256,
             modified_at=excluded.modified_at,
             line_count=excluded.line_count,
-            last_indexed_at=excluded.last_indexed_at
+            last_indexed_at=excluded.last_indexed_at,
+            purpose_summary=NULL,
+            last_summarized_at=NULL,
+            summary_source_hash=NULL,
+            summary_model=NULL,
+            summary_prompt_version=NULL
         """,
         (rid, relative, lang, stat.st_size, current_hash, stat.st_mtime, line_count, ts),
     )
@@ -186,6 +206,12 @@ def index_file(conn: sqlite3.Connection, root: Path, path: Path, rid: str | None
     return {"path": relative, "changed": True, "indexed": True, "symbols": len(symbols)}
 
 
+def _delete_indexed_path(conn: sqlite3.Connection, rid: str, relative: str) -> None:
+    conn.execute("DELETE FROM symbols WHERE repo_id=? AND file_path=?", (rid, relative))
+    conn.execute("DELETE FROM repo_fts WHERE repo_id=? AND (target=? OR target LIKE ?)", (rid, relative, relative + ":%"))
+    conn.execute("DELETE FROM files WHERE repo_id=? AND path=?", (rid, relative))
+
+
 def index_repo(repo_root: str | Path | None = None, max_files: int | None = None, force: bool = False) -> dict[str, Any]:
     root = repo_root_or_cwd(repo_root)
     conn = connect()
@@ -193,7 +219,7 @@ def index_repo(repo_root: str | Path | None = None, max_files: int | None = None
     previous_indexer_version = get_repo_meta(conn, rid, "indexer_version")
     indexer_version_changed = previous_indexer_version != INDEXER_VERSION
     effective_force = force or indexer_version_changed
-    files = iter_repo_files(root, max_files=max_files)
+    files, eligible_files, index_complete = scan_repo_files(root, max_files=max_files)
     indexed = skipped = errors = 0
     changed_paths: list[str] = []
     for path in files:
@@ -206,9 +232,39 @@ def index_repo(repo_root: str | Path | None = None, max_files: int | None = None
                 skipped += 1
         except Exception:
             errors += 1
+    selected_paths = {rel(path, root) for path in files}
+    removed_paths: list[str] = []
+    if errors == 0 and index_complete:
+        stored_paths = {str(row["path"]) for row in conn.execute("SELECT path FROM files WHERE repo_id=?", (rid,)).fetchall()}
+        removed_paths = sorted(stored_paths - selected_paths)
+        for relative in removed_paths:
+            _delete_indexed_path(conn, rid, relative)
+        conn.commit()
     if errors == 0:
         set_repo_meta(conn, rid, "indexer_version", INDEXER_VERSION)
-    return {"ok": errors == 0, "repo_root": str(root), "repo_id": rid, "files_seen": len(files), "indexed_or_updated": indexed, "unchanged": skipped, "errors": errors, "changed_paths": changed_paths[:100], "db_path": str(db_path()), "indexer_version": INDEXER_VERSION, "previous_indexer_version": previous_indexer_version, "indexer_version_changed": indexer_version_changed, "forced": effective_force}
+        set_repo_meta(conn, rid, "eligible_files", str(eligible_files))
+        set_repo_meta(conn, rid, "index_complete", "true" if index_complete else "false")
+        set_repo_meta(conn, rid, "indexed_branch", str(git_info(root).get("branch") or ""))
+    return {
+        "ok": errors == 0,
+        "repo_root": str(root),
+        "repo_id": rid,
+        "files_seen": len(files),
+        "indexed_files": len(selected_paths),
+        "eligible_files": eligible_files,
+        "index_complete": index_complete,
+        "indexed_or_updated": indexed,
+        "unchanged": skipped,
+        "removed": len(removed_paths),
+        "removed_paths": removed_paths[:100],
+        "errors": errors,
+        "changed_paths": changed_paths[:100],
+        "db_path": str(db_path()),
+        "indexer_version": INDEXER_VERSION,
+        "previous_indexer_version": previous_indexer_version,
+        "indexer_version_changed": indexer_version_changed,
+        "forced": effective_force,
+    }
 
 
 def status(repo_root: str | Path | None = None) -> dict[str, Any]:
@@ -221,14 +277,31 @@ def status(repo_root: str | Path | None = None) -> dict[str, Any]:
         counts[table] = int(row["n"] if row else 0)
     stale = 0
     missing = 0
-    for row in conn.execute("SELECT path, sha256 FROM files WHERE repo_id=?", (rid,)).fetchall():
+    for row in conn.execute("SELECT path, size_bytes, modified_at FROM files WHERE repo_id=?", (rid,)).fetchall():
         p = root / row["path"]
         if not p.exists():
             missing += 1
-        elif sha256_file(p) != row["sha256"]:
-            stale += 1
+        else:
+            try:
+                stat = p.stat()
+                if stat.st_size != int(row["size_bytes"] or -1) or stat.st_mtime != float(row["modified_at"] or -1):
+                    stale += 1
+            except OSError:
+                stale += 1
     previous_indexer_version = get_repo_meta(conn, rid, "indexer_version")
-    return {"repo_root": str(root), "repo_id": rid, "db_path": str(db_path()), "counts": counts, "stale_files": stale, "missing_files": missing, "git": git_info(root), "indexer_version": INDEXER_VERSION, "stored_indexer_version": previous_indexer_version, "indexer_rebuild_recommended": previous_indexer_version != INDEXER_VERSION}
+    git = git_info(root)
+    indexed_branch = get_repo_meta(conn, rid, "indexed_branch")
+    indexed_files = counts.get("files", 0)
+    eligible = int(get_repo_meta(conn, rid, "eligible_files") or indexed_files)
+    complete = get_repo_meta(conn, rid, "index_complete") == "true"
+    return {
+        "repo_root": str(root), "repo_id": rid, "db_path": str(db_path()), "counts": counts,
+        "indexed_files": indexed_files, "eligible_files": eligible, "index_complete": complete,
+        "stale_files": stale, "missing_files": missing, "git": git,
+        "branch_changed": indexed_branch is not None and indexed_branch != str(git.get("branch") or ""),
+        "indexer_version": INDEXER_VERSION, "stored_indexer_version": previous_indexer_version,
+        "indexer_rebuild_recommended": previous_indexer_version != INDEXER_VERSION,
+    }
 
 
 def refresh(repo_root: str | Path | None = None, force: bool = False, max_files: int | None = None) -> dict[str, Any]:
@@ -266,7 +339,7 @@ def lookup(query: str, repo_root: str | Path | None = None, limit: int = 20) -> 
     return {"repo_root": str(root), "repo_id": rid, "query": query, "hits": rows, "symbols": symbols}
 
 
-def file_context(path: str, repo_root: str | Path | None = None, around_line: int | None = None, context_lines: int = 40) -> dict[str, Any]:
+def file_context(path: str, repo_root: str | Path | None = None, around_line: int | None = None, context_lines: int = 40, symbol_limit: int = 25) -> dict[str, Any]:
     root = repo_root_or_cwd(repo_root)
     p = safe_path(path, root)
     conn = connect()
@@ -278,14 +351,63 @@ def file_context(path: str, repo_root: str | Path | None = None, around_line: in
         if not row or row["sha256"] != current:
             index_file(conn, root, p, rid=rid, force=True)
     file_row = conn.execute("SELECT * FROM files WHERE repo_id=? AND path=?", (rid, relative)).fetchone()
-    symbols = [dict(row) for row in conn.execute("SELECT kind, name, signature, start_line, end_line FROM symbols WHERE repo_id=? AND file_path=? ORDER BY start_line, name", (rid, relative)).fetchall()]
+    symbols = [dict(row) for row in conn.execute("SELECT kind, name, signature, start_line, end_line FROM symbols WHERE repo_id=? AND file_path=? ORDER BY start_line, name LIMIT ?", (rid, relative, max(0, symbol_limit))).fetchall()]
     excerpt = None
     if around_line and p.exists():
         lines = read_text_file(p, 500_000).splitlines()
-        start = max(1, around_line - context_lines)
-        end = min(len(lines), around_line + context_lines)
+        requested = max(1, int(context_lines))
+        before = (requested - 1) // 2
+        start = max(1, int(around_line) - before)
+        end = min(len(lines), start + requested - 1)
+        start = max(1, end - requested + 1)
         excerpt = {"start_line": start, "end_line": end, "text": "\n".join(f"{i}: {lines[i-1]}" for i in range(start, end + 1))}
-    return {"repo_root": str(root), "path": relative, "exists": p.exists(), "file": dict(file_row) if file_row else None, "fresh": bool(file_row and p.exists() and sha256_file(p) == file_row["sha256"]), "symbols": symbols, "excerpt": excerpt}
+    fresh = False
+    if file_row and p.exists():
+        stat = p.stat()
+        fresh = stat.st_size == int(file_row["size_bytes"] or -1) and stat.st_mtime == float(file_row["modified_at"] or -1)
+    return {"repo_root": str(root), "path": relative, "exists": p.exists(), "file": dict(file_row) if file_row else None, "fresh": fresh, "symbols": symbols, "excerpt": excerpt}
+
+
+def file_excerpts(ranges: list[dict[str, Any]], repo_root: str | Path | None = None, max_chars: int = 20_000) -> dict[str, Any]:
+    root = repo_root_or_cwd(repo_root)
+    remaining = max(256, int(max_chars))
+    excerpts: list[dict[str, Any]] = []
+    for item in ranges[:20]:
+        path = str(item.get("path") or "")
+        if not path or remaining <= 0:
+            break
+        p = safe_path(path, root)
+        if not p.exists():
+            excerpts.append({"path": path, "exists": False})
+            continue
+        lines = read_text_file(p, 1_000_000).splitlines()
+        start = max(1, int(item.get("start_line") or 1))
+        end = min(len(lines), int(item.get("end_line") or start + 39))
+        if end < start:
+            start, end = end, start
+        text = "\n".join(f"{i}: {lines[i-1]}" for i in range(start, end + 1))
+        if len(text) > remaining:
+            text = text[:remaining].rsplit("\n", 1)[0] + "\n...[budget exhausted]"
+        excerpts.append({"path": rel(p, root), "exists": True, "start_line": start, "end_line": end, "sha256": sha256_file(p), "text": text})
+        remaining -= len(text)
+    return {"repo_root": str(root), "max_chars": max_chars, "chars_returned": max_chars - remaining, "excerpts": excerpts}
+
+
+def store_summary(path: str, summary: str, model: str, prompt_version: str, repo_root: str | Path | None = None) -> dict[str, Any]:
+    root = repo_root_or_cwd(repo_root)
+    p = safe_path(path, root)
+    conn = connect()
+    rid = upsert_repo(conn, root)
+    relative = rel(p, root)
+    source_hash = sha256_file(p)
+    conn.execute("DELETE FROM repo_fts WHERE repo_id=? AND kind='summary' AND target=?", (rid, relative))
+    conn.execute(
+        "UPDATE files SET purpose_summary=?, last_summarized_at=?, summary_source_hash=?, summary_model=?, summary_prompt_version=? WHERE repo_id=? AND path=?",
+        (summary[:6000], now_iso(), source_hash, model, prompt_version, rid, relative),
+    )
+    conn.execute("INSERT INTO repo_fts(repo_id, kind, target, body) VALUES(?, 'summary', ?, ?)", (rid, relative, f"{relative}\n{summary[:6000]}"))
+    conn.commit()
+    return {"path": relative, "source_hash": source_hash, "model": model, "prompt_version": prompt_version}
 
 
 def record_task_query(query: str, result: dict[str, Any], repo_root: str | Path | None = None) -> None:
@@ -307,6 +429,8 @@ def record_change(summary: str, paths: list[str], repo_root: str | Path | None =
             normalized.append(rel(p, root))
             if p.exists():
                 index_file(conn, root, p, rid=rid, force=True)
+            else:
+                _delete_indexed_path(conn, rid, rel(p, root))
         except Exception:
             normalized.append(path)
     conn.execute("INSERT INTO change_events(repo_id, summary, paths_json, created_at) VALUES(?, ?, ?, ?)", (rid, summary, json.dumps(normalized), now_iso()))

@@ -1,0 +1,75 @@
+from __future__ import annotations
+
+from neo_localmcp import repo_memory
+
+
+def test_complete_index_prunes_deleted_files(tmp_path, isolated_config):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    first = repo / "first.py"
+    second = repo / "second.py"
+    first.write_text("def first():\n    return 1\n", encoding="utf-8")
+    second.write_text("def second():\n    return 2\n", encoding="utf-8")
+
+    initial = repo_memory.index_repo(repo)
+    assert initial["index_complete"] is True
+    assert initial["eligible_files"] == 2
+
+    second.unlink()
+    refreshed = repo_memory.refresh(repo)
+    assert refreshed["removed"] == 1
+    assert repo_memory.list_indexed_files(repo) == ["first.py"]
+
+
+def test_capped_index_reports_incomplete_without_pruning(tmp_path, isolated_config):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for name in ("a.py", "b.py", "c.py"):
+        (repo / name).write_text(f"VALUE = '{name}'\n", encoding="utf-8")
+
+    full = repo_memory.index_repo(repo)
+    assert full["indexed_files"] == 3
+    capped = repo_memory.index_repo(repo, max_files=1)
+    assert capped["index_complete"] is False
+    assert capped["eligible_files"] == 3
+    assert len(repo_memory.list_indexed_files(repo)) == 3
+
+
+def test_summary_is_replaced_and_invalidated_on_source_change(tmp_path, isolated_config):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    source = repo / "module.py"
+    source.write_text("def value():\n    return 1\n", encoding="utf-8")
+    repo_memory.index_repo(repo)
+
+    repo_memory.store_summary("module.py", "first summary", "model-a", "prompt-v1", repo)
+    repo_memory.store_summary("module.py", "second summary", "model-a", "prompt-v1", repo)
+    conn = repo_memory.connect()
+    rid = repo_memory.repo_id(repo)
+    count = conn.execute("SELECT COUNT(*) FROM repo_fts WHERE repo_id=? AND kind='summary' AND target='module.py'", (rid,)).fetchone()[0]
+    assert count == 1
+
+    source.write_text("def value():\n    return 2\n", encoding="utf-8")
+    repo_memory.refresh(repo)
+    row = conn.execute("SELECT purpose_summary, summary_source_hash FROM files WHERE repo_id=? AND path='module.py'", (rid,)).fetchone()
+    assert row["purpose_summary"] is None
+    assert row["summary_source_hash"] is None
+
+
+def test_file_context_line_count_is_total_not_radius(tmp_path, isolated_config):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    path = repo / "lines.py"
+    path.write_text("\n".join(f"line_{number}" for number in range(1, 101)), encoding="utf-8")
+    repo_memory.index_repo(repo)
+    result = repo_memory.file_context("lines.py", repo, around_line=50, context_lines=12)
+    excerpt = result["excerpt"]
+    assert excerpt["end_line"] - excerpt["start_line"] + 1 == 12
+
+
+def test_repo_identity_separates_clones(tmp_path, isolated_config):
+    one = tmp_path / "one"
+    two = tmp_path / "two"
+    one.mkdir()
+    two.mkdir()
+    assert repo_memory.repo_id(one) != repo_memory.repo_id(two)
