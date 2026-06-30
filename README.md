@@ -40,7 +40,7 @@ macOS:
 neo-localmcp setup --client all
 ```
 
-Both installers are idempotent. Use `-DryRun`/`--dry-run`, `-Repair`/`--repair`, or `-Upgrade`/`--upgrade`. Uninstalling preserves configuration and repository memory unless the remove-data option is supplied:
+Both installers are idempotent. Upgrades create side-by-side environments under `~/.neo-localmcp/venvs` and repoint stable CLI/MCP launchers, so an active desktop client cannot lock the upgrade target. Use `-DryRun`/`--dry-run`, `-Repair`/`--repair`, or `-Upgrade`/`--upgrade`. Uninstalling preserves configuration and repository memory unless the remove-data option is supplied:
 
 ```powershell
 .\uninstall.ps1

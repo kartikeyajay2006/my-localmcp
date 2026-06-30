@@ -1,3 +1,8 @@
+---
+description: Search indexed repository paths and symbols
+argument-hint: "<symbol-or-query>"
+---
+
 Use the `neo-localmcp` MCP server for this command.
 
 Rules:

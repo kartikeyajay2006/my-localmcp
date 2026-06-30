@@ -1,3 +1,8 @@
+---
+description: Retrieve indexed context and excerpts for one file
+argument-hint: "<file-path> [line]"
+---
+
 Use the `neo-localmcp` MCP server for this command.
 
 Rules:

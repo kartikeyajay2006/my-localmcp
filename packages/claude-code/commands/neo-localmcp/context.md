@@ -1,3 +1,8 @@
+---
+description: Prepare bounded source context for a repository task
+argument-hint: "<task> [repo-path]"
+---
+
 Use the `neo-localmcp` MCP server before broad repo search.
 
 Best style is natural language plus known symbols/files when available:

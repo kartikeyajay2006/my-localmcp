@@ -1,3 +1,8 @@
+---
+description: Show repository index and Neo LocalMCP status
+argument-hint: "[repo-path]"
+---
+
 Use the `neo-localmcp` MCP server for this command.
 
 Rules:

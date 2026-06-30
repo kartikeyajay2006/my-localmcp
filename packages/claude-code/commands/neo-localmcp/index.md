@@ -1,3 +1,8 @@
+---
+description: Build or rebuild the current repository index
+argument-hint: "[repo-path]"
+---
+
 Use the `neo-localmcp` MCP server for this command.
 
 Rules:

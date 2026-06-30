@@ -27,6 +27,11 @@ def _python_command() -> str:
     return sys.executable
 
 
+def _server_command() -> str:
+    suffix = ".cmd" if platform.system().lower() == "windows" else ""
+    return str(APP_DIR / "bin" / f"neo-localmcp-server{suffix}")
+
+
 def _toml_string(value: str | Path) -> str:
     return str(value).replace("\\", "\\\\").replace('"', '\\"')
 
@@ -34,8 +39,8 @@ def _toml_string(value: str | Path) -> str:
 def _mcp_server_block() -> dict[str, Any]:
     return {
         IDENTITY.mcp_server_name: {
-            "command": _python_command(),
-            "args": ["-m", "neo_localmcp.server"],
+            "command": _server_command(),
+            "args": [],
             "env": {"NEO_LOCALMCP_CONFIG": str(CONFIG_PATH)},
         }
     }
@@ -45,8 +50,8 @@ def _codex_block() -> str:
     return f"""
 # BEGIN neo-localmcp
 [mcp_servers.{IDENTITY.mcp_server_name}]
-command = "{_toml_string(_python_command())}"
-args = ["-m", "neo_localmcp.server"]
+command = "{_toml_string(_server_command())}"
+args = []
 
 [mcp_servers.{IDENTITY.mcp_server_name}.env]
 NEO_LOCALMCP_CONFIG = "{_toml_string(CONFIG_PATH)}"
@@ -86,13 +91,30 @@ def setup_claude_code(apply: bool = True) -> dict[str, Any]:
         if claude:
             # User scope is best for repeatable Claude Code sessions. If the CLI is older and does not support
             # --scope, fall back to the classic command.
-            cmd = [claude, "mcp", "add", "--scope", "user", IDENTITY.mcp_server_name, "--", _python_command(), "-m", "neo_localmcp.server"]
-            result = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
-            if result.returncode != 0:
-                fallback = [claude, "mcp", "add", IDENTITY.mcp_server_name, "--", _python_command(), "-m", "neo_localmcp.server"]
+            cmd = [claude, "mcp", "add", "--scope", "user", IDENTITY.mcp_server_name, "--", _server_command()]
+            configured = False
+            for _ in range(3):
+                existing = subprocess.run([claude, "mcp", "get", IDENTITY.mcp_server_name], capture_output=True, text=True, errors="replace")
+                combined = f"{existing.stdout}\n{existing.stderr}".lower()
+                if existing.returncode != 0:
+                    break
+                if _server_command().lower() in combined and "scope: user" in combined:
+                    actions.append("Claude Code user-scope registration already uses the stable launcher")
+                    configured = True
+                    break
+                existing_scope = "local" if "scope: local" in combined else ("user" if "scope: user" in combined else ("project" if "scope: project" in combined else None))
+                if not existing_scope:
+                    break
+                removed = subprocess.run([claude, "mcp", "remove", IDENTITY.mcp_server_name, "--scope", existing_scope], capture_output=True, text=True, errors="replace")
+                actions.append(f"removed existing {existing_scope}-scope registration for migration: exit {removed.returncode}")
+                if removed.returncode != 0:
+                    break
+            result = subprocess.run(cmd, capture_output=True, text=True, errors="replace") if not configured else existing
+            if not configured and result.returncode != 0:
+                fallback = [claude, "mcp", "add", IDENTITY.mcp_server_name, "--", _server_command()]
                 result = subprocess.run(fallback, capture_output=True, text=True, errors="replace")
                 actions.append(f"ran claude mcp add fallback: exit {result.returncode}")
-            else:
+            elif not configured:
                 actions.append(f"ran claude mcp add --scope user: exit {result.returncode}")
             if result.stderr.strip():
                 actions.append(result.stderr.strip()[:500])
@@ -103,8 +125,8 @@ def setup_claude_code(apply: bool = True) -> dict[str, Any]:
         "applied": apply,
         "target": str(target),
         "actions": actions,
-        "manual_mcp_user": f"claude mcp add --scope user {IDENTITY.mcp_server_name} -- {_python_command()} -m neo_localmcp.server",
-        "manual_mcp_fallback": f"claude mcp add {IDENTITY.mcp_server_name} -- {_python_command()} -m neo_localmcp.server",
+        "manual_mcp_user": f"claude mcp add --scope user {IDENTITY.mcp_server_name} -- {_server_command()}",
+        "manual_mcp_fallback": f"claude mcp add {IDENTITY.mcp_server_name} -- {_server_command()}",
     }
 
 
@@ -168,6 +190,7 @@ def client_status() -> dict[str, Any]:
     return {
         "product": IDENTITY.product_name,
         "python_command": _python_command(),
+        "server_command": _server_command(),
         "config_path": str(CONFIG_PATH),
         "commands_found": {"claude": claude_cli, "codex": codex_cli},
         "paths": {name: {"path": path, "exists": Path(path).exists()} for name, path in paths.items()},

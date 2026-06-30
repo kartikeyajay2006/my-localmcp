@@ -12,7 +12,9 @@ done
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_HOME="${NEO_LOCALMCP_HOME:-$HOME/.neo-localmcp}"
-VENV_DIR="$APP_HOME/venv"
+VENV_ROOT="$APP_HOME/venvs"
+INSTALL_ID="$(date +%Y%m%d%H%M%S)-$$"
+VENV_DIR="$VENV_ROOT/$INSTALL_ID"
 BIN_DIR="$APP_HOME/bin"
 
 if [[ "$DRY_RUN" == "1" ]]; then
@@ -31,7 +33,7 @@ else
   exit 1
 fi
 
-mkdir -p "$APP_HOME" "$BIN_DIR"
+mkdir -p "$APP_HOME" "$BIN_DIR" "$VENV_ROOT"
 "$PYTHON" -m venv "$VENV_DIR"
 "$VENV_DIR/bin/python" -m pip install --upgrade pip
 "$VENV_DIR/bin/python" -m pip install --upgrade --force-reinstall "$ROOT_DIR"
@@ -44,6 +46,13 @@ cat > "$BIN_DIR/neo-localmcp" <<EOF2
 exec "$VENV_DIR/bin/python" -m neo_localmcp.cli "\$@"
 EOF2
 chmod +x "$BIN_DIR/neo-localmcp"
+
+cat > "$BIN_DIR/neo-localmcp-server" <<EOF2
+#!/usr/bin/env bash
+exec "$VENV_DIR/bin/python" -m neo_localmcp.server
+EOF2
+chmod +x "$BIN_DIR/neo-localmcp-server"
+printf '%s\n' "$VENV_DIR" > "$APP_HOME/current-venv.txt"
 
 PROFILE_FILE=""
 SHELL_NAME="$(basename "${SHELL:-}")"

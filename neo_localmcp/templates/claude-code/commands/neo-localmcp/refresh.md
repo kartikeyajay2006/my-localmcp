@@ -1,3 +1,8 @@
+---
+description: Refresh stale or changed files in the repository index
+argument-hint: "[repo-path]"
+---
+
 Use the `neo-localmcp` MCP server for this command.
 
 Rules:

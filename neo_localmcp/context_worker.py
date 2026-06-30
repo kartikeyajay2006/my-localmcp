@@ -8,7 +8,16 @@ from typing import Any
 from . import tools
 
 
+def _configure_utf8_stdio() -> None:
+    """Keep the JSON/text worker protocol independent of the Windows code page."""
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8", errors="replace")
+
+
 def main() -> int:
+    _configure_utf8_stdio()
     try:
         payload = json.loads(sys.stdin.read() or "{}")
         task = str(payload.get("task") or "")

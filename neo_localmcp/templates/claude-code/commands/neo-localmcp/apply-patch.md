@@ -1,3 +1,8 @@
+---
+description: Apply an exact, developer-approved unified patch
+argument-hint: "<patch-file> [--check-only]"
+---
+
 Use the `neo-localmcp` MCP server for this command.
 
 Rules:

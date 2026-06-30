@@ -3,13 +3,15 @@ $ErrorActionPreference = "Stop"
 
 $RootDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $AppHome = if ($env:NEO_LOCALMCP_HOME) { $env:NEO_LOCALMCP_HOME } else { Join-Path $HOME ".neo-localmcp" }
-$VenvDir = Join-Path $AppHome "venv"
+$VenvRoot = Join-Path $AppHome "venvs"
+$InstallId = "$(Get-Date -Format 'yyyyMMddHHmmss')-$PID"
+$VenvDir = Join-Path $VenvRoot $InstallId
 $BinDir = Join-Path $AppHome "bin"
 
 if ($DryRun) {
     Write-Host "Would install or repair neo-localmcp from $RootDir"
     Write-Host "Application home: $AppHome"
-    Write-Host "Virtual environment: $VenvDir"
+    Write-Host "New side-by-side virtual environment: $VenvDir"
     exit 0
 }
 
@@ -23,6 +25,7 @@ function Get-PythonCommand {
 
 New-Item -ItemType Directory -Force -Path $AppHome | Out-Null
 New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
+New-Item -ItemType Directory -Force -Path $VenvRoot | Out-Null
 
 $Py = Get-PythonCommand
 & $Py.Exe @($Py.Args) -m venv $VenvDir
@@ -35,6 +38,11 @@ if (Test-Path $McpbSource) { Copy-Item -Force $McpbSource (Join-Path $AppHome "n
 $Cmd = Join-Path $BinDir "neo-localmcp.cmd"
 $CmdContent = "@echo off`r`n`"$VenvPython`" -m neo_localmcp.cli %*`r`n"
 Set-Content -Path $Cmd -Value $CmdContent -Encoding ASCII
+
+$ServerCmd = Join-Path $BinDir "neo-localmcp-server.cmd"
+$ServerCmdContent = "@echo off`r`n`"$VenvPython`" -m neo_localmcp.server`r`n"
+Set-Content -Path $ServerCmd -Value $ServerCmdContent -Encoding ASCII
+Set-Content -Path (Join-Path $AppHome "current-venv.txt") -Value $VenvDir -Encoding UTF8
 
 $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
 if (-not $UserPath) { $UserPath = "" }

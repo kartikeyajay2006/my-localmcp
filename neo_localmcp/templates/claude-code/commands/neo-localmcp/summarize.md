@@ -1,3 +1,8 @@
+---
+description: Summarize one file with the configured Ollama model
+argument-hint: "<file-path>"
+---
+
 Use the `neo-localmcp` MCP server for this command.
 
 Rules:

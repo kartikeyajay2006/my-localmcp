@@ -1,3 +1,8 @@
+---
+description: Record a verified change and refresh affected files
+argument-hint: "<summary> [paths...]"
+---
+
 Use the `neo-localmcp` MCP server for this command.
 
 Rules:

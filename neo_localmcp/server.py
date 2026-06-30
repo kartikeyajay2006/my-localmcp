@@ -69,11 +69,14 @@ def _context_prepare_worker(task: str, repo_root: str, max_files: int, token_bud
     timeout_seconds = 30
     if use_ollama:
         timeout_seconds = int(ollama_cfg.get("startup_timeout_seconds", 20)) + int(ollama_cfg.get("warm_timeout_seconds", 90)) + int(ollama_cfg.get("fast_timeout_seconds", 60)) + 10
+    worker_env = os.environ.copy()
+    worker_env["PYTHONIOENCODING"] = "utf-8"
+    worker_env["PYTHONUTF8"] = "1"
     try:
         proc = subprocess.run(
             [sys.executable, "-m", "neo_localmcp.context_worker"], input=json.dumps(payload),
             text=True, encoding="utf-8", errors="replace", capture_output=True,
-            timeout=timeout_seconds, env=os.environ.copy(),
+            timeout=timeout_seconds, env=worker_env,
         )
     except subprocess.TimeoutExpired:
         return json.dumps({"ok": False, "error": "context worker timed out", "repo_root": repo_root, "use_ollama": use_ollama, "timeout_seconds": timeout_seconds, "fallback": "Retry with use_ollama=false; deterministic context remains available."}, indent=2)
