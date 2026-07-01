@@ -22,6 +22,11 @@ platform-specific behavior materially improves reliability, stability, or
 functionality. Every exception remains behind a shared Python interface and
 must not redefine lifecycle policy.
 
+For version-sensitive library and tool behavior, consult Context7 first when it
+is available, then primary official documentation. Third-party sources are a
+fallback only when official documentation is silent, and any resulting inference
+must be identified and covered by a test.
+
 ## Entrypoint and command ownership
 
 During development the lifecycle entrypoint is `setup_v2.py`. After validation,
@@ -224,6 +229,11 @@ cleanup and restoration, process ownership, interruption recovery, output
 terminology, metadata transitions, broken-runtime detection, and
 Windows/macOS/Linux path behavior. Platform-specific process behavior is tested
 on its corresponding CI operating system.
+
+Windows x64 CI is the durable Windows compatibility gate. A temporary Parallels
+VM is used only for targeted live process-lock and client smoke tests; the design
+does not optimize for Parallels or add Windows ARM-specific behavior without a
+confirmed user-impacting defect that cannot be solved in shared Python.
 
 ## OS-specific boundaries
 
