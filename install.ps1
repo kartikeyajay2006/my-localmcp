@@ -68,6 +68,88 @@ function Remove-ItemWithRetry([string]$Target) {
     }
 }
 
+function Invoke-BoundedExe([string]$Exe, [string[]]$ExeArgs, [int]$TimeoutSeconds) {
+    # Any external process launched here (ollama.exe) is untrusted with respect to
+    # timing -- it must never be allowed to stall the install indefinitely (same
+    # "Ollama failures never block deterministic behavior" rule ollama_client.py
+    # applies to context retrieval, applied here to the installer itself). A plain
+    # `& $exe` has no timeout, so run it as a job and cap the wait explicitly.
+    $job = Start-Job -ScriptBlock {
+        param($JobExe, $JobArgs)
+        $out = & $JobExe @JobArgs 2>&1
+        [pscustomobject]@{ Output = $out; ExitCode = $LASTEXITCODE }
+    } -ArgumentList $Exe, $ExeArgs
+    $completed = Wait-Job $job -Timeout $TimeoutSeconds
+    if (-not $completed) {
+        Stop-Job $job -ErrorAction SilentlyContinue | Out-Null
+        Remove-Job $job -Force -ErrorAction SilentlyContinue | Out-Null
+        return @{ Completed = $false; ExitCode = -1; Output = @() }
+    }
+    $result = Receive-Job $job -ErrorAction SilentlyContinue
+    Remove-Job $job -Force -ErrorAction SilentlyContinue | Out-Null
+    if (-not $result) {
+        return @{ Completed = $true; ExitCode = -1; Output = @() }
+    }
+    return @{ Completed = $true; ExitCode = $result.ExitCode; Output = @($result.Output) }
+}
+
+function Test-OllamaSetup([string]$VenvPython) {
+    # Ollama is optional preprocessing, never required (see CLAUDE.md). This only
+    # reports presence/readiness/model coverage -- it never fails the install and
+    # never auto-pulls a missing model, matching ollama_client.py's own rule. Every
+    # external call below is time-bounded so a stuck/unresponsive ollama.exe can
+    # never hang the installer -- it just gets skipped and reported as such.
+    Write-Host ""
+    Write-Host "Checking Ollama (optional; deterministic retrieval works without it)..."
+    try {
+        $ollamaCmd = Get-Command ollama -ErrorAction SilentlyContinue
+        if (-not $ollamaCmd) {
+            Write-Host "  ollama not found on PATH -- skipping. Install it later from https://ollama.com if you want ranking/summarization."
+            return
+        }
+        $list = Invoke-BoundedExe -Exe $ollamaCmd.Source -ExeArgs @("list") -TimeoutSeconds 10
+        if (-not $list.Completed) {
+            Write-Host "  'ollama list' did not respond within 10s -- skipping model check."
+            return
+        }
+        if ($list.ExitCode -ne 0) {
+            Write-Host "  ollama found but not responding -- starting 'ollama serve' headless (same as neo-localmcp's own auto-start)..."
+            try {
+                Start-Process -FilePath $ollamaCmd.Source -ArgumentList "serve" -WindowStyle Hidden `
+                    -RedirectStandardOutput "NUL" -RedirectStandardError "NUL" | Out-Null
+            } catch {
+                Write-Host "  Could not start ollama serve: $($_.Exception.Message)"
+                return
+            }
+            Start-Sleep -Seconds 3
+            $list = Invoke-BoundedExe -Exe $ollamaCmd.Source -ExeArgs @("list") -TimeoutSeconds 10
+            if (-not $list.Completed -or $list.ExitCode -ne 0) {
+                Write-Host "  Ollama still not responding after starting it -- skipping model check."
+                return
+            }
+        }
+        $configCheck = Invoke-BoundedExe -Exe $VenvPython -ExeArgs @(
+            "-c", "import json; from neo_localmcp.config import load_config; c = load_config()['ollama']; print(json.dumps({'fast_model': c['fast_model'], 'summary_model': c['summary_model']}))"
+        ) -TimeoutSeconds 15
+        if (-not $configCheck.Completed -or $configCheck.ExitCode -ne 0 -or -not $configCheck.Output) {
+            Write-Host "  Could not read configured model names -- skipping model check."
+            return
+        }
+        $configuredModels = ($configCheck.Output -join "") | ConvertFrom-Json
+        $installedNames = @($list.Output | Select-Object -Skip 1 | ForEach-Object { ("$_" -split '\s+')[0] } | Where-Object { $_ })
+        foreach ($role in @("fast_model", "summary_model")) {
+            $model = $configuredModels.$role
+            if ($installedNames -contains $model) {
+                Write-Host "  [found]   $role -> $model"
+            } else {
+                Write-Host "  [missing] $role -> $model (not auto-installed; run 'ollama pull $model' if you want it)"
+            }
+        }
+    } catch {
+        Write-Host "  Ollama check skipped due to an unexpected error: $($_.Exception.Message)"
+    }
+}
+
 function Test-VenvIntact([string]$Venv) {
     # Fast sanity check that a present venv is actually usable, not a leftover from
     # an interrupted previous run.
@@ -123,7 +205,10 @@ if ((Test-Path $VenvDir) -and (Test-VenvIntact $VenvDir) -and -not $Repair) {
 }
 $VenvPython = Join-Path $VenvDir "Scripts\python.exe"
 
-$McpbSource = Join-Path $RootDir "packages\claude-desktop\neo-localmcp.mcpb"
+# The packaged .mcpb is versioned in packages/claude-desktop/ (1.0.9+), but the
+# local copy stays a fixed filename so setup.ps1's Desktop-extension instructions
+# can point at a stable path without the user hunting for a version suffix.
+$McpbSource = Join-Path $RootDir "packages\claude-desktop\neo-localmcp-v$Version.mcpb"
 if (Test-Path $McpbSource) { Copy-Item -Force $McpbSource (Join-Path $AppHome "neo-localmcp.mcpb") }
 
 $Cmd = Join-Path $BinDir "neo-localmcp.cmd"
@@ -145,6 +230,7 @@ if (($UserPath -split ";") -notcontains $BinDir) {
 
 & $Cmd init
 try { & $Cmd doctor } catch { Write-Host "Doctor reported an issue; install still completed." }
+Test-OllamaSetup -VenvPython $VenvPython
 
 Write-Host ""
 Write-Host "Installed neo-localmcp."
@@ -155,8 +241,12 @@ Write-Host "Next:"
 Write-Host "  1. Open a new terminal if PATH is not refreshed."
 Write-Host "  2. Run setup once from anywhere:"
 Write-Host "       neo-localmcp setup --client all"
-Write-Host "  3. cd into the repo you want analyzed, then index/context there:"
-Write-Host "       cd C:\Path\To\YourRepo"
-Write-Host "       neo-localmcp index"
-Write-Host '       neo-localmcp context "debug settings persistence: BackdropMaterial, LoadSettingsAsync"'
-Write-Host "  4. Check paths anytime with: neo-localmcp where"
+Write-Host "  3. Check paths anytime with: neo-localmcp where"
+Write-Host ""
+Write-Host "===================================================================" -ForegroundColor Cyan
+Write-Host "  IMPORTANT: neo-localmcp does nothing for a repo until it's indexed." -ForegroundColor Cyan
+Write-Host "  For every repo you want it to help with, run:" -ForegroundColor Cyan
+Write-Host "       cd C:\Path\To\YourRepo" -ForegroundColor Cyan
+Write-Host "       neo-localmcp index" -ForegroundColor Cyan
+Write-Host "  ...or ask your AI agent to do it (see docs/AGENT_INTEGRATION.md)." -ForegroundColor Cyan
+Write-Host "===================================================================" -ForegroundColor Cyan

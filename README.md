@@ -1,26 +1,122 @@
 # neo-localmcp
 
-`neo-localmcp` is a local repository-context server for Claude and Codex. It indexes a repository once, incrementally refreshes changed files, and returns a bounded bundle of current source excerpts so the primary model can avoid repeated broad searches and full-file reads.
+## What it is
 
-V1 targets at least a 50% reduction in discovery/read tokens and a 30% reduction in total task tokens without reducing edit accuracy. Deterministic source retrieval is always authoritative; Ollama is optional preprocessing for ranking and summarization.
+`neo-localmcp` is a local MCP server that gives Claude/Codex deterministic,
+hash-aware repository context — ranked source excerpts, symbols, and tests — so
+the primary model can skip repeated broad search and full-file reads. It
+indexes a repository once, incrementally refreshes changed files, and returns
+a bounded bundle of *current* source excerpts on request.
 
-## Core workflow
+V1 targets at least a 50% reduction in discovery/read tokens and a 30%
+reduction in total task tokens without reducing edit accuracy.
 
-The primary MCP tool is:
+**It does not generate or edit source code.** The one exception is applying an
+exact, developer-approved unified diff via `apply-patch`/`apply_patch`, which
+always validates with `git apply --check` first and defaults to check-only.
+Everything else is retrieval, indexing, ranking, and summarization.
 
-```text
-prepare_context(task, repo_root, token_budget=3000, max_files=6)
-```
+## How it works
 
-It returns ranked current-source excerpts, hashes, line ranges, related symbols/tests, selection reasons, index completeness, and approximate retrieval-token measurements. Use `file_excerpts` for additional exact ranges and `repo_lookup` for precise symbols or paths.
+1. **Index once, refresh incrementally.** The first request against a repo
+   builds a complete hash-aware index (files, symbols, tests) into one shared
+   SQLite database (`~/.neo-localmcp/repo-context.sqlite`). Later requests
+   compare path, size, and modification time before re-hashing, so refreshes
+   are cheap.
+2. **Deterministic retrieval is always authoritative.** `prepare_context`
+   parses a task string into intent + strong/weak terms, ranks candidate
+   files/symbols against the index, and returns bounded current-source
+   excerpts with hashes and line ranges — no model call required.
+3. **Ollama is optional preprocessing layered on top.** It can re-rank
+   candidates or summarize a file, but every Ollama-touching path has a
+   deterministic fallback. A missing, cold, busy, or failed Ollama call
+   degrades gracefully; it never blocks or empties a response.
+4. **Repository identity is centralized, not per-repo.** All indexed repos
+   share one database, distinguished internally by canonical root + Git
+   remote, so clones and worktrees stay separate but memory persists across
+   sessions.
+5. **The only mutation path is an approved patch.** `apply-patch`/`apply_patch`
+   applies an exact unified diff via `git apply`; it never invents one.
+   `record-change`/`record_change` logs a completed edit and re-indexes the
+   touched paths.
 
-Recommended agent instruction:
+## Does it use Ollama?
 
-```text
-Before broad repository search, call neo-localmcp prepare_context.
-Use its current source excerpts first. Request additional exact ranges only when needed.
-Treat source and tests as truth. Ollama output is optional advisory context.
-```
+**No, not by default, and never for anything you can't get without it.**
+Deterministic context retrieval (`context`/`prepare_context`) works fully
+without Ollama and stays the default (`use_ollama=false` / no `--ollama-rank`
+flag). The one command that *is* inherently an Ollama call is
+`summarize`/`summarize_file` — its entire purpose is a model-written summary,
+cached by source hash so it's only regenerated when the file changes.
+
+## Command reference
+
+### CLI — administration (CLI-only, never exposed as an MCP tool)
+
+| Command | Purpose |
+|---|---|
+| `init` | Create a fresh config at `~/.neo-localmcp/config.yaml`. |
+| `status` | Fast status: config, repo index counts, Git, Ollama reachability. |
+| `doctor` | Full health check: config, DB, Ollama, repo index, running servers. |
+| `where` | Show install/config paths and the repo currently being analyzed. |
+| `config` | Print the config file path. |
+| `clients` | Show detected Claude/Codex config paths and the MCP block that would be written. |
+| `setup [--client ...] [--dry-run]` | Install MCP config + slash commands for Claude Code, Claude Desktop, Codex CLI/Desktop. |
+| `remove-client [--client ...] [--dry-run]` | Deregister neo-localmcp from supported clients (inverse of `setup`). |
+| `serve` | Run the MCP server over stdio (what clients actually launch). |
+| `servers` | List running neo-localmcp servers registered under this app home. |
+| `stop [--pid \| --all] [--match-executable] [--timeout] [--no-force]` | Ask running server(s) to exit gracefully; force only as a last resort. |
+| `set-ollama --base-url --fast-model --summary-model --num-ctx` | Set Ollama endpoint/model defaults. |
+| `model status` | Show configured Ollama models and which are actually reachable. |
+
+### CLI — repository indexing and queries (`--repo-root` on all of these)
+
+| Command | Purpose |
+|---|---|
+| `index [--max-files] [--force]` | Hash-aware full index of files and symbols. |
+| `refresh [--max-files] [--force]` | Update only stale/missing/changed files. |
+| `reindex [--max-files]` | Force a full rebuild with the current indexer version. |
+| `reset-repo --yes` | Delete only *this* repo's indexed context. Keeps config and every other repo. |
+| `reset-all --yes` | Delete the entire shared context DB (every indexed repo). Keeps config and client setup. |
+| `test-determinism task [--runs] [--reset-repo] [--reindex-first]` | Run the same deterministic query N times and verify identical output hashes. |
+| `lookup query [--limit]` | Search indexed files/symbols by name or path. |
+| `file path [--around-line] [--context-lines]` | One file's cached context, symbols, freshness, and an optional excerpt. |
+| `context task [--max-files] [--token-budget] [--ollama-rank] [--model] [--format]` | Bounded source-first context bundle for a task — the main retrieval command. |
+| `summarize path [--heading] [--model]` | Summarize a file (or one Markdown heading) with Ollama; cached by source hash. |
+| `apply-patch patch_file [--check-only]` | Validate (default) or apply an exact unified diff via `git apply`. |
+| `record-change summary paths...` | Record a verified change and re-index the listed paths. |
+
+### Ollama subcommands (`neo-localmcp ollama <sub>`)
+
+| Subcommand | Purpose |
+|---|---|
+| `status` | Endpoint, installed/loaded models, readiness — no mutation. |
+| `ensure` | Make sure Ollama and the requested model are ready (starts/warms as needed; never auto-downloads a model). |
+| `start` | Start a local Ollama service. Never touches a remote endpoint. |
+| `warm` | Load the model into memory ahead of a request. |
+| `test` | Round-trip a small prompt to confirm the model responds. |
+| `unload` | Explicitly unload the model (never automatic). |
+| `stop` | Stop a local Ollama service *only if neo-localmcp started it*. |
+
+### MCP tools — what Claude/Codex actually call at runtime
+
+| Tool | Key args | Purpose |
+|---|---|---|
+| `prepare_context` | `task, repo_root, token_budget=3000, max_files=6, use_ollama=false` | Bounded current-source excerpts for a task, before broad search. The primary tool. |
+| `context_prepare` | *(same)* | Compatibility alias for `prepare_context`, retained for one release. |
+| `file_excerpts` | `ranges[], retrieval_id` | Read several exact current-source ranges in one bounded call. Pass a prior `retrieval_id` to record whether you used the suggested section. |
+| `repo_lookup` | `query, limit=20` | Precise lookup for a symbol or path. |
+| `repo_status` | `repo_root` | Repo index, config, Git, and Ollama status — read-only. |
+| `doctor` | `repo_root` | Full read-only health check across server, repo, and Ollama. |
+| `refresh_index` | `repo_root, force=false, max_files` | Refresh changed/stale/missing files in the persistent index. |
+| `summarize_file` | `path, heading, model` | Summarize one file or one Markdown heading with Ollama; cached by source hash. |
+| `apply_patch` | `patch_text, check_only=true` | Validate or apply an exact developer-approved unified diff. Defaults to validation only. |
+| `record_change` | `summary, paths[]` | Record a verified change and re-index the touched paths. |
+| `ollama_status` | `model, purpose="ranking"` | Ollama endpoint/model readiness — no mutation. |
+| `ollama_ensure` | `model, purpose="ranking"` | Ensure Ollama and the requested model are ready; never starts a remote service. |
+
+Administration (`index`, `reindex`, `reset-*`, `setup`, `servers`, `stop`, ...)
+is deliberately CLI-only and never exposed as an MCP tool.
 
 ## Install
 
@@ -52,29 +148,65 @@ Both installers are idempotent. On Windows (1.0.8+), `install.ps1` keeps exactly
 ./uninstall.sh
 ```
 
+## Quickstart: fresh repo (little or no code yet)
+
+There's nothing to onboard an agent into yet, so just install once per
+machine and start indexing as the repo grows:
+
+```bash
+cd /path/to/new-repo
+neo-localmcp index --repo-root .
+neo-localmcp context "scaffold initial project structure" --repo-root . --token-budget 2000
+```
+
+The first `context`/`prepare_context` call also auto-builds the index if you
+skip the explicit `index` step. Early on, with little source to rank, expect a
+thin result — it becomes genuinely useful as soon as real files and symbols
+exist. Keep calling `context`/`prepare_context` as you add code instead of
+falling back to broad reads.
+
+## Quickstart: existing repo (already has code, maybe its own CLAUDE.md/AGENTS.md)
+
+```bash
+cd /path/to/existing-repo
+neo-localmcp index --repo-root .     # one-time full index of the existing codebase
+neo-localmcp doctor --repo-root .    # confirm ok: true before relying on it
+```
+
+Then give any agent working in that repo a minimal prompt so it actually
+discovers and uses the tools instead of silently falling back to broad
+search and full-file reads:
+
+```text
+This repository is indexed by neo-localmcp, a local MCP server for
+deterministic repository context. Before broad repository search, call
+prepare_context(task, repo_root) and use its current source excerpts first.
+Use file_excerpts for additional exact ranges and repo_lookup for a known
+symbol or path. Treat source and tests as truth; Ollama output, when
+present, is optional advisory context, never authoritative. Report which
+tool you used (or that none applied) back to the user.
+```
+
+The same snippet, plus a full tool-by-tool reference (arguments, defaults,
+and when to call each one), lives in
+[`docs/AGENT_INTEGRATION.md`](docs/AGENT_INTEGRATION.md) — paste that file's
+top snippet into the downstream repo's own `CLAUDE.md`/`AGENTS.md` so the
+instruction persists across sessions instead of being repeated by hand.
+
 ## Client integration
 
 - Claude Code is configured using `claude mcp add` and receives `/neo-localmcp:*` command templates.
-- Claude Desktop uses the package generated at `packages/claude-desktop/neo-localmcp.mcpb`. Build it with `scripts/build-mcpb.ps1` or `scripts/build-mcpb.sh`, then install it through Settings > Extensions > Advanced settings.
+- Claude Desktop uses the versioned package generated at `packages/claude-desktop/neo-localmcp-v<version>.mcpb`. Build it with `scripts/build-mcpb.ps1` or `scripts/build-mcpb.sh`, then install it through Settings > Extensions > Advanced settings. `install.ps1` also copies it to a fixed-name local copy at `~/.neo-localmcp/neo-localmcp.mcpb` so setup instructions don't need to track the version suffix.
 - Codex app, CLI, and IDE share `~/.codex/config.toml`; setup writes one marked, replaceable block there.
 - MCP calls use a client workspace root when available. If none or several are exposed, pass `repo_root` explicitly or set `NEO_LOCALMCP_REPO`; the server refuses ambiguous automatic scope.
 
 ## Repository indexing
 
-Run manually when desired:
-
-```bash
-neo-localmcp index --repo-root /path/to/repo
-neo-localmcp status --repo-root /path/to/repo
-```
-
 The first context request creates a complete index automatically. Later requests compare path, size, and modification time before hashing. Complete refreshes transactionally prune deleted and renamed files. Capped indexes explicitly report `index_complete=false` with both `indexed_files` and `eligible_files`.
 
 Repository identity includes the canonical root and Git remote, keeping clones and worktrees separate. Summaries are stored with source hash, model, and prompt version and are replaced—not duplicated—when regenerated.
 
-## Ollama
-
-Context retrieval works without Ollama. Enable it per request with `use_ollama=true` or CLI `--ollama-rank`.
+## Ollama configuration
 
 Configure localhost or a remote endpoint:
 
@@ -90,34 +222,7 @@ Before inference, neo-localmcp checks Ollama version, installed models, and runn
 
 States returned to Claude/Codex include `unreachable`, `model_missing`, `model_cold`, `warming`, `ready`, `busy`, `timed_out`, and `failed`. Failures preserve deterministic context. HTTP 503 is treated as busy and does not trigger a restart.
 
-Administrative commands:
-
-```bash
-neo-localmcp ollama status
-neo-localmcp ollama ensure
-neo-localmcp ollama start
-neo-localmcp ollama warm
-neo-localmcp ollama test
-neo-localmcp ollama unload   # explicit only
-neo-localmcp ollama stop     # only a service started by neo-localmcp
-```
-
 Models may be shared with other agents. neo-localmcp never unloads automatically and does not alter Ollama's global parallelism or queue configuration.
-
-## CLI reference
-
-Normal workflow:
-
-```bash
-neo-localmcp context "debug model startup: ensure, warm, status" --repo-root . --token-budget 3000 --max-files 6
-neo-localmcp lookup ensure --repo-root .
-neo-localmcp file neo_localmcp/ollama_client.py --around-line 200 --context-lines 20
-neo-localmcp record-change "Fixed model readiness" neo_localmcp/ollama_client.py --repo-root .
-```
-
-Administration remains CLI-only: `doctor`, `where`, `index`, `refresh`, `reindex`, `reset-repo`, `reset-all`, `test-determinism`, `setup`, `set-ollama`, `summarize`, and exact approved `apply-patch`.
-
-The MCP surface includes `prepare_context`, compatibility alias `context_prepare`, `file_excerpts`, `repo_lookup`, `repo_status`, `doctor`, `refresh_index`, `summarize_file`, safe-by-default `apply_patch`, `record_change`, `ollama_status`, and `ollama_ensure`. Patch application defaults to check-only and requires `check_only=false` for an exact developer-approved diff.
 
 ## Verification
 

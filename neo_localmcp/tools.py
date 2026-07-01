@@ -969,7 +969,7 @@ def apply_unified_patch(patch_text: str, repo_root: str = "auto", check_only: bo
     root = repo_root_or_cwd(repo_root)
     if not patch_text.strip():
         return json_out({"ok": False, "error": "patch_text is empty"})
-    with tempfile.NamedTemporaryFile("w", delete=False, suffix=".patch", encoding="utf-8") as tmp:
+    with tempfile.NamedTemporaryFile("w", delete=False, suffix=".patch", encoding="utf-8", newline="") as tmp:
         tmp.write(patch_text)
         patch_path = Path(tmp.name)
     try:

@@ -64,7 +64,17 @@ DEFAULT_CONFIG: dict[str, Any] = {
         # capped signal that does. Off switch lives here, not a hidden env var.
         "record_context_queries": True,
         "task_query_retention": 500,
+        # Retrieval-boost tuning surface (1.0.9, P9g). Promoted from hard-coded
+        # constants in repo_memory.py (RETRIEVAL_BOOST_CAP / RETRIEVAL_BOOST_MIN_SHOWN,
+        # which remain the defaults) so these can be calibrated against real usage
+        # without a code change, the same way retention already is. Defaults are
+        # unchanged pending real multi-session usage data -- a 2026-07-01 live audit
+        # confirmed the mechanism works and is conservative (a boost only appears
+        # after the same task is shown >= min_shown times), so there is no
+        # evidence-based case to move them yet.
         "retrieval_boost_retention_days": 90,
+        "retrieval_boost_cap": 8,
+        "retrieval_boost_min_shown": 3,
     },
     "setup": {
         "install_slash_commands": True,
