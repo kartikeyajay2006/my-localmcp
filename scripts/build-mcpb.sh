@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VERSION="$(sed -n 's/.*__version__\s*=\s*"\([^"]*\)".*/\1/p' "$ROOT/neo_localmcp/__init__.py")"
+VERSION="$(sed -n 's/.*__version__[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$ROOT/neo_localmcp/__init__.py")"
 if [ -z "$VERSION" ]; then
     echo "Could not determine neo-localmcp version from $ROOT/neo_localmcp/__init__.py" >&2
     exit 1
