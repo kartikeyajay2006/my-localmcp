@@ -7,11 +7,14 @@ from .types import (
     OperationResult,
     OperationStatus,
 )
+from .paths import ManagedPaths, UnsafeManagedRoot
 
 __all__ = [
     "DetectedState",
     "InstallStateKind",
+    "ManagedPaths",
     "Operation",
     "OperationResult",
     "OperationStatus",
+    "UnsafeManagedRoot",
 ]
