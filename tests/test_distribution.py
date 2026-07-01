@@ -74,7 +74,7 @@ async def _assert_repo_tools_respond(repo: Path, app_home: Path) -> None:
 
 
 def test_built_mcpb_contains_valid_manifest():
-    bundle = Path(__file__).parents[1] / "packages" / "claude-desktop" / "neo-localmcp.mcpb"
+    bundle = Path(__file__).parents[1] / "packages" / "claude-desktop" / f"neo-localmcp-v{__version__}.mcpb"
     assert bundle.exists()
     with zipfile.ZipFile(bundle) as archive:
         manifest = json.loads(archive.read("manifest.json"))
@@ -88,7 +88,7 @@ def test_built_mcpb_contains_valid_manifest():
 
 def test_built_mcpb_embeds_current_package_bytes():
     root = Path(__file__).parents[1]
-    bundle = root / "packages" / "claude-desktop" / "neo-localmcp.mcpb"
+    bundle = root / "packages" / "claude-desktop" / f"neo-localmcp-v{__version__}.mcpb"
     with zipfile.ZipFile(bundle) as archive:
         names = {name.replace("\\", "/"): name for name in archive.namelist()}
         for source in sorted((root / "neo_localmcp").rglob("*")):
