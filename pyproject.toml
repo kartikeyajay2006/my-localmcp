@@ -7,11 +7,12 @@ name = "neo-localmcp"
 version = "1.0.9"
 description = "Agent-ready deterministic repo context for Claude/Codex with local Ollama-assisted preprocessing."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 authors = [{ name = "neo-localmcp" }]
 license = { text = "MIT" }
 dependencies = [
-  "mcp[cli]>=1.27,<2"
+  "mcp[cli]>=1.27,<2",
+  "psutil>=5.9,<8"
 ]
 
 [project.optional-dependencies]
