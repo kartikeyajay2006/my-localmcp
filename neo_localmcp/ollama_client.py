@@ -13,10 +13,16 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from .config import APP_DIR, load_config, ollama_base_url
+from . import config
+from .config import load_config, ollama_base_url
 
-STATE_PATH = APP_DIR / "ollama-supervisor.json"
-LOCK_PATH = APP_DIR / "ollama-supervisor.lock"
+
+def _state_path() -> Path:
+    return config.cache_path("ollama", "supervisor.json")
+
+
+def _lock_path() -> Path:
+    return config.cache_path("ollama", "supervisor.lock")
 
 
 class SupervisorLockTimeout(RuntimeError):
@@ -31,16 +37,17 @@ class _SupervisorLock:
 
     def __enter__(self) -> "_SupervisorLock":
         deadline = time.monotonic() + self.timeout
-        APP_DIR.mkdir(parents=True, exist_ok=True)
+        lock_path = _lock_path()
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
         while True:
             try:
-                LOCK_PATH.mkdir()
-                (LOCK_PATH / "owner").write_text(f"{os.getpid()}\n{time.time()}\n", encoding="utf-8")
+                lock_path.mkdir()
+                (lock_path / "owner").write_text(f"{os.getpid()}\n{time.time()}\n", encoding="utf-8")
                 return self
             except FileExistsError:
                 try:
-                    if time.time() - LOCK_PATH.stat().st_mtime > max(120, self.timeout * 2):
-                        shutil.rmtree(LOCK_PATH, ignore_errors=True)
+                    if time.time() - lock_path.stat().st_mtime > max(120, self.timeout * 2):
+                        shutil.rmtree(lock_path, ignore_errors=True)
                         continue
                 except OSError:
                     pass
@@ -49,7 +56,7 @@ class _SupervisorLock:
                 time.sleep(0.1)
 
     def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
-        shutil.rmtree(LOCK_PATH, ignore_errors=True)
+        shutil.rmtree(_lock_path(), ignore_errors=True)
 
 
 def _cfg() -> dict[str, Any]:
@@ -81,14 +88,15 @@ def _is_local(base_url: str) -> bool:
 
 def _read_state() -> dict[str, Any]:
     try:
-        return json.loads(STATE_PATH.read_text(encoding="utf-8"))
+        return json.loads(_state_path().read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
 
 
 def _write_state(data: dict[str, Any]) -> None:
-    APP_DIR.mkdir(parents=True, exist_ok=True)
-    STATE_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    path = _state_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
 def _request_json(
@@ -246,7 +254,7 @@ def ensure(model: str | None = None, purpose: str = "ranking", auto_start: bool 
     failed_at = float(state.get("failed_at") or 0)
     if failed_at and time.time() - failed_at < cooldown:
         return {"ok": False, "state": "unreachable", "action": "circuit_open", "base_url": ollama_base_url(), "model": _model_for(purpose, model), "retry_after_seconds": round(cooldown - (time.time() - failed_at), 1)}
-    APP_DIR.mkdir(parents=True, exist_ok=True)
+    config.cache_dir().mkdir(parents=True, exist_ok=True)
     try:
         with _SupervisorLock(float(cfg.get("startup_timeout_seconds", 20)) + float(cfg.get("warm_timeout_seconds", 90))):
             current = status(model, purpose)

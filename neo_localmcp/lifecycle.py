@@ -45,7 +45,7 @@ def _servers_root() -> Path:
     # Resolved dynamically from config.APP_DIR (not bound at import) so it follows
     # both the NEO_LOCALMCP_HOME env used by spawned servers and the test fixture's
     # APP_DIR override, without any caller needing to remember to patch it.
-    return config.APP_DIR / "servers"
+    return config.process_registry_dir() / "servers"
 
 
 def _servers_dir() -> Path:

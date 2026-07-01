@@ -123,7 +123,7 @@ async def _spawn_register_and_stop(app_home: Path, env: dict) -> None:
     from mcp.client.stdio import stdio_client
 
     params = StdioServerParameters(command=sys.executable, args=["-m", "neo_localmcp.server"], env=env)
-    servers_dir = app_home / "servers"
+    servers_dir = app_home / "cache" / "processes" / "servers"
 
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:
