@@ -1,3 +1,3 @@
 """neo-localmcp: deterministic repository context MCP."""
 
-__version__ = "1.0.4"
+__version__ = "1.0.8"
