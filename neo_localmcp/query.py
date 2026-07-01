@@ -137,6 +137,16 @@ def normalize_query(task: str) -> dict[str, Any]:
     }
 
 
+def term_key(interpreted: dict[str, Any]) -> str:
+    """Stable, order-independent key for a query's term set.
+
+    Used to associate retrieval-memory feedback with the same query intent
+    across calls, regardless of phrasing order or casing.
+    """
+    terms = {str(t).strip().lower() for t in (interpreted.get("strong_terms") or []) + (interpreted.get("weak_terms") or []) if str(t).strip()}
+    return "|".join(sorted(terms))
+
+
 def classify_path(path: str) -> str:
     p = path.replace("\\", "/")
     lower = p.lower()

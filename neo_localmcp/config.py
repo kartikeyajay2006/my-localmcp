@@ -54,6 +54,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "memory": {
         "db_path": str(APP_DIR / "repo-context.sqlite"),
+        # Phase 3 (1.0.6): query/result metadata recording is observational only and
+        # does not influence ranking by itself; see retrieval_boost for the separate,
+        # capped signal that does. Off switch lives here, not a hidden env var.
+        "record_context_queries": True,
+        "task_query_retention": 500,
+        "retrieval_boost_retention_days": 90,
     },
     "setup": {
         "install_slash_commands": True,

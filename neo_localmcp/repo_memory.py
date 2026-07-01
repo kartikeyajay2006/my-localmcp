@@ -2,14 +2,20 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from .config import db_path, load_config
 
-INDEXER_VERSION = "1.0.0"
+INDEXER_VERSION = "1.1.0"
 from .utils import extract_symbols, git_info, language_for_path, read_text_file, rel, repo_id, repo_root_or_cwd, safe_path, scan_repo_files, sha256_file, simple_terms
+
+# Retrieval-memory tuning (1.0.6, P4). Kept intentionally conservative: structural
+# evidence (heading/milestone matches in tools.py) always scores far higher than
+# these caps, so memory can only nudge near-ties, never override a real match.
+RETRIEVAL_BOOST_CAP = 8
+RETRIEVAL_BOOST_MIN_SHOWN = 3
 
 
 def now_iso() -> str:
@@ -91,6 +97,32 @@ def init_db(conn: sqlite3.Connection) -> None:
             paths_json TEXT NOT NULL,
             created_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS retrieval_boost (
+            repo_id TEXT NOT NULL,
+            term_key TEXT NOT NULL,
+            path TEXT NOT NULL,
+            heading_name TEXT NOT NULL DEFAULT '',
+            shown_count INTEGER NOT NULL DEFAULT 0,
+            followed_count INTEGER NOT NULL DEFAULT 0,
+            corrected_count INTEGER NOT NULL DEFAULT 0,
+            last_updated_at TEXT NOT NULL,
+            PRIMARY KEY(repo_id, term_key, path, heading_name)
+        );
+        CREATE TABLE IF NOT EXISTS section_summaries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            repo_id TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            heading_name TEXT NOT NULL,
+            start_line INTEGER NOT NULL,
+            end_line INTEGER NOT NULL,
+            summary TEXT,
+            keywords TEXT,
+            source_hash TEXT NOT NULL,
+            model TEXT,
+            prompt_version TEXT,
+            created_at TEXT NOT NULL,
+            UNIQUE(repo_id, file_path, heading_name)
+        );
         CREATE VIRTUAL TABLE IF NOT EXISTS repo_fts USING fts5(repo_id, kind, target, body);
         """
     )
@@ -102,6 +134,13 @@ def init_db(conn: sqlite3.Connection) -> None:
     }.items():
         if column not in existing_columns:
             conn.execute(f"ALTER TABLE files ADD COLUMN {column} {definition}")
+    existing_tq_columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(task_queries)").fetchall()}
+    for column, definition in {
+        "retrieval_id": "TEXT",
+        "term_key": "TEXT",
+    }.items():
+        if column not in existing_tq_columns:
+            conn.execute(f"ALTER TABLE task_queries ADD COLUMN {column} {definition}")
     conn.commit()
 
 
@@ -294,6 +333,8 @@ def status(repo_root: str | Path | None = None) -> dict[str, Any]:
     indexed_files = counts.get("files", 0)
     eligible = int(get_repo_meta(conn, rid, "eligible_files") or indexed_files)
     complete = get_repo_meta(conn, rid, "index_complete") == "true"
+    last_query_row = conn.execute("SELECT MAX(created_at) AS m FROM task_queries WHERE repo_id=?", (rid,)).fetchone()
+    memory_cfg = load_config().get("memory", {})
     return {
         "repo_root": str(root), "repo_id": rid, "db_path": str(db_path()), "counts": counts,
         "indexed_files": indexed_files, "eligible_files": eligible, "index_complete": complete,
@@ -301,6 +342,9 @@ def status(repo_root: str | Path | None = None) -> dict[str, Any]:
         "branch_changed": indexed_branch is not None and indexed_branch != str(git.get("branch") or ""),
         "indexer_version": INDEXER_VERSION, "stored_indexer_version": previous_indexer_version,
         "indexer_rebuild_recommended": previous_indexer_version != INDEXER_VERSION,
+        "query_recording_enabled": bool(memory_cfg.get("record_context_queries", True)),
+        "recorded_queries": counts.get("task_queries", 0),
+        "last_query_recorded_at": (last_query_row["m"] if last_query_row else None),
     }
 
 
@@ -418,12 +462,224 @@ def store_summary(path: str, summary: str, model: str, prompt_version: str, repo
     return {"path": relative, "source_hash": source_hash, "model": model, "prompt_version": prompt_version}
 
 
-def record_task_query(query: str, result: dict[str, Any], repo_root: str | Path | None = None) -> None:
+def _prune_task_queries(conn: sqlite3.Connection, rid: str, keep: int) -> None:
+    if keep <= 0:
+        return
+    conn.execute(
+        "DELETE FROM task_queries WHERE repo_id=? AND id NOT IN (SELECT id FROM task_queries WHERE repo_id=? ORDER BY id DESC LIMIT ?)",
+        (rid, rid, keep),
+    )
+
+
+def _bump_shown(conn: sqlite3.Connection, rid: str, term_key: str, path: str, heading_name: str | None) -> None:
+    conn.execute(
+        """
+        INSERT INTO retrieval_boost(repo_id, term_key, path, heading_name, shown_count, followed_count, corrected_count, last_updated_at)
+        VALUES(?, ?, ?, ?, 1, 0, 0, ?)
+        ON CONFLICT(repo_id, term_key, path, heading_name) DO UPDATE SET
+            shown_count = shown_count + 1,
+            last_updated_at = excluded.last_updated_at
+        """,
+        (rid, term_key, path, heading_name or "", now_iso()),
+    )
+
+
+def _bump_feedback(conn: sqlite3.Connection, rid: str, term_key: str, path: str, heading_name: str | None, *, followed: bool) -> None:
+    conn.execute(
+        """
+        INSERT INTO retrieval_boost(repo_id, term_key, path, heading_name, shown_count, followed_count, corrected_count, last_updated_at)
+        VALUES(?, ?, ?, ?, 0, ?, ?, ?)
+        ON CONFLICT(repo_id, term_key, path, heading_name) DO UPDATE SET
+            followed_count = followed_count + excluded.followed_count,
+            corrected_count = corrected_count + excluded.corrected_count,
+            last_updated_at = excluded.last_updated_at
+        """,
+        (rid, term_key, path, heading_name or "", int(followed), int(not followed), now_iso()),
+    )
+
+
+def record_task_query(
+    query: str,
+    repo_root: str | Path | None = None,
+    *,
+    retrieval_id: str,
+    term_key: str,
+    sections: list[dict[str, Any]],
+    tool_version: str,
+) -> None:
+    """Observationally record one context_prepare call and its shown sections.
+
+    This is P4 (1.0.6): recording is config-gated (memory.record_context_queries,
+    default on) rather than the old hidden env var, and only compact metadata is
+    stored (terms/sections/version), not the full response payload. Each shown
+    section also bumps its retrieval_boost 'shown' count, which is the baseline
+    that record_retrieval_feedback later compares follow-up file_excerpts pulls
+    against. This function only records; it never changes ranking by itself.
+    """
     root = repo_root_or_cwd(repo_root)
+    cfg = load_config().get("memory", {})
+    if not bool(cfg.get("record_context_queries", True)):
+        return
     conn = connect()
     rid = upsert_repo(conn, root)
-    conn.execute("INSERT INTO task_queries(repo_id, query, result_json, created_at) VALUES(?, ?, ?, ?)", (rid, query, json.dumps(result), now_iso()))
+    compact = {"terms": term_key.split("|") if term_key else [], "sections": sections, "tool_version": tool_version}
+    conn.execute(
+        "INSERT INTO task_queries(repo_id, query, result_json, retrieval_id, term_key, created_at) VALUES(?, ?, ?, ?, ?, ?)",
+        (rid, query, json.dumps(compact), retrieval_id, term_key, now_iso()),
+    )
+    for section in sections:
+        path = section.get("path")
+        if path:
+            _bump_shown(conn, rid, term_key, str(path), section.get("matched_name"))
+    _prune_task_queries(conn, rid, int(cfg.get("task_query_retention", 500)))
     conn.commit()
+
+
+def record_retrieval_feedback(retrieval_id: str, repo_root: str | Path | None, requested_ranges: list[dict[str, Any]]) -> dict[str, Any]:
+    """Associate a follow-up file_excerpts pull with an earlier prepare_context call.
+
+    P5 (1.0.6) implicit success signal: if the requested range overlaps the section
+    that was suggested for that path, that's positive evidence (followed); a pull
+    elsewhere in the same file is weak correction evidence. A path the agent never
+    asked about again is not scored either way (silence is not treated as negative,
+    since token budgets and task flow make that ambiguous).
+    """
+    root = repo_root_or_cwd(repo_root)
+    conn = connect()
+    rid = repo_id(root)
+    row = conn.execute(
+        "SELECT term_key, result_json FROM task_queries WHERE repo_id=? AND retrieval_id=? ORDER BY id DESC LIMIT 1",
+        (rid, retrieval_id),
+    ).fetchone()
+    if not row:
+        return {"ok": False, "error": f"unknown retrieval_id: {retrieval_id}"}
+    term_key = str(row["term_key"] or "")
+    sections = (json.loads(row["result_json"] or "{}") or {}).get("sections") or []
+    by_path = {str(s.get("path")): s for s in sections if s.get("path")}
+    updates: list[dict[str, Any]] = []
+    for item in requested_ranges:
+        path = str(item.get("path") or "")
+        suggestion = by_path.get(path)
+        if not suggestion:
+            continue
+        start = int(item.get("start_line") or 1)
+        end = int(item.get("end_line") or start)
+        s_start = int(suggestion.get("start_line") or 1)
+        s_end = int(suggestion.get("end_line") or s_start)
+        overlap = not (end < s_start or start > s_end)
+        _bump_feedback(conn, rid, term_key, path, suggestion.get("matched_name"), followed=overlap)
+        updates.append({"path": path, "overlap": overlap})
+    conn.commit()
+    return {"ok": True, "retrieval_id": retrieval_id, "updates": updates}
+
+
+def get_boost_map(repo_root: str | Path | None, term_key: str, paths: list[str]) -> dict[tuple[str, str], int]:
+    """Batched, capped, recency-gated memory boost lookup for a set of candidate paths.
+
+    Returns {(path, heading_name_or_empty): boost}. A row only contributes once it
+    has been shown at least RETRIEVAL_BOOST_MIN_SHOWN times (avoids single-sample
+    noise) and only if it was last touched within the configured retention window
+    (a simple recency gate standing in for true time-decay: stale signals go cold
+    rather than being weighted down gradually). The result is additive net
+    evidence (followed - corrected), capped at RETRIEVAL_BOOST_CAP so memory can
+    only ever nudge ranking among near-ties, never outrank structural evidence.
+    """
+    if not paths or not term_key:
+        return {}
+    root = repo_root_or_cwd(repo_root)
+    rid = repo_id(root)
+    conn = connect()
+    retention_days = int(load_config().get("memory", {}).get("retrieval_boost_retention_days", 90))
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
+    placeholders = ",".join("?" for _ in paths)
+    rows = conn.execute(
+        f"""
+        SELECT path, heading_name, shown_count, followed_count, corrected_count
+        FROM retrieval_boost
+        WHERE repo_id=? AND term_key=? AND path IN ({placeholders}) AND last_updated_at >= ?
+        """,
+        (rid, term_key, *paths, cutoff),
+    ).fetchall()
+    out: dict[tuple[str, str], int] = {}
+    for row in rows:
+        if int(row["shown_count"]) < RETRIEVAL_BOOST_MIN_SHOWN:
+            continue
+        net = int(row["followed_count"]) - int(row["corrected_count"])
+        boost = max(0, min(RETRIEVAL_BOOST_CAP, net))
+        if boost:
+            out[(str(row["path"]), str(row["heading_name"] or ""))] = boost
+    return out
+
+
+def find_heading_symbol(path: str, heading: str, repo_root: str | Path | None = None) -> dict[str, Any] | None:
+    root = repo_root_or_cwd(repo_root)
+    p = safe_path(path, root)
+    conn = connect()
+    rid = upsert_repo(conn, root)
+    relative = rel(p, root)
+    row = conn.execute(
+        "SELECT name, signature, start_line, end_line FROM symbols WHERE repo_id=? AND file_path=? AND kind='heading' AND name=? ORDER BY start_line LIMIT 1",
+        (rid, relative, heading),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def get_section_summary(path: str, heading_name: str, repo_root: str | Path | None = None) -> dict[str, Any] | None:
+    root = repo_root_or_cwd(repo_root)
+    p = safe_path(path, root)
+    conn = connect()
+    rid = repo_id(root)
+    relative = rel(p, root)
+    row = conn.execute(
+        "SELECT * FROM section_summaries WHERE repo_id=? AND file_path=? AND heading_name=?",
+        (rid, relative, heading_name),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def store_section_summary(
+    path: str,
+    heading_name: str,
+    start_line: int,
+    end_line: int,
+    summary: str,
+    keywords: str,
+    model: str,
+    prompt_version: str,
+    repo_root: str | Path | None = None,
+) -> dict[str, Any]:
+    """Cache one Ollama-generated section summary, keyed by whole-file content hash.
+
+    P6 (1.0.6): this is enrichment only. It adds supplemental FTS-searchable text
+    (kind='summary') so a query can find a section by paraphrase/keyword; it never
+    supplies or overrides a heading's start_line/end_line, which stay authoritative
+    from the deterministic extractor in utils.extract_markdown_headings.
+    """
+    root = repo_root_or_cwd(repo_root)
+    p = safe_path(path, root)
+    conn = connect()
+    rid = upsert_repo(conn, root)
+    relative = rel(p, root)
+    source_hash = sha256_file(p)
+    fts_target = f"{relative}:{heading_name}"
+    conn.execute("DELETE FROM repo_fts WHERE repo_id=? AND kind='summary' AND target=?", (rid, fts_target))
+    conn.execute(
+        """
+        INSERT INTO section_summaries(repo_id, file_path, heading_name, start_line, end_line, summary, keywords, source_hash, model, prompt_version, created_at)
+        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(repo_id, file_path, heading_name) DO UPDATE SET
+            start_line=excluded.start_line, end_line=excluded.end_line, summary=excluded.summary,
+            keywords=excluded.keywords, source_hash=excluded.source_hash, model=excluded.model,
+            prompt_version=excluded.prompt_version, created_at=excluded.created_at
+        """,
+        (rid, relative, heading_name, start_line, end_line, summary[:4000], keywords[:1000], source_hash, model, prompt_version, now_iso()),
+    )
+    conn.execute(
+        "INSERT INTO repo_fts(repo_id, kind, target, body) VALUES(?, 'summary', ?, ?)",
+        (rid, fts_target, f"{relative} {heading_name}\n{summary[:4000]}\n{keywords[:1000]}"),
+    )
+    conn.commit()
+    return {"path": relative, "heading": heading_name, "source_hash": source_hash, "model": model, "prompt_version": prompt_version}
 
 
 def record_change(summary: str, paths: list[str], repo_root: str | Path | None = None) -> dict[str, Any]:
@@ -472,7 +728,7 @@ def reset_repo(repo_root: str | Path | None = None) -> dict[str, Any]:
     conn = connect()
     rid = repo_id(root)
     counts_before: dict[str, int] = {}
-    for table in ["files", "symbols", "task_queries", "change_events", "repo_metadata", "repos"]:
+    for table in ["files", "symbols", "task_queries", "change_events", "retrieval_boost", "section_summaries", "repo_metadata", "repos"]:
         if table == "repos":
             row = conn.execute("SELECT COUNT(*) AS n FROM repos WHERE id=?", (rid,)).fetchone()
         else:
@@ -482,6 +738,8 @@ def reset_repo(repo_root: str | Path | None = None) -> dict[str, Any]:
     conn.execute("DELETE FROM symbols WHERE repo_id=?", (rid,))
     conn.execute("DELETE FROM task_queries WHERE repo_id=?", (rid,))
     conn.execute("DELETE FROM change_events WHERE repo_id=?", (rid,))
+    conn.execute("DELETE FROM retrieval_boost WHERE repo_id=?", (rid,))
+    conn.execute("DELETE FROM section_summaries WHERE repo_id=?", (rid,))
     conn.execute("DELETE FROM repo_metadata WHERE repo_id=?", (rid,))
     conn.execute("DELETE FROM repo_fts WHERE repo_id=?", (rid,))
     conn.execute("DELETE FROM repos WHERE id=?", (rid,))

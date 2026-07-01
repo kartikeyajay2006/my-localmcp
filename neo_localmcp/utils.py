@@ -192,7 +192,50 @@ def repo_id(root: Path) -> str:
     return f"{label[:80]}-{digest}"
 
 
+def extract_markdown_headings(text: str) -> list[dict[str, Any]]:
+    """Return ATX headings as addressable section symbols.
+
+    Each heading spans from its own line to just before the next heading of
+    equal-or-higher level (or EOF), giving prose docs the same line-range
+    addressability code symbols already have. Headings inside fenced code blocks
+    are ignored so example markdown does not create phantom sections.
+    """
+    lines = text.splitlines()
+    found: list[dict[str, Any]] = []
+    fence: str | None = None  # active code-fence marker ('```' or '~~~')
+    for idx, line in enumerate(lines, start=1):
+        stripped = line.strip()
+        if fence is not None:
+            if stripped.startswith(fence):
+                fence = None
+            continue
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            fence = stripped[:3]
+            continue
+        # CommonMark: 4+ leading spaces is an indented code block, not a heading.
+        if len(line) - len(line.lstrip(" ")) >= 4:
+            continue
+        m = re.match(r"^(#{1,6})\s+(.+?)\s*#*\s*$", stripped)
+        if not m:
+            continue
+        name = m.group(2).strip()
+        if name:
+            found.append({"level": len(m.group(1)), "name": name[:300], "signature": stripped[:300], "start_line": idx})
+    total = len(lines)
+    rows: list[dict[str, Any]] = []
+    for i, h in enumerate(found):
+        end = total
+        for nxt in found[i + 1:]:
+            if nxt["level"] <= h["level"]:
+                end = nxt["start_line"] - 1
+                break
+        rows.append({"kind": "heading", "name": h["name"], "signature": h["signature"], "start_line": h["start_line"], "end_line": max(h["start_line"], end)})
+    return rows[:400]
+
+
 def extract_symbols(text: str, language: str) -> list[dict[str, Any]]:
+    if language == "markdown":
+        return extract_markdown_headings(text)
     rows: list[dict[str, Any]] = []
     lines = text.splitlines()
     patterns: list[tuple[str, str]] = []
