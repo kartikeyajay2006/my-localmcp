@@ -34,6 +34,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "temperature": 0.1,
         "num_ctx": 32768,
         "fast_num_ctx": 8192,
+        # 1.0.7 (P7a): hard cap on a section summary's generation length. Covers both
+        # the summary and keywords portions of one response; plenty for "1-2 sentences
+        # + up to 8 keywords" while bounding worst-case latency if the model ignores
+        # the length instruction in the prompt.
+        "section_summary_num_predict": 400,
         "keep_alive": "30m",
         "auto_start_local": True,
     },

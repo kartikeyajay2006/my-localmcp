@@ -275,7 +275,7 @@ def unload(model: str | None = None, purpose: str = "ranking") -> dict[str, Any]
     return {"ok": code == 200, "state": "model_cold" if code == 200 else "failed", "action": "unloaded" if code == 200 else "unload_failed", "model": chosen, "error": payload.get("error")}
 
 
-def chat(prompt: str, model: str | None = None, purpose: str = "summary") -> dict[str, Any]:
+def chat(prompt: str, model: str | None = None, purpose: str = "summary", num_predict: int | None = None) -> dict[str, Any]:
     cfg = _cfg()
     chosen = _model_for(purpose, model)
     readiness = ensure(chosen, purpose)
@@ -283,9 +283,15 @@ def chat(prompt: str, model: str | None = None, purpose: str = "summary") -> dic
     timeout_seconds = int(cfg.get("fast_timeout_seconds", 60) if purpose in {"ranking", "query"} else cfg.get("summary_timeout_seconds", 200))
     if not readiness.get("ok"):
         return {"ok": False, "model": chosen, "purpose": purpose, "error": readiness.get("error") or readiness.get("state"), "timed_out": readiness.get("state") == "timed_out", "timeout_seconds": timeout_seconds, "ollama_status": readiness}
+    options: dict[str, Any] = {"temperature": float(cfg.get("temperature", 0.1)), "num_ctx": int(cfg.get("fast_num_ctx", 8192) if purpose in {"ranking", "query"} else cfg.get("num_ctx", 32768))}
+    if num_predict is not None:
+        # Bounds worst-case generation length/latency. Without this a model that
+        # ignores a length instruction in the prompt (e.g. "keywords: at most 8")
+        # can run to the model's own max output before returning at all.
+        options["num_predict"] = int(num_predict)
     body = {
         "model": chosen, "prompt": prompt, "stream": False,
-        "options": {"temperature": float(cfg.get("temperature", 0.1)), "num_ctx": int(cfg.get("fast_num_ctx", 8192) if purpose in {"ranking", "query"} else cfg.get("num_ctx", 32768))},
+        "options": options,
         "keep_alive": str(cfg.get("keep_alive", "30m")),
     }
     started = time.monotonic()
