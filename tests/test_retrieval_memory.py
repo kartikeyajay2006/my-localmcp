@@ -177,6 +177,37 @@ def test_boost_below_min_shown_threshold_stays_zero(tmp_path, isolated_config):
     assert boost_map == {}
 
 
+def test_min_shown_and_cap_are_config_overridable(tmp_path, isolated_config):
+    """1.0.9 (P9g): memory.retrieval_boost_min_shown / retrieval_boost_cap override the
+    module-constant defaults so the boost can be calibrated without a code change."""
+    from neo_localmcp import config
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _seed_repo(repo)
+    repo_memory.index_repo(str(repo), force=True)
+    conn = repo_memory.connect()
+    rid = repo_memory.repo_id(repo)
+    # shown=2 (below the default min_shown of 3), net evidence of 20 (above default cap 8).
+    conn.execute(
+        "INSERT INTO retrieval_boost(repo_id, term_key, path, heading_name, shown_count, followed_count, corrected_count, last_updated_at) VALUES(?,?,?,?,?,?,?,?)",
+        (rid, "beta|rollup|widget", "docs/plan.md", "m9.2 beta widget rollup", 2, 20, 0, repo_memory.now_iso()),
+    )
+    conn.commit()
+
+    # Defaults: shown=2 < min_shown(3) -> no boost at all.
+    assert repo_memory.get_boost_map(repo, "beta|rollup|widget", ["docs/plan.md"]) == {}
+
+    # Lower min_shown to 2 and raise cap to 15 via config: now the row contributes,
+    # capped at the new ceiling (net 20 -> 15), proving both overrides take effect.
+    cfg = config.load_config()
+    cfg["memory"]["retrieval_boost_min_shown"] = 2
+    cfg["memory"]["retrieval_boost_cap"] = 15
+    config.save_config(cfg)
+    boost_map = repo_memory.get_boost_map(repo, "beta|rollup|widget", ["docs/plan.md"])
+    assert boost_map == {("docs/plan.md", "m9.2 beta widget rollup"): 15}
+
+
 def test_boost_outside_retention_window_is_ignored(tmp_path, isolated_config):
     from datetime import datetime, timedelta, timezone
 

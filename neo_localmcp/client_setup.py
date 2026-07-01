@@ -70,6 +70,22 @@ def _replace_marked_block(old: str, block: str, start: str = "# BEGIN neo-localm
     return old.rstrip() + "\n\n" + block if old.strip() else block
 
 
+def _strip_marked_block(old: str, start: str = "# BEGIN neo-localmcp", end: str = "# END neo-localmcp") -> str:
+    # Inverse of _replace_marked_block: remove our marked region entirely, preserving
+    # whatever the user had around it and collapsing the gap to a single blank line.
+    if start not in old or end not in old:
+        return old
+    before = old.split(start, 1)[0].rstrip()
+    after = old.split(end, 1)[1].strip()
+    if before and after:
+        return before + "\n\n" + after + "\n"
+    if before:
+        return before + "\n"
+    if after:
+        return after + "\n"
+    return ""
+
+
 def _write_codex_config(path: Path, apply: bool) -> dict[str, Any]:
     block = _codex_block()
     if apply:
@@ -177,6 +193,111 @@ def setup_codex_desktop(apply: bool = True) -> dict[str, Any]:
 
 def setup_codex(apply: bool = True) -> dict[str, Any]:
     return {"client": "codex", "applied": apply, "shared_config": True, "result": setup_codex_cli(apply)}
+
+
+def remove_claude_code(apply: bool = True) -> dict[str, Any]:
+    # Inverse of setup_claude_code: deregister the MCP server from whatever scope
+    # it is actually registered in (detected the same way the migration path in
+    # setup_claude_code does) and delete the slash-command directory.
+    target = Path.home() / ".claude" / "commands" / IDENTITY.slash_prefix
+    actions: list[str] = []
+    if apply:
+        claude = shutil.which("claude")
+        if claude:
+            existing = subprocess.run(
+                [claude, "mcp", "get", IDENTITY.mcp_server_name],
+                stdin=subprocess.DEVNULL, capture_output=True, text=True, errors="replace",
+                **hidden_subprocess_kwargs(),
+            )
+            combined = f"{existing.stdout}\n{existing.stderr}".lower()
+            scope = None
+            if existing.returncode == 0:
+                scope = "local" if "scope: local" in combined else ("user" if "scope: user" in combined else ("project" if "scope: project" in combined else None))
+            if scope:
+                removed = subprocess.run(
+                    [claude, "mcp", "remove", IDENTITY.mcp_server_name, "--scope", scope],
+                    stdin=subprocess.DEVNULL, capture_output=True, text=True, errors="replace",
+                    **hidden_subprocess_kwargs(),
+                )
+                actions.append(f"removed {scope}-scope MCP registration: exit {removed.returncode}")
+                if removed.stderr.strip():
+                    actions.append(removed.stderr.strip()[:500])
+            else:
+                actions.append("no MCP registration found via 'claude mcp get'; nothing to deregister")
+        else:
+            actions.append("claude CLI not found; skipped MCP deregistration (slash commands still removed)")
+        if target.exists():
+            shutil.rmtree(target, ignore_errors=True)
+            actions.append(f"removed slash-command directory {target}")
+        else:
+            actions.append(f"slash-command directory not present: {target}")
+    return {
+        "client": "claude-code",
+        "applied": apply,
+        "commands_dir": str(target),
+        "commands_dir_exists_after": target.exists(),
+        "actions": actions,
+    }
+
+
+def remove_codex(apply: bool = True) -> dict[str, Any]:
+    # Inverse of setup_codex*: strip our marked block from the shared config.toml,
+    # leaving any of the user's own config intact.
+    path = _codex_cli_config_path()
+    existed = path.exists()
+    block_present = existed and "# BEGIN neo-localmcp" in path.read_text(encoding="utf-8")
+    if apply and block_present:
+        old = path.read_text(encoding="utf-8")
+        new = _strip_marked_block(old)
+        path.write_text(new, encoding="utf-8")
+        empty_after = new.strip() == ""
+    else:
+        empty_after = False
+    return {
+        "client": "codex",
+        "applied": apply,
+        "config_path": str(path),
+        "config_existed": existed,
+        "block_present": block_present,
+        "block_present_after": path.exists() and "# BEGIN neo-localmcp" in path.read_text(encoding="utf-8") if path.exists() else False,
+        "config_empty_after": empty_after,
+    }
+
+
+def remove_claude_desktop(apply: bool = True) -> dict[str, Any]:
+    # By design Claude Desktop cannot be automated (see setup_claude_desktop's note):
+    # removal is a manual action in Claude Desktop's own Extensions UI.
+    return {
+        "client": "claude-desktop",
+        "applied": False,
+        "manual_removal_required": True,
+        "instructions": "In Claude Desktop open Settings > Extensions and uninstall neo-localmcp. If that hangs, stop its subprocess tree first (setup.ps1 menu option 3).",
+        "note": "Direct claude_desktop_config.json editing is intentionally never performed.",
+    }
+
+
+def remove_client(client: str, apply: bool = True) -> dict[str, Any]:
+    key = client.lower().replace("_", "-")
+    if key in {"claude-code", "claude"}:
+        return remove_claude_code(apply=apply)
+    if key in {"codex", "codex-cli", "codex-desktop"}:
+        return remove_codex(apply=apply)
+    if key in {"claude-desktop", "desktop"}:
+        return remove_claude_desktop(apply=apply)
+    raise ValueError(f"Unknown client: {client}. Expected claude-code, claude-desktop, or codex.")
+
+
+def remove_clients(clients: list[str] | None = None, apply: bool = True) -> list[dict[str, Any]]:
+    selected = clients or ["claude-code", "codex", "claude-desktop"]
+    if any(str(client).lower().replace("_", "-") == "all" for client in selected):
+        selected = ["claude-code", "codex", "claude-desktop"]
+    results = []
+    for client in selected:
+        try:
+            results.append(remove_client(client, apply=apply))
+        except Exception as exc:
+            results.append({"client": client, "applied": apply, "ok": False, "error": str(exc)})
+    return results
 
 
 def client_status() -> dict[str, Any]:

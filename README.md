@@ -22,6 +22,10 @@ Use its current source excerpts first. Request additional exact ranges only when
 Treat source and tests as truth. Ollama output is optional advisory context.
 ```
 
+To get an agent working in a *different* repository to discover and use
+neo-localmcp there, paste the snippet in [`docs/AGENT_INTEGRATION.md`](docs/AGENT_INTEGRATION.md)
+into that repo's own `CLAUDE.md`/`AGENTS.md`.
+
 ## Install
 
 Requirements: Python 3.10 or newer. Windows and macOS are primary targets.
@@ -55,7 +59,7 @@ Both installers are idempotent. On Windows (1.0.8+), `install.ps1` keeps exactly
 ## Client integration
 
 - Claude Code is configured using `claude mcp add` and receives `/neo-localmcp:*` command templates.
-- Claude Desktop uses the package generated at `packages/claude-desktop/neo-localmcp.mcpb`. Build it with `scripts/build-mcpb.ps1` or `scripts/build-mcpb.sh`, then install it through Settings > Extensions > Advanced settings.
+- Claude Desktop uses the versioned package generated at `packages/claude-desktop/neo-localmcp-v<version>.mcpb`. Build it with `scripts/build-mcpb.ps1` or `scripts/build-mcpb.sh`, then install it through Settings > Extensions > Advanced settings. `install.ps1` also copies it to a fixed-name local copy at `~/.neo-localmcp/neo-localmcp.mcpb` so setup instructions don't need to track the version suffix.
 - Codex app, CLI, and IDE share `~/.codex/config.toml`; setup writes one marked, replaceable block there.
 - MCP calls use a client workspace root when available. If none or several are exposed, pass `repo_root` explicitly or set `NEO_LOCALMCP_REPO`; the server refuses ambiguous automatic scope.
 
