@@ -33,6 +33,8 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 neo-localmcp setup --client all
 ```
 
+Or, on Windows, run `powershell -ExecutionPolicy Bypass -File .\setup.ps1` for an interactive wizard that detects current state and walks through install/upgrade/uninstall instead of requiring flags.
+
 macOS:
 
 ```bash
@@ -40,7 +42,7 @@ macOS:
 neo-localmcp setup --client all
 ```
 
-Both installers are idempotent. Upgrades create side-by-side environments under `~/.neo-localmcp/venvs` and repoint stable CLI/MCP launchers, so an active desktop client cannot lock the upgrade target. Use `-DryRun`/`--dry-run`, `-Repair`/`--repair`, or `-Upgrade`/`--upgrade`. Uninstalling preserves configuration and repository memory unless the remove-data option is supplied:
+Both installers are idempotent. On Windows (1.0.8+), `install.ps1` keeps exactly one virtual environment per version at `~/.neo-localmcp/.venv-nlm-v<version>`: it asks any running server to exit gracefully before touching venv files (rather than relying on side-by-side directories to dodge a locked upgrade target), removes any other version's venv, and skips the rebuild entirely if the target version is already installed. Pass `-DryRun` to preview, or `-Repair` to force a rebuild of the currently-targeted version. macOS's `install.sh` still uses the pre-1.0.8 side-by-side layout under `~/.neo-localmcp/venvs` pending parity (tracked in `docs/1.0.7_PLAN.md`). Uninstalling preserves configuration and repository memory unless the remove-data option is supplied:
 
 ```powershell
 .\uninstall.ps1
