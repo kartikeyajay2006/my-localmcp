@@ -198,7 +198,24 @@ def ollama_ensure(model: Optional[str] = None, purpose: str = "ranking") -> str:
 
 
 def main() -> None:
-    mcp.run()
+    # Register this server and start the stop-file watcher before entering the
+    # blocking mcp.run() loop, so `neo-localmcp stop` (and the upgrade flow) can
+    # ask it to exit gracefully instead of relying on an external force-kill.
+    from . import __version__
+    from . import lifecycle
+    from .config import ensure_config
+
+    ensure_config()
+    try:
+        lifecycle.register_server(__version__)
+        lifecycle.start_stop_watcher()
+    except Exception:
+        # Never let lifecycle bookkeeping prevent the server from actually serving.
+        pass
+    try:
+        mcp.run()
+    finally:
+        lifecycle.unregister_server()
 
 
 if __name__ == "__main__":

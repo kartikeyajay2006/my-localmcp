@@ -46,6 +46,27 @@ def cmd_serve(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_servers(args: argparse.Namespace) -> int:
+    from . import lifecycle
+    print(json.dumps({"servers": lifecycle.list_servers(prune=True)}, indent=2))
+    return 0
+
+
+def cmd_stop(args: argparse.Namespace) -> int:
+    from . import lifecycle
+    targets = lifecycle.resolve_stop_targets(pid=args.pid, all_servers=args.all, match_executable=args.match_executable)
+    if not targets:
+        print(json.dumps({
+            "ok": True,
+            "stopped": [],
+            "note": "No matching running server. Specify --pid, --all, or --match-executable.",
+        }, indent=2))
+        return 0
+    result = lifecycle.stop_servers(targets, timeout=args.timeout, allow_force=not args.no_force)
+    print(json.dumps(result, indent=2))
+    return 0 if result.get("ok") else 1
+
+
 def cmd_setup(args: argparse.Namespace) -> int:
     ensure_config()
     results = setup_clients(args.client, apply=not args.dry_run)
@@ -126,7 +147,7 @@ def cmd_ollama(args: argparse.Namespace) -> int:
 
 
 def cmd_summarize(args: argparse.Namespace) -> int:
-    print_json_text(tools.summarize_file(args.path, args.repo_root, args.model))
+    print_json_text(tools.summarize_file(args.path, args.repo_root, args.model, args.heading))
     return 0
 
 
@@ -150,6 +171,14 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("doctor", help="Full health check and command inventory."); p.add_argument("--repo-root", default="auto"); p.set_defaults(func=cmd_doctor)
     p = sub.add_parser("where", help="Show install/config paths and the repo currently being analyzed."); p.add_argument("--repo-root", default="auto"); p.set_defaults(func=cmd_where)
     p = sub.add_parser("serve", help="Run the MCP server over stdio."); p.set_defaults(func=cmd_serve)
+    p = sub.add_parser("servers", help="List running neo-localmcp servers registered under this app home."); p.set_defaults(func=cmd_servers)
+    p = sub.add_parser("stop", help="Ask running server(s) to exit gracefully via the stop-file watcher; force only as a last resort.")
+    p.add_argument("--pid", type=int, default=None, help="Stop one server by PID.")
+    p.add_argument("--all", action="store_true", help="Stop every registered running server (including other clients').")
+    p.add_argument("--match-executable", default=None, help="Stop servers whose interpreter path contains this substring, e.g. the venvs root being upgraded.")
+    p.add_argument("--timeout", type=float, default=12.0, help="Seconds to wait for graceful exit before escalating.")
+    p.add_argument("--no-force", action="store_true", help="Never escalate to force-termination; report a timeout instead.")
+    p.set_defaults(func=cmd_stop)
     p = sub.add_parser("config", help="Print config path."); p.set_defaults(func=cmd_config)
     p = sub.add_parser("clients", help="Show detected Claude/Codex client config paths and MCP blocks."); p.set_defaults(func=cmd_clients)
 
@@ -224,8 +253,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--format", choices=["text", "json", "mcp_text", "mcp_json"], default="text", help="CLI output format. MCP tools use bounded mcp_text by default in V1.")
     p.set_defaults(func=cmd_context)
 
-    p = sub.add_parser("summarize", help="Summarize one file with Ollama and store it as working context.")
+    p = sub.add_parser("summarize", help="Summarize one file, or one Markdown heading section of it, with Ollama and store it as working context.")
     p.add_argument("path"); p.add_argument("--repo-root", default="auto"); p.add_argument("--model")
+    p.add_argument("--heading", default=None, help="Summarize only this Markdown heading's section instead of the whole file.")
     p.set_defaults(func=cmd_summarize)
 
     p = sub.add_parser("apply-patch", help="Apply an exact approved unified diff; never generates code.")
