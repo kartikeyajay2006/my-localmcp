@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 import tempfile
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -13,13 +13,12 @@ from . import repo_memory
 from .config import CONFIG_PATH, ensure_config, load_config, save_config
 from .identity import IDENTITY
 from .ollama_client import chat, ensure as ensure_ollama, ping, start_service, status as ollama_state, stop_service, unload as unload_ollama, warm as warm_ollama
-from .query import category_boost, classify_path, extract_file_references, normalize_query
-from .utils import read_text_file, rel, repo_root_or_cwd, rg_search, safe_path, run_command
+from .query import category_boost, classify_path, extract_file_references, normalize_query, term_key as compute_term_key
+from .utils import read_text_file, rel, repo_root_or_cwd, rg_search, safe_path, sha256_file, run_command
 
 
 LINE_HINT_MAX_PER_FILE = 5
 READ_FIRST_MAX = 5
-CONTEXT_QUERY_RECORD_ENV = "NEO_LOCALMCP_RECORD_CONTEXT_QUERIES"
 
 
 def json_out(data: Any) -> str:
@@ -249,6 +248,8 @@ def _mcp_tiny_context_text(data: dict[str, Any]) -> str:
     lines.append("neo-localmcp context_prepare")
     lines.append(f"version: {__version__}")
     lines.append(f"repo_root: {data.get('repo_root')}")
+    if data.get("retrieval_id"):
+        lines.append(f"retrieval_id: {data.get('retrieval_id')} (pass to file_excerpts to record whether you used the suggested section)")
     if git:
         lines.append(f"git: branch={git.get('branch')} commit={str(git.get('commit') or '')[:12]} dirty={git.get('dirty_files')}")
     lines.append(f"intent: {interp.get('intent')} policy: {interp.get('ranking_policy')}")
@@ -291,7 +292,8 @@ def _mcp_tiny_context_text(data: dict[str, Any]) -> str:
         lines.append("")
         lines.append("CURRENT SOURCE EXCERPTS")
         for excerpt in excerpts:
-            lines.append(f"--- {excerpt.get('path')}:{excerpt.get('start_line')}-{excerpt.get('end_line')} sha256={str(excerpt.get('sha256') or '')[:12]} ---")
+            section = f" §{excerpt.get('matched_name')}" if excerpt.get("matched_name") else ""
+            lines.append(f"--- {excerpt.get('path')}:{excerpt.get('start_line')}-{excerpt.get('end_line')}{section} sha256={str(excerpt.get('sha256') or '')[:12]} ---")
             lines.append(str(excerpt.get("text") or ""))
     metrics = data.get("retrieval_metrics") or {}
     if metrics:
@@ -368,19 +370,21 @@ def model_status() -> str:
 
 
 def doctor(repo_root: str = "auto") -> str:
+    from . import lifecycle
     cfg = load_config()
     checks = {
         "config_exists": CONFIG_PATH.exists(),
         "db_open": True,
         "ollama": ping(),
         "repo": repo_memory.status(repo_root),
+        "running_servers": lifecycle.list_servers(prune=True),
         "rules": [
             "neo-localmcp retrieves, indexes, summarizes, ranks, and applies exact approved patches.",
             "neo-localmcp does not generate source code or make engineering decisions.",
             "Claude/Codex reason and create exact patches.",
             "Context lookup is deterministic by default; Ollama ranking is opt-in with --ollama-rank or MCP use_ollama=true.",
         ],
-        "commands": ["init", "where", "doctor", "status", "clients", "setup", "serve", "index", "reindex", "reset-repo", "reset-all", "test-determinism", "refresh", "lookup", "file", "context", "summarize", "apply-patch", "record-change", "model status"],
+        "commands": ["init", "where", "doctor", "status", "clients", "setup", "serve", "servers", "stop", "index", "reindex", "reset-repo", "reset-all", "test-determinism", "refresh", "lookup", "file", "context", "summarize", "apply-patch", "record-change", "model status"],
         "config": {"ollama_base_url": cfg.get("ollama", {}).get("base_url"), "summary_model": cfg.get("ollama", {}).get("summary_model"), "db_path": cfg.get("memory", {}).get("db_path")},
     }
     return json_out({"ok": True, **checks})
@@ -490,8 +494,15 @@ def file_context(path: str, repo_root: str = "auto", around_line: int | None = N
     return json_out(repo_memory.file_context(path, repo_root, around_line=around_line, context_lines=context_lines))
 
 
-def file_excerpts(ranges: list[dict[str, Any]], repo_root: str = "auto", max_chars: int = 20_000) -> str:
-    return json_out(repo_memory.file_excerpts(ranges, repo_root, max_chars=max_chars))
+def file_excerpts(ranges: list[dict[str, Any]], repo_root: str = "auto", max_chars: int = 20_000, retrieval_id: str | None = None) -> str:
+    result = repo_memory.file_excerpts(ranges, repo_root, max_chars=max_chars)
+    if retrieval_id:
+        # P4/P5 (1.0.6): an explicit follow-up pull is the implicit success signal
+        # for the earlier prepare_context call that returned this retrieval_id.
+        # This only ever feeds the capped retrieval_boost table; it cannot change
+        # what was already returned here.
+        result["retrieval_feedback"] = repo_memory.record_retrieval_feedback(retrieval_id, repo_root, ranges)
+    return json_out(result)
 
 
 def _resolve_reference(ref: str, indexed_files: list[str]) -> list[str]:
@@ -558,6 +569,65 @@ def _term_score(term: str, interpreted: dict[str, Any], strong: int, weak: int) 
     return strong if term in interpreted.get("strong_terms", []) else weak
 
 
+_MILESTONE_RE = re.compile(r"^[A-Za-z]\d+(?:\.\d+)*$")
+# Cap a single section excerpt so one long section cannot starve the shared budget.
+_MAX_SECTION_LINES = 80
+
+
+def _heading_words(name: str) -> set[str]:
+    return set(re.findall(r"[A-Za-z0-9_.]+", str(name or "").lower()))
+
+
+def _heading_match_score(term: str, sym: dict[str, Any], interpreted: dict[str, Any]) -> tuple[int, str]:
+    """Score a heading-symbol candidate hit.
+
+    An exact milestone token (e.g. ``f4.7``) appearing in a heading is the
+    strongest document signal available and must beat incidental code-symbol
+    collisions on generic words like ``render``.
+    """
+    base = _term_score(term, interpreted, 16, 10)
+    words = _heading_words(sym.get("name", ""))
+    term_l = term.lower()
+    if _MILESTONE_RE.match(term) and term_l in words:
+        return base + 60, " [milestone]"
+    if term_l in words:
+        is_strong = term in interpreted.get("strong_terms", [])
+        return base + (25 if is_strong else 12), " [heading-term]"
+    return base, ""
+
+
+def _best_heading_section(path: str, symbol_hits: list[dict[str, Any]], interpreted: dict[str, Any]) -> dict[str, Any] | None:
+    """Pick the heading section in ``path`` that best matches the query terms.
+
+    This is what lets a filename-anchored or free-text doc query land on the
+    correct section instead of line 1. Returns the winning heading symbol, or
+    ``None`` when no heading's text overlaps the query.
+    """
+    strong = [t.lower() for t in interpreted.get("strong_terms", [])]
+    weak = [t.lower() for t in interpreted.get("weak_terms", [])]
+    best: dict[str, Any] | None = None
+    best_key: tuple[int, int] = (0, 0)
+    for sym in symbol_hits:
+        if sym.get("kind") != "heading" or sym.get("file_path") != path or not sym.get("start_line"):
+            continue
+        words = _heading_words(sym.get("name", ""))
+        score = 0
+        for t in strong:
+            if t in words:
+                score += 30 if _MILESTONE_RE.match(t) else 12
+        for t in weak:
+            if t in words:
+                score += 6
+        if score <= 0:
+            continue
+        # Highest score wins; ties break to the earliest section for stability.
+        key = (score, -int(sym.get("start_line")))
+        if key > best_key:
+            best_key = key
+            best = sym
+    return best
+
+
 def context_prepare(task: str, repo_root: str = "auto", max_files: int | None = None, limit: int = 6, use_ollama: bool = False, model: str | None = None, output_format: str = "json", token_budget: int = 3000) -> str:
     root = repo_root_or_cwd(repo_root)
     status_data = repo_memory.status(root)
@@ -597,7 +667,12 @@ def context_prepare(task: str, repo_root: str = "auto", max_files: int | None = 
         for sym in lookup_data.get("symbols", []):
             symbol_hits.append(sym)
             path = sym.get("file_path")
-            if path:
+            if not path:
+                continue
+            if sym.get("kind") == "heading":
+                score, label = _heading_match_score(term, sym, interpreted)
+                _add_candidate(candidates, path, f"heading '{sym.get('name')}' line {sym.get('start_line')}{label}", score, intent)
+            else:
                 _add_candidate(candidates, path, f"symbol '{sym.get('name')}' line {sym.get('start_line')}", _term_score(term, interpreted, 16, 10), intent)
     batch_terms = terms[:20]
     if batch_terms:
@@ -635,6 +710,23 @@ def context_prepare(task: str, repo_root: str = "auto", max_files: int | None = 
     for resolved in sorted(explicit_paths):
         _add_candidate(candidates, resolved, "explicit path in task", 120, intent, allow_reason_line_hint=False)
 
+    # Retrieval-memory boost (1.0.6, P4/P5): a small, capped, recency-gated nudge
+    # from prior sessions' implicit feedback (see repo_memory.get_boost_map). This
+    # runs after all structural scoring above and is bounded well below any
+    # structural signal (heading milestone match alone is +60), so memory can only
+    # break near-ties, never override a real structural match.
+    term_key = compute_term_key(interpreted)
+    if term_key and candidates:
+        boost_map = repo_memory.get_boost_map(root, term_key, list(candidates.keys()))
+        if boost_map:
+            for path, item in candidates.items():
+                section = _best_heading_section(path, symbol_hits, interpreted)
+                heading_name = section.get("name") if section else None
+                boost = boost_map.get((path, ""), 0) + (boost_map.get((path, heading_name), 0) if heading_name else 0)
+                if boost:
+                    item["score"] += boost
+                    item["reasons"].append(f"memory boost (+{boost}) from prior retrievals")
+
     for item in candidates.values():
         item["reasons"] = sorted(item.get("reasons", []))
         item["line_hints"] = _compact_line_hints(item.get("line_hints", []))
@@ -668,7 +760,20 @@ def context_prepare(task: str, repo_root: str = "auto", max_files: int | None = 
         item["line_hints"] = _compact_line_hints(item.get("line_hints", []))
 
     ranges: list[dict[str, Any]] = []
+    section_by_path: dict[str, dict[str, Any]] = {}
+    sections_for_memory: list[dict[str, Any]] = []
     for item in read_first:
+        # Prefer the matched heading's real section range so a long doc opens at
+        # the relevant section, not its first line. Fall back to symbol/hint
+        # centering, then the file opening.
+        section = _best_heading_section(item["path"], symbol_hits, interpreted)
+        if section:
+            start = max(1, int(section["start_line"]))
+            end = min(max(start, int(section["end_line"])), start + _MAX_SECTION_LINES - 1)
+            ranges.append({"path": item["path"], "start_line": start, "end_line": end})
+            section_by_path[item["path"]] = {"match_kind": "heading", "matched_name": section.get("name"), "start_line": start, "end_line": end}
+            sections_for_memory.append({"path": item["path"], "start_line": start, "end_line": end, "match_kind": "heading", "matched_name": section.get("name"), "score": item.get("score")})
+            continue
         center = None
         for term in interpreted.get("strong_terms", []):
             exact = next((sym for sym in symbol_hits if sym.get("file_path") == item["path"] and str(sym.get("name", "")).lower() == str(term).lower()), None)
@@ -677,12 +782,21 @@ def context_prepare(task: str, repo_root: str = "auto", max_files: int | None = 
                 break
         hint_numbers = [int(match.group(1)) for hint in item.get("line_hints", []) if (match := re.search(r"(\d+)", hint))]
         center = center or (hint_numbers[0] if hint_numbers else 1)
-        ranges.append({"path": item["path"], "start_line": max(1, center - 20), "end_line": center + 19})
+        range_start, range_end = max(1, center - 20), center + 19
+        ranges.append({"path": item["path"], "start_line": range_start, "end_line": range_end})
+        sections_for_memory.append({"path": item["path"], "start_line": range_start, "end_line": range_end, "match_kind": "fallback", "matched_name": None, "score": item.get("score")})
     excerpt_data = repo_memory.file_excerpts(ranges, root, max_chars=max(1000, min(int(token_budget), 8000) * 4))
+    for excerpt in excerpt_data.get("excerpts", []):
+        section = section_by_path.get(excerpt.get("path"))
+        if section:
+            excerpt["match_kind"] = section["match_kind"]
+            excerpt["matched_name"] = section["matched_name"]
+    retrieval_id = uuid.uuid4().hex[:16]
     deterministic = {
         "task": task,
         "repo_root": str(root),
         "mode": "agent_ready_natural_context",
+        "retrieval_id": retrieval_id,
         "repo_status": status_data,
         "interpreted_query": interpreted,
         "candidate_files": ranked,
@@ -729,9 +843,10 @@ Candidate files, scores, reasons, and line hints:
 """.strip()
         ollama_result = chat(prompt, model=model, purpose="ranking")
 
-    result = {**deterministic, "ollama_requested": bool(use_ollama), "ollama_ranking": ollama_result, "ollama_timing": _format_model_timing(ollama_result), "ollama_status": (ollama_result or {}).get("ollama_status")}
-    if os.environ.get(CONTEXT_QUERY_RECORD_ENV, "").strip().lower() in {"1", "true", "yes", "on"}:
-        repo_memory.record_task_query(task, result, root)
+    ranking_full_status = (ollama_result or {}).get("ollama_status")
+    ranking_result_for_nesting = {**ollama_result, "ollama_status": _slim_status_for_nesting(ranking_full_status)} if ollama_result else ollama_result
+    result = {**deterministic, "ollama_requested": bool(use_ollama), "ollama_ranking": ranking_result_for_nesting, "ollama_timing": _format_model_timing(ollama_result), "ollama_status": ranking_full_status}
+    repo_memory.record_task_query(task, root, retrieval_id=retrieval_id, term_key=term_key, sections=sections_for_memory, tool_version=__version__)
     return _format(result, output_format)
 
 
@@ -739,8 +854,90 @@ def prepare_context(task: str, repo_root: str = "auto", token_budget: int = 3000
     return context_prepare(task, repo_root, max_files=None, limit=max_files, use_ollama=use_ollama, model=model, output_format=output_format, token_budget=token_budget)
 
 
-def summarize_file(path: str, repo_root: str = "auto", model: str | None = None) -> str:
+def _cap_keyword_terms(raw: str, max_terms: int = 8) -> str:
+    """Cap by comma-separated term count, not character count.
+
+    A generation-length cap (see ollama_client.chat's num_predict) is the primary
+    defense against a runaway response, but this is the belt-and-suspenders layer:
+    even a response that stays under the token cap could still cram far more than
+    the requested "at most 8" terms into a shorter space. Enforce the actual shape
+    regardless of what the model produced.
+    """
+    terms = [t.strip() for t in raw.split(",") if t.strip()]
+    return ", ".join(terms[:max_terms])
+
+
+def _split_summary_keywords(text: str) -> tuple[str, str]:
+    """Best-effort split of a 'summary: ...\\nkeywords: ...' style Ollama response."""
+    summary_match = re.search(r"summary\s*:\s*(.+?)(?:\n\s*keywords\s*:|\Z)", text, re.IGNORECASE | re.DOTALL)
+    keywords_match = re.search(r"keywords\s*:\s*(.+)", text, re.IGNORECASE | re.DOTALL)
+    summary = (summary_match.group(1).strip() if summary_match else text.strip())[:2000]
+    keywords_raw = (keywords_match.group(1).strip() if keywords_match else "")[:4000]
+    keywords = _cap_keyword_terms(keywords_raw)
+    return summary, keywords
+
+
+def _slim_status_for_nesting(status: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Drop the verbose installed_models list from a second, nested copy of an Ollama
+    status dict. The top-level ollama_status key in the same response keeps the full
+    list; embedding it again inside ollama_summary/ollama_ranking is pure duplication."""
+    if not status:
+        return status
+    return {k: v for k, v in status.items() if k != "installed_models"}
+
+
+def _summarize_section(path: str, heading: str, root: Path, model: str | None) -> str:
+    sym = repo_memory.find_heading_symbol(path, heading, root)
+    if not sym:
+        return json_out({"ok": False, "error": f"heading not found: {heading}", "path": path})
+    current_hash = sha256_file(safe_path(path, root))
+    cached = repo_memory.get_section_summary(path, heading, root)
+    if cached and cached.get("source_hash") == current_hash and (not model or cached.get("model") == model):
+        return json_out({
+            "file": cached.get("file_path"), "heading": heading, "cached": True,
+            "start_line": cached.get("start_line"), "end_line": cached.get("end_line"),
+            "summary": cached.get("summary"), "keywords": cached.get("keywords"),
+            "model": cached.get("model"), "prompt_version": cached.get("prompt_version"),
+        })
+    excerpt_data = repo_memory.file_excerpts([{"path": path, "start_line": sym["start_line"], "end_line": sym["end_line"]}], root, max_chars=12_000)
+    section_text = ((excerpt_data.get("excerpts") or [{}])[0]).get("text", "")
+    prompt = f"""
+Summarize this single document section for repository working context. Do not write or suggest source code.
+Return exactly two labeled parts:
+summary: one or two factual sentences describing what this section covers
+keywords: a short comma-separated list of section-specific terms, at most 8
+
+Section heading: {sym.get('signature') or heading}
+Section text:
+{section_text}
+""".strip()
+    num_predict = int(load_config().get("ollama", {}).get("section_summary_num_predict", 400))
+    result = chat(prompt, model=model, purpose="summary", num_predict=num_predict)
+    eval_count = (result.get("raw") or {}).get("eval_count")
+    # Ollama stops generation at exactly num_predict tokens when the cap is what ended
+    # the response rather than the model choosing to stop -- a reliable runaway signal.
+    truncated = bool(result.get("ok") and eval_count is not None and int(eval_count) >= num_predict)
+    stored = None
+    if result.get("ok") and result.get("response") and not truncated:
+        summary_text, keywords_text = _split_summary_keywords(str(result["response"]))
+        stored = repo_memory.store_section_summary(path, heading, int(sym["start_line"]), int(sym["end_line"]), summary_text, keywords_text, str(result.get("model") or model or ""), "section-summary-v1", root)
+    full_status = result.get("ollama_status")
+    result_for_nesting = {**result, "ollama_status": _slim_status_for_nesting(full_status)}
+    return json_out({
+        "file": stored.get("path") if stored else path, "heading": heading, "cached": False, "truncated": truncated,
+        "start_line": sym["start_line"], "end_line": sym["end_line"],
+        "ollama_summary": result_for_nesting, "ollama_timing": _format_model_timing(result), "ollama_status": full_status,
+        "stored": stored,
+    })
+
+
+def summarize_file(path: str, repo_root: str = "auto", model: str | None = None, heading: str | None = None) -> str:
     root = repo_root_or_cwd(repo_root)
+    if heading:
+        # P6 (1.0.6): section-scoped enrichment. This never determines a heading's
+        # line boundaries -- those stay authoritative from the deterministic
+        # extractor -- it only adds cached, keyword-searchable summary text.
+        return _summarize_section(path, heading, root, model)
     p = safe_path(path, root)
     ctx = repo_memory.file_context(rel(p, root), root)
     text = read_text_file(p, int(load_config().get("repo", {}).get("summary_max_chars", 80_000)))
@@ -763,7 +960,9 @@ Current source file:
     result = chat(prompt, model=model, purpose="summary")
     if result.get("ok") and result.get("response"):
         repo_memory.store_summary(rel(p, root), result["response"], str(result.get("model") or model or ""), "file-summary-v1", root)
-    return json_out({"file": rel(p, root), "context": ctx, "ollama_summary": result, "ollama_timing": _format_model_timing(result), "ollama_status": result.get("ollama_status")})
+    full_status = result.get("ollama_status")
+    result_for_nesting = {**result, "ollama_status": _slim_status_for_nesting(full_status)}
+    return json_out({"file": rel(p, root), "context": ctx, "ollama_summary": result_for_nesting, "ollama_timing": _format_model_timing(result), "ollama_status": full_status})
 
 
 def apply_unified_patch(patch_text: str, repo_root: str = "auto", check_only: bool = False) -> str:

@@ -108,11 +108,16 @@ async def context_prepare(task: str, ctx: Context, repo_root: str = "auto", toke
 
 
 @mcp.tool()
-async def file_excerpts(ranges: list[dict[str, Any]], ctx: Context, repo_root: str = "auto", max_chars: int = 20_000) -> str:
-    """Read several exact current-source ranges in one bounded response."""
+async def file_excerpts(ranges: list[dict[str, Any]], ctx: Context, repo_root: str = "auto", max_chars: int = 20_000, retrieval_id: Optional[str] = None) -> str:
+    """Read several exact current-source ranges in one bounded response.
+
+    Pass the retrieval_id from a prior prepare_context call to record whether
+    the pulled range matched what was suggested; this only feeds a capped,
+    observational retrieval-memory signal and never changes what is returned.
+    """
     try:
         root = await _resolve_repo_root(repo_root, ctx)
-        return tools.file_excerpts(ranges, root, max_chars)
+        return tools.file_excerpts(ranges, root, max_chars, retrieval_id)
     except Exception as exc:
         return json.dumps({"ok": False, "error": str(exc)}, indent=2)
 
@@ -163,10 +168,10 @@ async def refresh_index(ctx: Context, repo_root: str = "auto", max_files: Option
 
 
 @mcp.tool()
-async def summarize_file(path: str, ctx: Context, repo_root: str = "auto", model: Optional[str] = None) -> str:
-    """Summarize one exact current file with the configured Ollama summary model and cache it by source hash."""
+async def summarize_file(path: str, ctx: Context, repo_root: str = "auto", model: Optional[str] = None, heading: Optional[str] = None) -> str:
+    """Summarize one exact current file, or one Markdown heading section of it, with the configured Ollama summary model and cache it by source hash."""
     try:
-        return tools.summarize_file(path, await _resolve_repo_root(repo_root, ctx), model)
+        return tools.summarize_file(path, await _resolve_repo_root(repo_root, ctx), model, heading)
     except Exception as exc:
         return json.dumps({"ok": False, "error": str(exc)}, indent=2)
 
