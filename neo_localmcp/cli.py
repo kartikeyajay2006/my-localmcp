@@ -6,7 +6,7 @@ import sys
 from typing import Any
 
 from . import tools
-from .client_setup import client_status, setup_clients
+from .client_setup import client_status, remove_clients, setup_clients
 from .config import CONFIG_PATH, ensure_config
 from .identity import IDENTITY
 
@@ -71,6 +71,12 @@ def cmd_setup(args: argparse.Namespace) -> int:
     ensure_config()
     results = setup_clients(args.client, apply=not args.dry_run)
     print(json.dumps({"ok": True, "product": IDENTITY.product_name, "config_path": str(CONFIG_PATH), "applied": not args.dry_run, "results": results}, indent=2))
+    return 0
+
+
+def cmd_remove_client(args: argparse.Namespace) -> int:
+    results = remove_clients(args.client, apply=not args.dry_run)
+    print(json.dumps({"ok": True, "product": IDENTITY.product_name, "applied": not args.dry_run, "results": results}, indent=2, ensure_ascii=False))
     return 0
 
 
@@ -199,6 +205,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--client", action="append", choices=["all", "claude-code", "claude-desktop", "codex", "codex-cli", "codex-desktop"], help="Client to set up. Repeatable. Defaults to Claude Code, Claude Desktop, Codex CLI, and Codex Desktop.")
     p.add_argument("--dry-run", action="store_true", help="Show what would be written without changing files.")
     p.set_defaults(func=cmd_setup)
+
+    p = sub.add_parser("remove-client", help="Deregister neo-localmcp from supported clients (inverse of setup).")
+    p.add_argument("--client", action="append", choices=["all", "claude-code", "claude-desktop", "codex", "codex-cli", "codex-desktop"], help="Client to deregister. Repeatable. Defaults to Claude Code, Codex, and Claude Desktop.")
+    p.add_argument("--dry-run", action="store_true", help="Show what would be removed without changing files.")
+    p.set_defaults(func=cmd_remove_client)
 
     p = sub.add_parser("set-ollama", help="Set Ollama URL/model defaults.")
     p.add_argument("--base-url"); p.add_argument("--summary-model"); p.add_argument("--fast-model"); p.add_argument("--num-ctx", type=int)

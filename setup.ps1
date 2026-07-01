@@ -153,6 +153,90 @@ function Invoke-StopDesktopExtension {
     Write-Host "Settings > Extensions > Uninstall normally." -ForegroundColor Green
 }
 
+function Get-ClientStatus([string]$Cmd) {
+    # Reuses client_setup.py's client_status() (exposed as `neo-localmcp clients`)
+    # rather than re-deriving paths here -- this wizard must never drift from what
+    # the actual setup code will do.
+    if (-not (Test-Path $Cmd)) { return $null }
+    try {
+        $json = & $Cmd clients 2>$null
+        if ($LASTEXITCODE -ne 0 -or -not $json) { return $null }
+        return ($json -join "") | ConvertFrom-Json
+    } catch {
+        return $null
+    }
+}
+
+function Show-SurfacePreview([string]$Surface, $Status) {
+    switch ($Surface) {
+        "claude-code" {
+            Write-Host "  Claude Code:"
+            if ($Status) {
+                $entry = $Status.mcp_server_block.PSObject.Properties | Select-Object -First 1
+                Write-Host "    Slash commands  -> $($Status.paths.claude_code_commands.path)"
+                Write-Host "    MCP registration -> claude mcp add --scope user $($entry.Name) -- $($entry.Value.command) (falls back to project scope if the 'claude' CLI isn't found)"
+            } else {
+                Write-Host "    ~/.claude/commands/neo-localmcp/ plus 'claude mcp add --scope user neo-localmcp'"
+            }
+        }
+        "codex" {
+            Write-Host "  Codex CLI/Desktop:"
+            if ($Status) {
+                Write-Host "    $($Status.paths.codex_cli_config.path)  (shared by Codex app, CLI, and IDE -- one marked, replaceable block)"
+            } else {
+                Write-Host "    ~/.codex/config.toml (shared by Codex app, CLI, and IDE)"
+            }
+        }
+        "claude-desktop" {
+            Write-Host "  Claude Desktop:"
+            Write-Host "    Cannot be automated -- install manually from $(Join-Path $AppHome 'neo-localmcp.mcpb') via Settings > Extensions > Advanced settings > Install Extension."
+        }
+    }
+}
+
+function Invoke-ClientSurfaceSelection([string]$Cmd) {
+    Write-Host ""
+    Write-Host "Which client surfaces would you like to set up? (CLI is already installed above.)"
+    Write-Host "  1) Claude Code"
+    Write-Host "  2) Codex CLI/Desktop"
+    Write-Host "  3) Claude Desktop (manual instructions only -- this wizard cannot install it)"
+    Write-Host "  4) All of the above"
+    Write-Host "  5) None / skip"
+    $raw = Read-Host "Enter comma-separated numbers (e.g. 1,2)"
+    $numbers = @($raw -split "[,\s]+" | Where-Object { $_ -match '^\d+$' })
+    if ($numbers.Count -eq 0 -or $numbers -contains "5") {
+        Write-Host "Skipping client registration." -ForegroundColor DarkGray
+        return
+    }
+
+    $surfaces = [System.Collections.Generic.List[string]]::new()
+    if ($numbers -contains "4") {
+        $surfaces.AddRange([string[]]@("claude-code", "codex", "claude-desktop"))
+    } else {
+        if ($numbers -contains "1") { $surfaces.Add("claude-code") }
+        if ($numbers -contains "2") { $surfaces.Add("codex") }
+        if ($numbers -contains "3") { $surfaces.Add("claude-desktop") }
+    }
+    if ($surfaces.Count -eq 0) {
+        Write-Host "No valid selection -- skipping client registration." -ForegroundColor Yellow
+        return
+    }
+
+    $status = Get-ClientStatus -Cmd $Cmd
+    Write-Host ""
+    Write-Host "This will touch:"
+    foreach ($surface in $surfaces) { Show-SurfacePreview -Surface $surface -Status $status }
+    $confirm = Read-Host "Proceed? [Y/n]"
+    if ($confirm -match '^[Nn]') {
+        Write-Host "Cancelled -- no client files were changed." -ForegroundColor DarkGray
+        return
+    }
+
+    $setupArgs = @("setup")
+    foreach ($surface in $surfaces) { $setupArgs += @("--client", $surface) }
+    & $Cmd @setupArgs
+}
+
 function Invoke-Install {
     Write-Host ""
     $venv = Get-InstalledVenv
@@ -183,39 +267,127 @@ function Invoke-Install {
     # changed. Skip the offer only if this looked like a no-op status check, i.e.
     # never actually prompt again mid-loop if the user is just re-checking.
     if (-not $sameVersionAlreadyInstalled -or $repair -match '^[Yy]') {
-        Write-Host ""
-        $registerClients = Read-Host "Register neo-localmcp with Claude Code / Codex now (neo-localmcp setup --client all)? [Y/n]"
-        if ($registerClients -notmatch '^[Nn]') {
-            $cmd = Join-Path $AppHome "bin\neo-localmcp.cmd"
-            if (Test-Path $cmd) { & $cmd setup --client all }
-        }
+        $cmd = Join-Path $AppHome "bin\neo-localmcp.cmd"
+        if (Test-Path $cmd) { Invoke-ClientSurfaceSelection -Cmd $cmd }
     }
 }
 
-function Invoke-Uninstall {
+function Invoke-RemoveClientSurface([string]$Cmd, [string]$Client) {
+    if (-not (Test-Path $Cmd)) {
+        Write-Host "  CLI launcher not found -- cannot deregister $Client (its venv may already be gone; remove client config manually)." -ForegroundColor Yellow
+        return
+    }
+    & $Cmd remove-client --client $Client
+}
+
+function Invoke-UninstallCliState {
+    # Granular keep/delete for everything under ~/.neo-localmcp, replacing the old
+    # single "also delete config + database?" prompt. Each destructive data category
+    # gets its own typed-DELETE gate so nothing irreversible is bundled behind one
+    # blanket confirmation.
     $venv = Get-InstalledVenv
     $legacyVenvs = Join-Path $AppHome "venvs"
     if (-not $venv -and -not (Test-Path $legacyVenvs)) {
-        Write-Host "No CLI install found under $AppHome -- nothing to uninstall." -ForegroundColor DarkGray
+        Write-Host "No CLI install found under $AppHome -- nothing to remove." -ForegroundColor DarkGray
         return
     }
 
-    Show-DesktopExtensionNotice
+    Write-Host ""
+    Write-Host "Choose what to delete under $AppHome (press Enter to accept each default):" -ForegroundColor Cyan
+
+    # Splat via a HASHTABLE, not an array. Array-splatting "-Switch" strings into a
+    # PowerShell script binds them as positional VALUES, not switch parameters, so
+    # every switch is silently dropped and uninstall.ps1 runs on its defaults
+    # (verified: array splat -> RemoveConfig=False; hashtable splat -> True).
+    $switchParams = @{}
+
+    $removeVenv = (Read-Host "  Remove the CLI runtime (venv, bin launchers)? [Y/n]") -notmatch '^[Nn]'
+    if (-not $removeVenv) { $switchParams["KeepVenv"] = $true }
+
+    $removeMcpb = (Read-Host "  Remove the local neo-localmcp.mcpb copy? [Y/n]") -notmatch '^[Nn]'
+    if (-not $removeMcpb) { $switchParams["KeepMcpb"] = $true }
+
+    $removeServers = (Read-Host "  Remove the servers/ registry directory (stale after stop)? [y/N]") -match '^[Yy]'
+    if ($removeServers) { $switchParams["RemoveServers"] = $true }
+
+    $removeConfig = (Read-Host "  Delete config.yaml (your Ollama endpoint/model settings)? [y/N]") -match '^[Yy]'
 
     Write-Host ""
-    Write-Host "This removes the CLI venv, bin launchers, and PATH entry."
-    $removeData = Read-Host "Also delete config.yaml and the repo index/memory database (all indexed repos, retrieval memory, cached summaries)? [y/N]"
-    $wipeData = $removeData -match '^[Yy]'
+    Write-Host "  NOTE: the repo index/memory database is ONE shared file for EVERY repo you" -ForegroundColor Yellow
+    Write-Host "  have ever indexed -- not just this directory. Deleting it wipes all indexes," -ForegroundColor Yellow
+    Write-Host "  retrieval memory, and cached summaries across every repo." -ForegroundColor Yellow
+    $removeDatabase = (Read-Host "  Delete the shared repo index/memory database (repo-context.sqlite)? [y/N]") -match '^[Yy]'
 
-    if ($wipeData) {
-        $confirmed = Confirm-Destructive "This permanently deletes config.yaml and repo-context.sqlite -- every indexed repo, retrieval-memory record, and cached summary. This cannot be undone."
-        if (-not $confirmed) {
-            Write-Host "Cancelled." -ForegroundColor DarkGray
-            return
+    # Per-category typed-DELETE gate for the genuinely destructive data categories.
+    if ($removeConfig) {
+        if (Confirm-Destructive "About to permanently delete config.yaml (custom Ollama endpoint/model settings). It will be recreated with defaults on next use.") {
+            $switchParams["RemoveConfig"] = $true
+        } else {
+            Write-Host "  Keeping config.yaml." -ForegroundColor DarkGray
         }
-        & $UninstallScript -RemoveData
-    } else {
-        & $UninstallScript
+    }
+    if ($removeDatabase) {
+        if (Confirm-Destructive "About to permanently delete repo-context.sqlite -- EVERY indexed repo, all retrieval memory, and all cached summaries across your whole machine. This cannot be undone.") {
+            $switchParams["RemoveDatabase"] = $true
+        } else {
+            Write-Host "  Keeping the repo index/memory database." -ForegroundColor DarkGray
+        }
+    }
+
+    Write-Host ""
+    & $UninstallScript @switchParams
+}
+
+function Invoke-Uninstall {
+    $cmd = Join-Path $AppHome "bin\neo-localmcp.cmd"
+
+    Write-Host ""
+    Write-Host "Which surfaces would you like to uninstall / deregister?"
+    Write-Host "  1) Claude Code (deregister MCP + remove slash commands)"
+    Write-Host "  2) Codex CLI/Desktop (strip its config.toml block)"
+    Write-Host "  3) Claude Desktop (manual -- instructions only)"
+    Write-Host "  4) CLI + local state under ~/.neo-localmcp (venv, config, database, ...)"
+    Write-Host "  5) All of the above"
+    Write-Host "  6) Cancel"
+    $raw = Read-Host "Enter comma-separated numbers (e.g. 1,4)"
+    $numbers = @($raw -split "[,\s]+" | Where-Object { $_ -match '^\d+$' })
+    if ($numbers.Count -eq 0 -or $numbers -contains "6") {
+        Write-Host "Cancelled." -ForegroundColor DarkGray
+        return
+    }
+
+    $doClaudeCode = ($numbers -contains "1") -or ($numbers -contains "5")
+    $doCodex      = ($numbers -contains "2") -or ($numbers -contains "5")
+    $doDesktop    = ($numbers -contains "3") -or ($numbers -contains "5")
+    $doCli        = ($numbers -contains "4") -or ($numbers -contains "5")
+
+    if ($doClaudeCode) {
+        Write-Host ""
+        Write-Host "== Claude Code ==" -ForegroundColor Cyan
+        Invoke-RemoveClientSurface -Cmd $cmd -Client "claude-code"
+    }
+    if ($doCodex) {
+        Write-Host ""
+        Write-Host "== Codex CLI/Desktop ==" -ForegroundColor Cyan
+        Invoke-RemoveClientSurface -Cmd $cmd -Client "codex"
+    }
+    if ($doDesktop) {
+        Write-Host ""
+        Write-Host "== Claude Desktop ==" -ForegroundColor Cyan
+        Show-DesktopExtensionNotice
+        Write-Host "Reminder: if Claude Desktop's own uninstall hangs, run menu option 3" -ForegroundColor DarkGray
+        Write-Host "(Prepare Claude Desktop extension for uninstall) first to free its file locks." -ForegroundColor DarkGray
+    }
+    if ($doCli) {
+        Write-Host ""
+        Write-Host "== CLI + local state ==" -ForegroundColor Cyan
+        # Deregistering the CLI's own bin from clients before deleting the venv avoids
+        # leaving client configs pointing at a launcher that's about to vanish.
+        if (-not $doClaudeCode -or -not $doCodex) {
+            Write-Host "(Note: you are removing the CLI runtime; any client still registered against it" -ForegroundColor DarkGray
+            Write-Host " will point at a missing launcher until you also deregister it above.)" -ForegroundColor DarkGray
+        }
+        Invoke-UninstallCliState
     }
 }
 

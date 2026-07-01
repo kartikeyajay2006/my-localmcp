@@ -14,6 +14,10 @@ from .utils import extract_symbols, git_info, language_for_path, read_text_file,
 # Retrieval-memory tuning (1.0.6, P4). Kept intentionally conservative: structural
 # evidence (heading/milestone matches in tools.py) always scores far higher than
 # these caps, so memory can only nudge near-ties, never override a real match.
+# 1.0.9 (P9g): these are now the *defaults* for the config-overridable
+# memory.retrieval_boost_cap / memory.retrieval_boost_min_shown; get_boost_map reads
+# config and falls back to these. Kept as named constants so tests and callers have
+# a stable default reference.
 RETRIEVAL_BOOST_CAP = 8
 RETRIEVAL_BOOST_MIN_SHOWN = 3
 
@@ -589,7 +593,10 @@ def get_boost_map(repo_root: str | Path | None, term_key: str, paths: list[str])
     root = repo_root_or_cwd(repo_root)
     rid = repo_id(root)
     conn = connect()
-    retention_days = int(load_config().get("memory", {}).get("retrieval_boost_retention_days", 90))
+    mem_cfg = load_config().get("memory", {})
+    retention_days = int(mem_cfg.get("retrieval_boost_retention_days", 90))
+    min_shown = int(mem_cfg.get("retrieval_boost_min_shown", RETRIEVAL_BOOST_MIN_SHOWN))
+    cap = int(mem_cfg.get("retrieval_boost_cap", RETRIEVAL_BOOST_CAP))
     cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
     placeholders = ",".join("?" for _ in paths)
     rows = conn.execute(
@@ -602,10 +609,10 @@ def get_boost_map(repo_root: str | Path | None, term_key: str, paths: list[str])
     ).fetchall()
     out: dict[tuple[str, str], int] = {}
     for row in rows:
-        if int(row["shown_count"]) < RETRIEVAL_BOOST_MIN_SHOWN:
+        if int(row["shown_count"]) < min_shown:
             continue
         net = int(row["followed_count"]) - int(row["corrected_count"])
-        boost = max(0, min(RETRIEVAL_BOOST_CAP, net))
+        boost = max(0, min(cap, net))
         if boost:
             out[(str(row["path"]), str(row["heading_name"] or ""))] = boost
     return out

@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 import sys
 import time
@@ -33,12 +34,12 @@ pytestmark = pytest.mark.skipif(
 REPO_ROOT = Path(__file__).parents[1]
 
 
-def _run_ps1(script: str, app_home: Path, extra_args: list[str] | None = None, timeout: int = 300) -> subprocess.CompletedProcess:
+def _run_ps1(script: str, app_home: Path, extra_args: list[str] | None = None, timeout: int = 300, stdin_text: str | None = None) -> subprocess.CompletedProcess:
     env = {**os.environ, "NEO_LOCALMCP_HOME": str(app_home)}
     args = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(REPO_ROOT / script)]
     if extra_args:
         args.extend(extra_args)
-    return subprocess.run(args, cwd=REPO_ROOT, env=env, capture_output=True, text=True, timeout=timeout)
+    return subprocess.run(args, cwd=REPO_ROOT, env=env, input=stdin_text, capture_output=True, text=True, timeout=timeout)
 
 
 def _installed_cmd(app_home: Path) -> Path:
@@ -186,3 +187,126 @@ def test_repair_flag_forces_rebuild_of_same_version(tmp_path):
     venvs_after = _venv_dirs(app_home)
     assert len(venvs_after) == 1
     assert marker.stat().st_ctime != marker_ctime, "-Repair should have rebuilt the venv"
+
+
+def _seed_full_memory_db(db_path: Path) -> list[tuple]:
+    """Create a realistic repo-context.sqlite with the real full schema (as a db that
+    has already seen use would have) plus two retrieval_boost rows, and return those
+    rows. Uses repo_memory.init_db so the schema can never drift from production."""
+    from neo_localmcp import repo_memory
+
+    seeded = [
+        ("repo-abc", "widget|rollup", "docs/plan.md", "m9.2 beta widget rollup", 7, 5, 1, "2026-06-01T00:00:00+00:00"),
+        ("repo-xyz", "startup|warm", "neo_localmcp/ollama_client.py", "", 4, 4, 0, "2026-06-15T12:30:00+00:00"),
+    ]
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.row_factory = sqlite3.Row
+        repo_memory.init_db(conn)
+        conn.executemany("INSERT INTO retrieval_boost VALUES(?,?,?,?,?,?,?,?)", seeded)
+        conn.commit()
+    finally:
+        conn.close()
+    return seeded
+
+
+def test_retrieval_memory_survives_a_real_venv_upgrade(tmp_path):
+    """1.0.9 (P9g) upgrade-persistence guarantee. The retrieval-boost memory lives in
+    repo-context.sqlite directly under APP_DIR, never inside a versioned venv, and
+    install.ps1's removal sweep only ever targets .venv-nlm-v*/venvs/venv paths. This
+    asserts that never-tested claim: seed retrieval_boost rows, stage a different-version
+    venv so install.ps1 does a real upgrade sweep, install, and prove the rows survive
+    intact.
+
+    Note the guarantee is DATA-level, not file-byte-level: install runs
+    'neo-localmcp init'/'doctor', which legitimately open and write to the db (indexer
+    version, FTS pages, the SQLite header change counter), so the file bytes DO change
+    on every upgrade -- verified live. What must never change is the memory data."""
+    app_home = tmp_path / ".neo-localmcp"
+    app_home.mkdir()
+
+    db = app_home / "repo-context.sqlite"
+    seeded = _seed_full_memory_db(db)
+
+    # Stage a leftover different-version venv so install.ps1 exercises its real
+    # upgrade sweep (removing another version's venv) rather than a fresh install.
+    stale_venv = app_home / ".venv-nlm-v0.0.1"
+    (stale_venv / "Scripts").mkdir(parents=True)
+    (stale_venv / "Scripts" / "python.exe").write_text("stale", encoding="utf-8")
+
+    install = _run_ps1("install.ps1", app_home)
+    assert install.returncode == 0, f"install.ps1 failed:\n{install.stdout}\n{install.stderr}"
+
+    # The stale venv must have been swept and the current one built...
+    assert not stale_venv.exists(), "install.ps1 should have removed the other-version venv"
+    assert _venv_dirs(app_home), "install.ps1 should have built the current-version venv"
+
+    # ...and every seeded retrieval_boost row must survive exactly, none added or lost.
+    assert db.exists(), "the memory database must survive the upgrade"
+    conn = sqlite3.connect(db)
+    try:
+        after = conn.execute(
+            "SELECT repo_id, term_key, path, heading_name, shown_count, followed_count, corrected_count, last_updated_at "
+            "FROM retrieval_boost ORDER BY repo_id"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert [tuple(r) for r in after] == sorted(seeded), "retrieval_boost rows were altered/lost across an upgrade -- memory did not survive"
+
+
+def test_uninstall_granular_switches_keep_and_delete_independently(tmp_path):
+    """1.0.9 (P9f): uninstall.ps1's granular switches must delete/keep each category
+    independently. -KeepVenv -RemoveServers leaves the runtime but clears the
+    registry; a follow-up -RemoveConfig -RemoveDatabase clears the data while the
+    default venv removal proceeds. Config/db are seeded directly so no live server
+    is required."""
+    app_home = tmp_path / ".neo-localmcp"
+
+    install = _run_ps1("install.ps1", app_home)
+    assert install.returncode == 0, f"install.ps1 failed:\n{install.stdout}\n{install.stderr}"
+
+    # Seed the categories the switches act on.
+    (app_home / "config.yaml").write_text("{}", encoding="utf-8")
+    (app_home / "repo-context.sqlite").write_text("db", encoding="utf-8")
+    servers_dir = app_home / "servers"
+    servers_dir.mkdir(exist_ok=True)
+    (servers_dir / "1234.json").write_text("{}", encoding="utf-8")
+
+    # Keep the runtime, clear only the servers/ registry.
+    keep = _run_ps1("uninstall.ps1", app_home, extra_args=["-KeepVenv", "-RemoveServers"])
+    assert keep.returncode == 0, f"granular uninstall failed:\n{keep.stdout}\n{keep.stderr}"
+    assert _venv_dirs(app_home), "-KeepVenv must not remove the venv"
+    assert not servers_dir.exists(), "-RemoveServers must remove the servers/ directory"
+    assert (app_home / "config.yaml").exists(), "config.yaml must be preserved without -RemoveConfig"
+    assert (app_home / "repo-context.sqlite").exists(), "database must be preserved without -RemoveDatabase"
+
+    # Now remove the data categories; venv removal proceeds by default.
+    wipe = _run_ps1("uninstall.ps1", app_home, extra_args=["-RemoveConfig", "-RemoveDatabase"])
+    assert wipe.returncode == 0, f"data uninstall failed:\n{wipe.stdout}\n{wipe.stderr}"
+    assert not _venv_dirs(app_home), "default uninstall must remove the venv"
+    assert not (app_home / "config.yaml").exists(), "-RemoveConfig must delete config.yaml"
+    assert not (app_home / "repo-context.sqlite").exists(), "-RemoveDatabase must delete the database"
+
+
+def test_setup_wizard_uninstall_surface_actually_deletes_selected_data(tmp_path):
+    """1.0.9 (P9f) regression guard for the wizard->uninstall.ps1 splat: setup.ps1
+    must pass the granular switches through as real switch parameters. An earlier
+    cut splatted an array of '-Switch' strings, which PowerShell binds as positional
+    VALUES, silently dropping every switch so a user who typed DELETE to wipe their
+    database had it preserved. Driving the wizard end-to-end (not uninstall.ps1
+    directly) is the only thing that catches that -- the direct-flag test above does
+    not exercise the splat at all."""
+    app_home = tmp_path / ".neo-localmcp"
+    install = _run_ps1("install.ps1", app_home)
+    assert install.returncode == 0, f"install.ps1 failed:\n{install.stdout}\n{install.stderr}"
+    (app_home / "repo-context.sqlite").write_text("db", encoding="utf-8")
+
+    # Menu 2 (Uninstall) -> surface 4 (CLI + local state) -> remove runtime (default)
+    # -> remove mcpb (default) -> remove servers (y) -> delete config (y) -> delete
+    # database (y) -> config DELETE gate -> database DELETE gate -> menu 5 (Exit).
+    stdin_text = "\n".join(["2", "4", "", "", "y", "y", "y", "DELETE", "DELETE", "5"]) + "\n"
+    wizard = _run_ps1("setup.ps1", app_home, stdin_text=stdin_text)
+    assert wizard.returncode == 0, f"setup.ps1 wizard failed:\n{wizard.stdout}\n{wizard.stderr}"
+    assert not _venv_dirs(app_home), "wizard uninstall must remove the venv"
+    assert not (app_home / "config.yaml").exists(), "wizard must delete config.yaml when DELETE is typed"
+    assert not (app_home / "repo-context.sqlite").exists(), "wizard must delete the database when DELETE is typed"
