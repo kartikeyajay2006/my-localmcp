@@ -277,10 +277,32 @@ def ensure(model: str | None = None, purpose: str = "ranking", auto_start: bool 
         return {"ok": False, "state": "busy", "action": "ensure_lock_timeout", "base_url": ollama_base_url(), "model": _model_for(purpose, model)}
 
 
+def unload_model(model: str, timeout: float | None = None) -> dict[str, Any]:
+    """Request Ollama unload a named model via ``keep_alive: 0``. Never raises.
+
+    Connection refused, timeout, missing model, and HTTP error all degrade to a
+    non-``ok`` result instead of propagating, so lifecycle operations (reinstall/
+    uninstall) can treat unload as best-effort and never block on it.
+    """
+    bounded = float(timeout) if timeout is not None else float(_cfg().get("health_timeout_seconds", 5))
+    started = time.monotonic()
+    try:
+        code, payload = _request_json("/api/generate", method="POST", body={"model": model, "prompt": "", "stream": False, "keep_alive": 0}, timeout=bounded)
+    except (TimeoutError, socket.timeout) as exc:
+        return {"ok": False, "model": model, "state": "timed_out", "action": "unload_timed_out", "error": str(exc) or "unload timed out", "elapsed_seconds": round(time.monotonic() - started, 3)}
+    except Exception as exc:
+        return {"ok": False, "model": model, "state": "failed", "action": "unload_failed", "error": str(exc), "elapsed_seconds": round(time.monotonic() - started, 3)}
+    elapsed = round(time.monotonic() - started, 3)
+    if code == 404:
+        return {"ok": False, "model": model, "state": "model_missing", "action": "unload_skipped", "error": payload.get("error") or "model not found", "elapsed_seconds": elapsed}
+    if code != 200:
+        return {"ok": False, "model": model, "state": "failed", "action": "unload_failed", "error": payload.get("error") or f"HTTP {code}", "elapsed_seconds": elapsed}
+    return {"ok": True, "model": model, "state": "model_cold", "action": "unloaded", "elapsed_seconds": elapsed}
+
+
 def unload(model: str | None = None, purpose: str = "ranking") -> dict[str, Any]:
     chosen = _model_for(purpose, model)
-    code, payload = _request_json("/api/generate", method="POST", body={"model": chosen, "prompt": "", "stream": False, "keep_alive": 0}, timeout=float(_cfg().get("health_timeout_seconds", 5)))
-    return {"ok": code == 200, "state": "model_cold" if code == 200 else "failed", "action": "unloaded" if code == 200 else "unload_failed", "model": chosen, "error": payload.get("error")}
+    return unload_model(chosen)
 
 
 def chat(prompt: str, model: str | None = None, purpose: str = "summary", num_predict: int | None = None) -> dict[str, Any]:

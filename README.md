@@ -222,7 +222,7 @@ Before inference, neo-localmcp checks Ollama version, installed models, and runn
 
 States returned to Claude/Codex include `unreachable`, `model_missing`, `model_cold`, `warming`, `ready`, `busy`, `timed_out`, and `failed`. Failures preserve deterministic context. HTTP 503 is treated as busy and does not trigger a restart.
 
-Models may be shared with other agents. neo-localmcp never unloads automatically and does not alter Ollama's global parallelism or queue configuration.
+Models may be shared with other agents. During ordinary MCP operation neo-localmcp never unloads a model automatically and does not alter Ollama's global parallelism or queue configuration. The one exception is the setup lifecycle (`setup_v2.py reinstall`/`uninstall`), which unloads only the models neo-localmcp itself configured — via `keep_alive: 0`, never by stopping the Ollama daemon — before replacing or removing the managed runtime.
 
 ## Verification
 

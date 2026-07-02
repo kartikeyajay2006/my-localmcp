@@ -42,6 +42,12 @@ from .processes import (
     discover_owned_processes,
     stop_owned_processes,
 )
+from .ollama import (
+    ModelUnloadResult,
+    configured_models,
+    unload_model,
+    unload_neo_models,
+)
 
 __all__ = [
     "DetectedState",
@@ -55,6 +61,7 @@ __all__ = [
     "MetadataCorruptError",
     "MetadataError",
     "MetadataMissingError",
+    "ModelUnloadResult",
     "Operation",
     "OperationResult",
     "OperationStatus",
@@ -71,10 +78,13 @@ __all__ = [
     "apply_migration",
     "complete_operation",
     "confirm_full_wipe",
+    "configured_models",
     "detect_state",
     "discover_owned_processes",
     "fail_operation",
     "plan_migration",
     "operation_explanation",
     "stop_owned_processes",
+    "unload_model",
+    "unload_neo_models",
 ]
