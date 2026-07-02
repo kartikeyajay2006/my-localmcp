@@ -454,9 +454,12 @@ def test_client_restore_failure_keeps_runtime_and_fails_visibly(tmp_path):
     assert "promote_candidate" in recorder.calls
     assert not recorder.venv_removed
     assert not recorder.root_deleted
-    # recovery guidance surfaced
+    # recovery guidance surfaced, and points at the real setup_v2 entrypoint
+    # rather than the removed `neo-localmcp setup` command.
     joined = "\n".join(messages).lower()
     assert "recover" in joined or "recovery" in joined
+    assert "setup_v2.py" in joined
+    assert "neo-localmcp setup" not in joined
     # failure recorded in metadata
     state = detect_state(ctx.paths)
     assert state.kind is not InstallStateKind.PARTIAL_OPERATION
