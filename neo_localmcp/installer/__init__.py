@@ -61,6 +61,19 @@ from .clients import (
     verify_registrations,
     write_registrations,
 )
+from .verification import (
+    VerificationCheck,
+    VerificationReport,
+    verify_installation,
+)
+from .operations import (
+    OperationContext,
+    SourceValidationError,
+    delete_managed_root,
+    install,
+    reinstall,
+    uninstall,
+)
 from .runtime import (
     PYTHON_FLOOR,
     CandidateRuntime,
@@ -121,8 +134,17 @@ __all__ = [
     "MetadataMissingError",
     "ModelUnloadResult",
     "Operation",
+    "OperationContext",
     "OperationResult",
     "OperationStatus",
+    "SourceValidationError",
+    "VerificationCheck",
+    "VerificationReport",
+    "delete_managed_root",
+    "install",
+    "reinstall",
+    "uninstall",
+    "verify_installation",
     "OwnedProcess",
     "PRESERVED_MEMORY_MESSAGE",
     "ProcessIdentity",
