@@ -115,8 +115,11 @@ cached by source hash so it's only regenerated when the file changes.
 | `ollama_status` | `model, purpose="ranking"` | Ollama endpoint/model readiness — no mutation. |
 | `ollama_ensure` | `model, purpose="ranking"` | Ensure Ollama and the requested model are ready; never starts a remote service. |
 
-Administration (`index`, `reindex`, `reset-*`, `setup`, `servers`, `stop`, ...)
-is deliberately CLI-only and never exposed as an MCP tool.
+Administration (`index`, `reindex`, `reset-*`, `config clients setup|remove|status`,
+`servers`, `stop`, ...) is deliberately CLI-only and never exposed as an MCP tool.
+No installed `neo-localmcp` command builds, rebuilds, or removes the managed
+runtime itself — that lifecycle work lives in `setup_v2.py` (see below) and the
+`.ps1`/`.sh` installers.
 
 ## Install
 
@@ -126,7 +129,7 @@ Windows:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install.ps1
-neo-localmcp setup --client all
+neo-localmcp config clients setup --client all
 ```
 
 Or, on Windows, run `powershell -ExecutionPolicy Bypass -File .\setup.ps1` for an interactive wizard that detects current state and walks through install/upgrade/uninstall instead of requiring flags.
@@ -135,7 +138,7 @@ macOS:
 
 ```bash
 ./install.sh
-neo-localmcp setup --client all
+neo-localmcp config clients setup --client all
 ```
 
 Both installers are idempotent. On Windows (1.0.8+), `install.ps1` keeps exactly one virtual environment per version at `~/.neo-localmcp/.venv-nlm-v<version>`: it asks any running server to exit gracefully before touching venv files (rather than relying on side-by-side directories to dodge a locked upgrade target), removes any other version's venv, and skips the rebuild entirely if the target version is already installed. Pass `-DryRun` to preview, or `-Repair` to force a rebuild of the currently-targeted version. macOS's `install.sh` still uses the pre-1.0.8 side-by-side layout under `~/.neo-localmcp/venvs` pending parity (tracked in `docs/1.0.7_PLAN.md`). Uninstalling preserves configuration and repository memory unless the remove-data option is supplied:
@@ -147,6 +150,28 @@ Both installers are idempotent. On Windows (1.0.8+), `install.ps1` keeps exactly
 ```bash
 ./uninstall.sh
 ```
+
+### setup_v2.py (in development)
+
+`setup_v2.py` is a new, cross-platform install/reinstall/uninstall entrypoint
+under active development (currently verified on macOS; Windows/Linux parity and
+full documentation land in later tasks). It requires Python 3.12+ and, until
+cross-platform parity is verified, is a preview alongside the `.ps1`/`.sh`
+installers above, not a replacement for them yet:
+
+```bash
+python3 setup_v2.py install                       # install, or update in place; preserves memory/config
+python3 setup_v2.py install --clean --yes          # full wipe + fresh install (destructive; --yes required non-interactively)
+python3 setup_v2.py reinstall                      # replace the managed runtime; never touches durable data
+python3 setup_v2.py uninstall                      # remove the managed runtime only; durable data preserved
+python3 setup_v2.py uninstall --delete-memory --yes # full wipe, no reinstall (destructive; --yes required non-interactively)
+python3 setup_v2.py install --dry-run              # show detected state + ordered action plan; changes nothing
+```
+
+Every subcommand supports `-h`/`--help`. `--clean` and `--delete-memory` are
+destructive (they delete the entire managed root) and require interactive
+confirmation or the explicit `--yes` flag; running one non-interactively
+without `--yes` is a safety refusal (exit code 2) before anything is touched.
 
 ## Quickstart: fresh repo (little or no code yet)
 
