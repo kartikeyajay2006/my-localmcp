@@ -333,7 +333,7 @@ def init() -> str:
         "product": IDENTITY.product_name,
         "config_path": str(path),
         "next": [
-            "Run setup once from anywhere: neo-localmcp setup --client all",
+            "Run client setup once from anywhere: neo-localmcp config clients setup --client all",
             "Then cd into the repo you want analyzed: cd /path/to/your/repo",
             "Index that repo: neo-localmcp index",
             "Ask for context: neo-localmcp context \"debug feature X: KnownSymbol, FileName.cs\"",
@@ -356,7 +356,7 @@ def where(repo_root: str = "auto") -> str:
         "repo_db": str(repo_memory.db_path()),
         "ollama_base_url": cfg.get("ollama", {}).get("base_url"),
         "summary_model": cfg.get("ollama", {}).get("summary_model"),
-        "note": "Run index/context from the repo you want analyzed. Setup can be run once from anywhere.",
+        "note": "Run index/context from the repo you want analyzed. Client setup (neo-localmcp config clients setup) can be run once from anywhere.",
     })
 
 
@@ -384,7 +384,7 @@ def doctor(repo_root: str = "auto") -> str:
             "Claude/Codex reason and create exact patches.",
             "Context lookup is deterministic by default; Ollama ranking is opt-in with --ollama-rank or MCP use_ollama=true.",
         ],
-        "commands": ["init", "where", "doctor", "status", "clients", "setup", "serve", "servers", "stop", "index", "reindex", "reset-repo", "reset-all", "test-determinism", "refresh", "lookup", "file", "context", "summarize", "apply-patch", "record-change", "model status"],
+        "commands": ["init", "where", "doctor", "status", "clients", "config clients setup", "config clients remove", "config clients status", "serve", "servers", "stop", "index", "reindex", "reset-repo", "reset-all", "test-determinism", "refresh", "lookup", "file", "context", "summarize", "apply-patch", "record-change", "model status"],
         "config": {"ollama_base_url": cfg.get("ollama", {}).get("base_url"), "summary_model": cfg.get("ollama", {}).get("summary_model"), "db_path": cfg.get("memory", {}).get("db_path")},
     }
     return json_out({"ok": True, **checks})

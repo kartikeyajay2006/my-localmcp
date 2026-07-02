@@ -67,17 +67,31 @@ def cmd_stop(args: argparse.Namespace) -> int:
     return 0 if result.get("ok") else 1
 
 
-def cmd_setup(args: argparse.Namespace) -> int:
+def cmd_config_clients_setup(args: argparse.Namespace) -> int:
     ensure_config()
     results = setup_clients(args.client, apply=not args.dry_run)
     print(json.dumps({"ok": True, "product": IDENTITY.product_name, "config_path": str(CONFIG_PATH), "applied": not args.dry_run, "results": results}, indent=2))
     return 0
 
 
-def cmd_remove_client(args: argparse.Namespace) -> int:
+def cmd_config_clients_remove(args: argparse.Namespace) -> int:
     results = remove_clients(args.client, apply=not args.dry_run)
     print(json.dumps({"ok": True, "product": IDENTITY.product_name, "applied": not args.dry_run, "results": results}, indent=2, ensure_ascii=False))
     return 0
+
+
+def cmd_config_clients_status(args: argparse.Namespace) -> int:
+    print(json.dumps(client_status(), indent=2, ensure_ascii=False))
+    return 0
+
+
+def cmd_remove_client(args: argparse.Namespace) -> int:
+    # Deprecated one-release compatibility alias for `config clients remove`.
+    print(json.dumps({
+        "deprecated": True,
+        "note": "`remove-client` is deprecated and will be removed in a future release; use `neo-localmcp config clients remove` instead.",
+    }, indent=2))
+    return cmd_config_clients_remove(args)
 
 
 def cmd_config(args: argparse.Namespace) -> int:
@@ -185,8 +199,28 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--timeout", type=float, default=12.0, help="Seconds to wait for graceful exit before escalating.")
     p.add_argument("--no-force", action="store_true", help="Never escalate to force-termination; report a timeout instead.")
     p.set_defaults(func=cmd_stop)
-    p = sub.add_parser("config", help="Print config path."); p.set_defaults(func=cmd_config)
-    p = sub.add_parser("clients", help="Show detected Claude/Codex client config paths and MCP blocks."); p.set_defaults(func=cmd_clients)
+    p = sub.add_parser("config", help="Print config path, or manage client configuration (see 'config clients -h').")
+    p.set_defaults(func=cmd_config)
+    config_sub = p.add_subparsers(dest="config_command", required=False)
+
+    cp = config_sub.add_parser("clients", help="Manage MCP client registrations (setup/remove/status). Registers clients only -- never builds/rebuilds/removes the managed runtime.")
+    clients_sub = cp.add_subparsers(dest="clients_command", required=True)
+
+    csp = clients_sub.add_parser("setup", help="Install MCP config/slash commands for supported clients.")
+    csp.add_argument("--client", action="append", choices=["all", "claude-code", "claude-desktop", "codex", "codex-cli", "codex-desktop"], help="Client to set up. Repeatable. Defaults to Claude Code, Claude Desktop, Codex CLI, and Codex Desktop.")
+    csp.add_argument("--dry-run", action="store_true", help="Show what would be written without changing files.")
+    csp.set_defaults(func=cmd_config_clients_setup)
+
+    crp = clients_sub.add_parser("remove", help="Deregister neo-localmcp from supported clients (inverse of setup).")
+    crp.add_argument("--client", action="append", choices=["all", "claude-code", "claude-desktop", "codex", "codex-cli", "codex-desktop"], help="Client to deregister. Repeatable. Defaults to Claude Code, Codex, and Claude Desktop.")
+    crp.add_argument("--dry-run", action="store_true", help="Show what would be removed without changing files.")
+    crp.set_defaults(func=cmd_config_clients_remove)
+
+    csta = clients_sub.add_parser("status", help="Show detected Claude/Codex client config paths and MCP blocks.")
+    csta.set_defaults(func=cmd_config_clients_status)
+
+    p = sub.add_parser("clients", help="Show detected Claude/Codex client config paths and MCP blocks. Equivalent to 'config clients status'.")
+    p.set_defaults(func=cmd_clients)
 
     p = sub.add_parser("model", help="Model/Ollama helpers.")
     model_sub = p.add_subparsers(dest="model_command", required=True)
@@ -201,12 +235,7 @@ def build_parser() -> argparse.ArgumentParser:
             op.add_argument("--purpose", choices=["ranking", "query", "summary"], default="ranking")
         op.set_defaults(func=cmd_ollama)
 
-    p = sub.add_parser("setup", help="Install MCP config/slash commands for supported clients.")
-    p.add_argument("--client", action="append", choices=["all", "claude-code", "claude-desktop", "codex", "codex-cli", "codex-desktop"], help="Client to set up. Repeatable. Defaults to Claude Code, Claude Desktop, Codex CLI, and Codex Desktop.")
-    p.add_argument("--dry-run", action="store_true", help="Show what would be written without changing files.")
-    p.set_defaults(func=cmd_setup)
-
-    p = sub.add_parser("remove-client", help="Deregister neo-localmcp from supported clients (inverse of setup).")
+    p = sub.add_parser("remove-client", help="Deprecated: use 'config clients remove' instead. Kept as a one-release compatibility alias.")
     p.add_argument("--client", action="append", choices=["all", "claude-code", "claude-desktop", "codex", "codex-cli", "codex-desktop"], help="Client to deregister. Repeatable. Defaults to Claude Code, Codex, and Claude Desktop.")
     p.add_argument("--dry-run", action="store_true", help="Show what would be removed without changing files.")
     p.set_defaults(func=cmd_remove_client)
