@@ -79,6 +79,7 @@ class Recorder:
     remove_runtime_ok: bool = True
     restore_raises: bool = False
     stop_ok: bool = True
+    client_removal_results: tuple[dict[str, Any], ...] = ()
 
     # Side-effect trackers
     venv_removed: bool = False
@@ -140,7 +141,7 @@ class Recorder:
     def remove_active_registrations(self, paths: ManagedPaths, *, apply: bool = True) -> tuple:
         self.record("remove_active_registrations")
         self.active_removed = True
-        return ()
+        return self.client_removal_results
 
     def restore_clients(self, paths, *, server_command, neo_config_path, apply=True) -> tuple:
         self.record("restore_clients")
@@ -463,6 +464,54 @@ def test_client_restore_failure_keeps_runtime_and_fails_visibly(tmp_path):
     # failure recorded in metadata
     state = detect_state(ctx.paths)
     assert state.kind is not InstallStateKind.PARTIAL_OPERATION
+
+
+@pytest.mark.parametrize(
+    ("operation", "destructive_call"),
+    [
+        (lambda ctx: uninstall(ctx), "remove_runtime"),
+        (lambda ctx: uninstall(ctx, delete_memory=True, assume_yes=True), "delete_root"),
+        (lambda ctx: install(ctx, clean=True, assume_yes=True), "delete_root"),
+    ],
+)
+def test_failed_automated_client_removal_aborts_before_destructive_step(
+    tmp_path, operation, destructive_call
+):
+    recorder = Recorder(
+        state=InstallStateKind.HEALTHY,
+        client_removal_results=(
+            {"client": "claude-code", "ok": False, "error": "remove command failed"},
+        ),
+    )
+    ctx = _context(tmp_path, recorder)
+
+    result = operation(ctx)
+
+    assert result.status is OperationStatus.FAILED
+    assert destructive_call not in recorder.calls
+    assert "removed-client-registrations" not in result.actions
+    assert any("claude-code" in warning for warning in result.warnings)
+
+
+def test_manual_client_removal_is_a_warning_not_a_lifecycle_failure(tmp_path):
+    recorder = Recorder(
+        state=InstallStateKind.HEALTHY,
+        client_removal_results=(
+            {
+                "client": "claude-desktop",
+                "ok": False,
+                "manual_removal_required": True,
+                "instructions": "Remove the extension in Claude Desktop.",
+            },
+        ),
+    )
+    ctx = _context(tmp_path, recorder)
+
+    result = uninstall(ctx)
+
+    assert result.status is OperationStatus.SUCCEEDED
+    assert "remove_runtime" in recorder.calls
+    assert any("claude-desktop" in warning for warning in result.warnings)
 
 
 def test_promotion_failure_restores_registrations_and_fails(tmp_path):

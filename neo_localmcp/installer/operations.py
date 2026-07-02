@@ -230,6 +230,45 @@ def _run_migration(ctx: OperationContext, actions: list[str], warnings: list[str
     return False
 
 
+def _remove_active_clients(
+    ctx: OperationContext, actions: list[str], warnings: list[str]
+) -> bool:
+    """Remove automated registrations and surface manual-only cleanup.
+
+    Automated cleanup failures stop the lifecycle before its runtime or managed
+    root is removed. Claude Desktop is intentionally manual-only, so its result
+    remains a visible warning without blocking the lifecycle.
+    """
+    try:
+        results = ctx.remove_active_registrations_fn(ctx.paths)
+    except Exception as exc:  # noqa: BLE001 - convert cleanup crashes to lifecycle failure
+        message = f"Client registration removal failed: {exc}"
+        warnings.append(message)
+        ctx.reporter.error(message)
+        return False
+
+    failed = False
+    for result in results or ():
+        client = str(result.get("client") or "unknown client")
+        if result.get("manual_removal_required"):
+            instructions = str(result.get("instructions") or "Manual removal is required.")
+            message = f"{client}: {instructions}"
+            warnings.append(message)
+            ctx.reporter.warn(message)
+            continue
+        if result.get("ok", True) is False:
+            detail = str(result.get("error") or "automated removal did not complete")
+            message = f"{client} registration removal failed: {detail}"
+            warnings.append(message)
+            ctx.reporter.error(message)
+            failed = True
+
+    if failed:
+        return False
+    actions.append("removed-client-registrations")
+    return True
+
+
 def _build_and_promote(
     ctx: OperationContext, actions: list[str], warnings: list[str]
 ) -> runtime_mod.PromotionResult | None:
@@ -379,7 +418,11 @@ def _install_like(
     # Clean install: destroy the whole validated root, then re-create the layout
     # and record the freshly-selected surfaces (never reuse deleted records).
     if clean:
-        ctx.remove_active_registrations_fn(ctx.paths)
+        if not _remove_active_clients(ctx, actions, warnings):
+            message = "Could not remove active client registrations; clean install aborted."
+            warnings.append(message)
+            fail_operation(ctx.paths, error=message, now=ctx.clock())
+            return _result(operation, OperationStatus.FAILED, actions, warnings)
         ctx.delete_registrations_fn(ctx.paths)
         ctx.delete_root_fn(ctx.paths)
         actions.append("wiped-managed-root")
@@ -502,8 +545,11 @@ def uninstall(
 
     # Remove live client registrations (records retained for a later reinstall
     # unless this is a full wipe, which deletes the whole root anyway).
-    ctx.remove_active_registrations_fn(ctx.paths)
-    actions.append("removed-client-registrations")
+    if not _remove_active_clients(ctx, actions, warnings):
+        message = "Could not remove active client registrations; uninstall aborted."
+        warnings.append(message)
+        fail_operation(ctx.paths, error=message, now=ctx.clock())
+        return _result(Operation.UNINSTALL, OperationStatus.FAILED, actions, warnings)
 
     if delete_memory:
         # Full wipe: delete the entire validated root. No venv-only step, no

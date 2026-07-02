@@ -282,6 +282,8 @@ def remove_claude_code(apply: bool = True) -> dict[str, Any]:
     # setup_claude_code does) and delete the slash-command directory.
     target = Path.home() / ".claude" / "commands" / IDENTITY.slash_prefix
     actions: list[str] = []
+    ok = True
+    error = ""
     if apply:
         claude = shutil.which("claude")
         if claude:
@@ -303,10 +305,17 @@ def remove_claude_code(apply: bool = True) -> dict[str, Any]:
                 actions.append(f"removed {scope}-scope MCP registration: exit {removed.returncode}")
                 if removed.stderr.strip():
                     actions.append(removed.stderr.strip()[:500])
+                if removed.returncode != 0:
+                    ok = False
+                    error = removed.stderr.strip() or removed.stdout.strip() or (
+                        f"claude mcp remove exited {removed.returncode}"
+                    )
             else:
                 actions.append("no MCP registration found via 'claude mcp get'; nothing to deregister")
         else:
             actions.append("claude CLI not found; skipped MCP deregistration (slash commands still removed)")
+            ok = False
+            error = "claude CLI not found; could not verify MCP deregistration"
         if target.exists():
             shutil.rmtree(target, ignore_errors=True)
             actions.append(f"removed slash-command directory {target}")
@@ -314,6 +323,8 @@ def remove_claude_code(apply: bool = True) -> dict[str, Any]:
             actions.append(f"slash-command directory not present: {target}")
     return {
         "client": "claude-code",
+        "ok": ok,
+        "error": error,
         "applied": apply,
         "commands_dir": str(target),
         "commands_dir_exists_after": target.exists(),
@@ -336,6 +347,7 @@ def remove_codex(apply: bool = True) -> dict[str, Any]:
         empty_after = False
     return {
         "client": "codex",
+        "ok": not (apply and block_present and (path.exists() and "# BEGIN neo-localmcp" in path.read_text(encoding="utf-8"))),
         "applied": apply,
         "config_path": str(path),
         "config_existed": existed,
@@ -350,6 +362,7 @@ def remove_claude_desktop(apply: bool = True) -> dict[str, Any]:
     # removal is a manual action in Claude Desktop's own Extensions UI.
     return {
         "client": "claude-desktop",
+        "ok": False,
         "applied": False,
         "manual_removal_required": True,
         "instructions": "In Claude Desktop open Settings > Extensions and uninstall neo-localmcp. If that hangs, stop its subprocess tree first (setup.ps1 menu option 3).",
