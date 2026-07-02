@@ -24,11 +24,26 @@ def test_register_list_unregister_roundtrip(isolated_config):
 
 
 def test_registry_records_executable_for_targeting(isolated_config):
-    lifecycle.register_server("9.9.9")
+    registered = lifecycle.register_server("9.9.9")
     servers = lifecycle.list_servers()
     entry = next(s for s in servers if s["pid"] == os.getpid())
     assert entry["executable"] == sys.executable
+    assert entry["parent_pid"] == os.getppid()
+    assert isinstance(entry["create_time"], float)
+    assert entry["create_time"] > 0
+    assert entry["command_line"]
+    assert entry["source"] == "managed-runtime"
+    assert registered["create_time"] == entry["create_time"]
     lifecycle.unregister_server()
+
+
+def test_list_servers_prunes_reused_pid_identity(isolated_config, monkeypatch):
+    lifecycle.register_server("9.9.9")
+    pid = os.getpid()
+    monkeypatch.setattr(lifecycle, "pid_alive", lambda candidate, create_time=None: False)
+
+    assert lifecycle.list_servers(prune=True) == []
+    assert not lifecycle._registry_path(pid).exists()
 
 
 def test_pid_alive_true_for_self_false_for_bogus(isolated_config):
