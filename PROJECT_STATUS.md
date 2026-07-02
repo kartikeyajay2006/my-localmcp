@@ -1,10 +1,12 @@
 # Project Status
 
-Updated: 2026-07-01
+Updated: 2026-07-02
 
 ## Current phase
 
-V1 reliability and token-savings implementation. Core repository indexing, bounded context retrieval, Ollama lifecycle supervision, reduced MCP tools, client configuration cleanup, packaging scaffolding, and regression tests are implemented in the working tree.
+1.0.10 cross-platform setup-v2 implementation through Phase 13. The shared Python lifecycle and its macOS acceptance path are implemented; Windows x64/Claude Desktop parity, Linux CI, and final installer retirement remain Phases 14-16.
+
+`setup_v2.py` can install, reinstall, default-uninstall while preserving durable data, clean-install, and full-wipe from a local checkout. It builds and verifies a candidate runtime before promotion, stops Neo-owned processes, unloads only Neo-used Ollama models, migrates recognized legacy layouts, reconnects recorded clients, and verifies the installed CLI/MCP endpoint. The old PowerShell/shell installers remain authoritative for released 1.0.9 installs until cross-platform parity is complete.
 
 1.0.9 onboarding-polish work (`docs/1.0.9_PLAN.md`) is complete and released: all phases 9a-9g (agent-integration doc, install-time Ollama presence/model check, versioned `.mcpb` packaging, called-out post-install indexing nudge, installer surface selection with path preview, the uninstaller overhaul with multi-select surfaces + granular data keep/delete, and the P5 retrieval-boost audit + upgrade-persistence guarantee + config-tuning) are implemented and verified. `__version__` is now `1.0.9`, bumped in lockstep across `neo_localmcp/__init__.py`, `pyproject.toml`, and `packages/claude-desktop/mcpb/manifest.json`; the versioned bundle `packages/claude-desktop/neo-localmcp-v1.0.9.mcpb` is built and the real `~/.neo-localmcp` CLI install was upgraded to 1.0.9 live (`doctor` ok, single `.venv-nlm-v1.0.9`).
 
@@ -18,6 +20,9 @@ V1 reliability and token-savings implementation. Core repository indexing, bound
 
 ## Verified
 
+- **Setup v2 through Phase 13 is verified on macOS in an isolated managed home**: the real lifecycle test completes install -> seed config/SQLite/client record -> start MCP -> live reinstall -> default uninstall with data preserved -> install reusing preserved data -> clean install -> full wipe. Real candidate promotion and the installed MCP handshake/doctor verification also pass.
+- **Client-removal success reporting is fail-safe**: automated registration removal now returns a machine-readable result, and setup v2 aborts before removing the runtime or managed root if cleanup fails. Claude Desktop's intentionally manual removal remains a visible warning rather than a false automated-success claim.
+
 - Automated regression suite passes on Windows (82 tests), including real MCP stdio handler calls, helper-process protocol isolation, byte-for-byte verification that every packaged `neo_localmcp` source/template matches the working tree, Markdown heading-section retrieval, retrieval-memory behavior, Ollama enrichment bounding, the graceful-stop lifecycle, and the Windows upgrade cycle end-to-end including the 1.0.8 single-venv-per-version behavior (same-version reinstall is a no-op, `-Repair` forces a real rebuild, a different version gracefully stops and replaces the old venv).
 - 1.0.8 built and installed: `packages/claude-desktop/neo-localmcp.mcpb` rebuilt and verified byte-identical to source; the CLI install (`~/.neo-localmcp`) was upgraded from a real leftover 1.0.7 install to 1.0.8. The separately-installed Claude Desktop/Code extension was deliberately left untouched — swap the rebuilt `.mcpb` in manually when ready.
 - **Retrieval-boost memory (P5) is now audited, upgrade-safe, and tunable (1.0.9, 9g)**: a 2026-07-01 live multi-call session against this repo confirmed the wiring works as designed -- `shown`/`followed`/`corrected` counts move on real `prepare_context`+`file_excerpts` calls, a boost only appears once the same task has been shown >= `min_shown` (3) times, grows with net-followed, and stays capped (8) far below any structural signal (a heading milestone match is +60); silence (shown-but-not-followed) is never penalized. Upgrade persistence is now asserted by a test: `retrieval_boost` rows survive a real venv-swap install intact (the guarantee is data-level -- the db file bytes do legitimately change because `init`/`doctor` write to it, but the memory data does not). `RETRIEVAL_BOOST_CAP`/`RETRIEVAL_BOOST_MIN_SHOWN` are promoted to config (`memory.retrieval_boost_cap`/`retrieval_boost_min_shown`), defaults unchanged since the audit found no evidence to move them (kept at 3 by explicit decision).
@@ -30,6 +35,10 @@ V1 reliability and token-savings implementation. Core repository indexing, bound
 - **1.0.9 phases 9a-9f verified**: `install.ps1` reports Ollama presence and per-model (`fast_model`/`summary_model`) availability at install time without ever blocking -- every external Ollama call is wrapped in a time-bounded (10-15s) PowerShell job after a real hang was caught by `tests/test_upgrade_cycle.py` and fixed. `.mcpb` packaging is versioned (`packages/claude-desktop/neo-localmcp-v1.0.8.mcpb`, rebuilt and verified byte-identical to source), with a fixed-name local copy still placed at `~/.neo-localmcp/neo-localmcp.mcpb` for Claude Desktop's manual-install instructions. `setup.ps1`'s client registration step is now per-surface (Claude Code / Codex / Claude Desktop) with a live path preview sourced from `client_status()` before any files are touched. The uninstaller is a per-surface multi-select with a granular keep/delete checklist for CLI local state (venv/config/database/mcpb/servers), each destructive data category behind its own typed-`DELETE` gate and the shared-database warning; new `remove_claude_code()`/`remove_codex()` + `neo-localmcp remove-client` back it. A silent data-loss bug (PowerShell array-splat dropping every switch, so a confirmed database delete was preserved) was caught by live testing and fixed with a hashtable splat; a wizard-driving regression test now guards it. Full regression suite passes including the real install/uninstall subprocess integration tests.
 
 ## Remaining validation
+
+- Run Phase 14 on Windows x64: verify promoted `Scripts/*.exe` launchers after staging-path relocation, live MCP/Claude Desktop lock release, ownership-scoped escalation, and the full destructive-semantics matrix.
+- Add Phase 15 Linux acceptance and three-OS CI gates.
+- Add explicit fresh-install client selection before setup v2 becomes the sole lifecycle entrypoint in Phase 16.
 
 - Run the installer, MCPB package, and client smoke tests on macOS (including graceful-stop and single-venv-per-version parity, currently Windows-only — see `docs/1.0.7_PLAN.md` 7d).
 - Collect baseline versus assisted token measurements from real Claude/Codex tasks.

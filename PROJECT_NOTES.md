@@ -1,5 +1,10 @@
 # Project Notes
 
+## 2026-07-02
+
+- Phase 13 whole-branch review found that setup-v2 orchestration discarded client-removal results and unconditionally reported `removed-client-registrations`; a failed `claude mcp remove` could therefore be followed by runtime/root deletion while leaving a stale client target. Added explicit removal `ok`/`error` results and lifecycle validation: failed automated cleanup now aborts default uninstall, full wipe, and clean install before destructive removal, while Claude Desktop's manual-only cleanup is surfaced as a warning. Regression coverage exercises all three destructive paths and the real client helpers.
+- Re-verified Phase 13 on macOS: 268 fast tests passed (6 platform skips), and the three unrestricted real tests passed for candidate promotion, installed-endpoint verification, and the complete isolated lifecycle. Windows x64/Claude Desktop behavior remains Phase 14, not inferred from the Mac result.
+
 ## 2026-07-01 (9)
 
 - Found and fixed a Windows-only `apply_patch`/`apply-patch` bug during a full command-inventory test against an external repo (AntiNotepad): `apply_unified_patch` in `neo_localmcp/tools.py` wrote the incoming patch to a temp file via `tempfile.NamedTemporaryFile("w", ..., encoding="utf-8")` with no `newline=""`, so Python's text-mode write silently converted every `\n` to `\r\n` on Windows. Against any LF-terminated target file (the common case), the CRLF temp patch no longer matched file context and `git apply --check` rejected an objectively valid diff -- reproduced directly (CRLF temp -> rc 1, same patch written with `newline=""` -> rc 0). One-line fix: added `newline=""` to the `NamedTemporaryFile` call. Verified via an isolated scratch git repo (not a real project) exercising the real `neo-localmcp apply-patch` CLI end-to-end: check-only now passes, real apply succeeds, `git diff --stat` shows a clean single-line append. Rebuilt `packages/claude-desktop/neo-localmcp-v1.0.9.mcpb` to bundle the fix; full suite still green (95 passed). No version bump -- same 1.0.9 train, not yet tagged/released.
