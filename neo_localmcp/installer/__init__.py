@@ -33,6 +33,15 @@ from .output import (
     confirm_full_wipe,
     operation_explanation,
 )
+from .processes import (
+    OwnedProcess,
+    ProcessIdentity,
+    ProcessSnapshot,
+    PsutilProcessProvider,
+    ShutdownResult,
+    discover_owned_processes,
+    stop_owned_processes,
+)
 
 __all__ = [
     "DetectedState",
@@ -49,16 +58,23 @@ __all__ = [
     "Operation",
     "OperationResult",
     "OperationStatus",
+    "OwnedProcess",
     "PRESERVED_MEMORY_MESSAGE",
+    "ProcessIdentity",
+    "ProcessSnapshot",
+    "PsutilProcessProvider",
     "ReportEvent",
     "Reporter",
+    "ShutdownResult",
     "UnsafeManagedRoot",
     "begin_operation",
     "apply_migration",
     "complete_operation",
     "confirm_full_wipe",
     "detect_state",
+    "discover_owned_processes",
     "fail_operation",
     "plan_migration",
     "operation_explanation",
+    "stop_owned_processes",
 ]
