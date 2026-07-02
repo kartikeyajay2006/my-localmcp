@@ -28,34 +28,80 @@ def _python_command() -> str:
     return sys.executable
 
 
-def _server_command() -> str:
+def _default_server_command() -> str:
     suffix = ".cmd" if platform.system().lower() == "windows" else ""
     return str(APP_DIR / "bin" / f"neo-localmcp-server{suffix}")
+
+
+def _server_command(server_command: str | Path | None = None) -> str:
+    # An explicit launcher (the installer passes the managed venv's
+    # neo-localmcp-server executable) always wins; only the legacy CLI path with
+    # no injected value falls back to the old side-by-side ``bin/`` shim.
+    if server_command is not None:
+        return str(server_command)
+    return _default_server_command()
+
+
+def _config_value(config_path: str | Path | None = None) -> str:
+    return str(config_path) if config_path is not None else str(CONFIG_PATH)
 
 
 def _toml_string(value: str | Path) -> str:
     return str(value).replace("\\", "\\\\").replace('"', '\\"')
 
 
-def _mcp_server_block() -> dict[str, Any]:
+def _read_config_for_edit(path: Path) -> tuple[str, str]:
+    # Return (LF-normalized text, detected newline style). Detection reads raw
+    # bytes because text-mode reads translate CRLF to LF before we can see it.
+    if not path.exists():
+        return "", "\n"
+    raw = path.read_bytes()
+    newline = "\r\n" if b"\r\n" in raw else "\n"
+    text = raw.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+    return text, newline
+
+
+def _atomic_write_text(path: Path, text: str, newline: str = "\n") -> None:
+    # Write user-owned config transactionally so a crash mid-write cannot leave a
+    # half-written registration, and re-expand to the file's own newline style so
+    # editing a CRLF config on POSIX (or vice versa) does not rewrite every line.
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = text.replace("\n", newline) if newline != "\n" else text
+    temporary = path.with_name(path.name + ".tmp")
+    temporary.write_bytes(data.encode("utf-8"))
+    if path.exists():
+        try:
+            shutil.copymode(path, temporary)
+        except OSError:
+            pass
+    os.replace(temporary, path)
+
+
+def _mcp_server_block(
+    server_command: str | Path | None = None,
+    config_path: str | Path | None = None,
+) -> dict[str, Any]:
     return {
         IDENTITY.mcp_server_name: {
-            "command": _server_command(),
+            "command": _server_command(server_command),
             "args": [],
-            "env": {"NEO_LOCALMCP_CONFIG": str(CONFIG_PATH)},
+            "env": {"NEO_LOCALMCP_CONFIG": _config_value(config_path)},
         }
     }
 
 
-def _codex_block() -> str:
+def _codex_block(
+    server_command: str | Path | None = None,
+    config_path: str | Path | None = None,
+) -> str:
     return f"""
 # BEGIN neo-localmcp
 [mcp_servers.{IDENTITY.mcp_server_name}]
-command = "{_toml_string(_server_command())}"
+command = "{_toml_string(_server_command(server_command))}"
 args = []
 
 [mcp_servers.{IDENTITY.mcp_server_name}.env]
-NEO_LOCALMCP_CONFIG = "{_toml_string(CONFIG_PATH)}"
+NEO_LOCALMCP_CONFIG = "{_toml_string(_config_value(config_path))}"
 # END neo-localmcp
 """.strip() + "\n"
 
@@ -86,17 +132,27 @@ def _strip_marked_block(old: str, start: str = "# BEGIN neo-localmcp", end: str 
     return ""
 
 
-def _write_codex_config(path: Path, apply: bool) -> dict[str, Any]:
-    block = _codex_block()
+def _write_codex_config(
+    path: Path,
+    apply: bool,
+    *,
+    server_command: str | Path | None = None,
+    config_path: str | Path | None = None,
+) -> dict[str, Any]:
+    block = _codex_block(server_command, config_path)
     if apply:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        old = path.read_text(encoding="utf-8") if path.exists() else ""
-        path.write_text(_replace_marked_block(old, block), encoding="utf-8")
-    return {"config_path": str(path), "exists_after": path.exists() if apply else path.exists(), "block": block}
+        old, newline = _read_config_for_edit(path)
+        _atomic_write_text(path, _replace_marked_block(old, block), newline)
+    return {"config_path": str(path), "exists_after": path.exists(), "block": block}
 
 
-def setup_claude_code(apply: bool = True) -> dict[str, Any]:
+def setup_claude_code(
+    apply: bool = True,
+    *,
+    server_command: str | Path | None = None,
+) -> dict[str, Any]:
     ensure_config()
+    launcher = _server_command(server_command)
     target = Path.home() / ".claude" / "commands" / IDENTITY.slash_prefix
     actions: list[str] = []
     if apply:
@@ -108,14 +164,14 @@ def setup_claude_code(apply: bool = True) -> dict[str, Any]:
         if claude:
             # User scope is best for repeatable Claude Code sessions. If the CLI is older and does not support
             # --scope, fall back to the classic command.
-            cmd = [claude, "mcp", "add", "--scope", "user", IDENTITY.mcp_server_name, "--", _server_command()]
+            cmd = [claude, "mcp", "add", "--scope", "user", IDENTITY.mcp_server_name, "--", launcher]
             configured = False
             for _ in range(3):
                 existing = subprocess.run([claude, "mcp", "get", IDENTITY.mcp_server_name], stdin=subprocess.DEVNULL, capture_output=True, text=True, errors="replace", **hidden_subprocess_kwargs())
                 combined = f"{existing.stdout}\n{existing.stderr}".lower()
                 if existing.returncode != 0:
                     break
-                if _server_command().lower() in combined and "scope: user" in combined:
+                if launcher.lower() in combined and "scope: user" in combined:
                     actions.append("Claude Code user-scope registration already uses the stable launcher")
                     configured = True
                     break
@@ -128,7 +184,7 @@ def setup_claude_code(apply: bool = True) -> dict[str, Any]:
                     break
             result = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True, errors="replace", **hidden_subprocess_kwargs()) if not configured else existing
             if not configured and result.returncode != 0:
-                fallback = [claude, "mcp", "add", IDENTITY.mcp_server_name, "--", _server_command()]
+                fallback = [claude, "mcp", "add", IDENTITY.mcp_server_name, "--", launcher]
                 result = subprocess.run(fallback, stdin=subprocess.DEVNULL, capture_output=True, text=True, errors="replace", **hidden_subprocess_kwargs())
                 actions.append(f"ran claude mcp add fallback: exit {result.returncode}")
             elif not configured:
@@ -141,9 +197,10 @@ def setup_claude_code(apply: bool = True) -> dict[str, Any]:
         "client": "claude-code",
         "applied": apply,
         "target": str(target),
+        "server_command": launcher,
         "actions": actions,
-        "manual_mcp_user": f"claude mcp add --scope user {IDENTITY.mcp_server_name} -- {_server_command()}",
-        "manual_mcp_fallback": f"claude mcp add {IDENTITY.mcp_server_name} -- {_server_command()}",
+        "manual_mcp_user": f"claude mcp add --scope user {IDENTITY.mcp_server_name} -- {launcher}",
+        "manual_mcp_fallback": f"claude mcp add {IDENTITY.mcp_server_name} -- {launcher}",
     }
 
 
@@ -180,19 +237,43 @@ def _codex_desktop_config_path() -> Path:
     return _codex_cli_config_path()
 
 
-def setup_codex_cli(apply: bool = True) -> dict[str, Any]:
+def setup_codex_cli(
+    apply: bool = True,
+    *,
+    server_command: str | Path | None = None,
+    config_path: str | Path | None = None,
+) -> dict[str, Any]:
     ensure_config()
     path = _codex_cli_config_path()
-    return {"client": "codex-cli", "applied": apply, **_write_codex_config(path, apply)}
+    return {
+        "client": "codex-cli",
+        "applied": apply,
+        **_write_codex_config(path, apply, server_command=server_command, config_path=config_path),
+    }
 
 
-def setup_codex_desktop(apply: bool = True) -> dict[str, Any]:
-    result = setup_codex_cli(apply)
+def setup_codex_desktop(
+    apply: bool = True,
+    *,
+    server_command: str | Path | None = None,
+    config_path: str | Path | None = None,
+) -> dict[str, Any]:
+    result = setup_codex_cli(apply, server_command=server_command, config_path=config_path)
     return {**result, "client": "codex-desktop", "shared_with_cli": True, "restart_required": True}
 
 
-def setup_codex(apply: bool = True) -> dict[str, Any]:
-    return {"client": "codex", "applied": apply, "shared_config": True, "result": setup_codex_cli(apply)}
+def setup_codex(
+    apply: bool = True,
+    *,
+    server_command: str | Path | None = None,
+    config_path: str | Path | None = None,
+) -> dict[str, Any]:
+    return {
+        "client": "codex",
+        "applied": apply,
+        "shared_config": True,
+        "result": setup_codex_cli(apply, server_command=server_command, config_path=config_path),
+    }
 
 
 def remove_claude_code(apply: bool = True) -> dict[str, Any]:
@@ -247,9 +328,9 @@ def remove_codex(apply: bool = True) -> dict[str, Any]:
     existed = path.exists()
     block_present = existed and "# BEGIN neo-localmcp" in path.read_text(encoding="utf-8")
     if apply and block_present:
-        old = path.read_text(encoding="utf-8")
+        old, newline = _read_config_for_edit(path)
         new = _strip_marked_block(old)
-        path.write_text(new, encoding="utf-8")
+        _atomic_write_text(path, new, newline)
         empty_after = new.strip() == ""
     else:
         empty_after = False
@@ -300,7 +381,10 @@ def remove_clients(clients: list[str] | None = None, apply: bool = True) -> list
     return results
 
 
-def client_status() -> dict[str, Any]:
+def client_status(
+    server_command: str | Path | None = None,
+    config_path: str | Path | None = None,
+) -> dict[str, Any]:
     claude_cli = shutil.which("claude")
     codex_cli = shutil.which("codex")
     paths = {
@@ -312,40 +396,52 @@ def client_status() -> dict[str, Any]:
     return {
         "product": IDENTITY.product_name,
         "python_command": _python_command(),
-        "server_command": _server_command(),
-        "config_path": str(CONFIG_PATH),
+        "server_command": _server_command(server_command),
+        "config_path": _config_value(config_path),
         "commands_found": {"claude": claude_cli, "codex": codex_cli},
         "paths": {name: {"path": path, "exists": Path(path).exists()} for name, path in paths.items()},
-        "mcp_server_block": _mcp_server_block(),
-        "codex_block": _codex_block(),
+        "mcp_server_block": _mcp_server_block(server_command, config_path),
+        "codex_block": _codex_block(server_command, config_path),
     }
 
 
-def setup_client(client: str, apply: bool = True) -> dict[str, Any]:
+def setup_client(
+    client: str,
+    apply: bool = True,
+    *,
+    server_command: str | Path | None = None,
+    config_path: str | Path | None = None,
+) -> dict[str, Any]:
     key = client.lower().replace("_", "-")
     if key == "all":
-        return {"client": "all", "applied": apply, "results": setup_clients(None, apply=apply)}
+        return {"client": "all", "applied": apply, "results": setup_clients(None, apply=apply, server_command=server_command, config_path=config_path)}
     if key in {"claude-code", "claude"}:
-        return setup_claude_code(apply=apply)
+        return setup_claude_code(apply=apply, server_command=server_command)
     if key in {"claude-desktop", "desktop"}:
         return setup_claude_desktop(apply=apply)
     if key == "codex":
-        return setup_codex(apply=apply)
+        return setup_codex(apply=apply, server_command=server_command, config_path=config_path)
     if key == "codex-cli":
-        return setup_codex_cli(apply=apply)
+        return setup_codex_cli(apply=apply, server_command=server_command, config_path=config_path)
     if key == "codex-desktop":
-        return setup_codex_desktop(apply=apply)
+        return setup_codex_desktop(apply=apply, server_command=server_command, config_path=config_path)
     raise ValueError(f"Unknown client: {client}. Expected all, claude-code, claude-desktop, codex, codex-cli, or codex-desktop.")
 
 
-def setup_clients(clients: list[str] | None = None, apply: bool = True) -> list[dict[str, Any]]:
+def setup_clients(
+    clients: list[str] | None = None,
+    apply: bool = True,
+    *,
+    server_command: str | Path | None = None,
+    config_path: str | Path | None = None,
+) -> list[dict[str, Any]]:
     selected = clients or ["claude-code", "claude-desktop", "codex"]
     if any(str(client).lower().replace("_", "-") == "all" for client in selected):
         selected = ["claude-code", "claude-desktop", "codex"]
     results = []
     for client in selected:
         try:
-            results.append(setup_client(client, apply=apply))
+            results.append(setup_client(client, apply=apply, server_command=server_command, config_path=config_path))
         except Exception as exc:
             results.append({"client": client, "applied": apply, "ok": False, "error": str(exc)})
     return results
