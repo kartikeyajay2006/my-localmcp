@@ -478,8 +478,24 @@ def _check_doctor(paths: ManagedPaths, *, env_runner: EnvCommandRunner) -> Verif
             details=f"doctor output was not valid JSON: {result.stdout[:200]!r}",
             recovery="Run `neo-localmcp doctor` directly to inspect the failure.",
         )
-    ok = bool(payload.get("ok"))
-    details = "doctor reported ok" if ok else f"doctor reported failure: {json.dumps(payload)[:300]}"
+    # Inspect the substantive, Ollama-independent health signals doctor actually
+    # returns rather than trusting its top-level ``ok`` (which is hardcoded True
+    # in tools.doctor() regardless of sub-check health, so it would make this a
+    # no-op required check). Ollama reachability is deliberately NOT required
+    # here: deterministic retrieval must never depend on Ollama, so an
+    # unreachable/cold model surfaces only through the separate warning-only
+    # ``ollama-optional`` check, never as an installation failure.
+    required_signals = {
+        "config_exists": payload.get("config_exists"),
+        "db_open": payload.get("db_open"),
+    }
+    failed = sorted(name for name, value in required_signals.items() if value is not True)
+    ok = not failed
+    details = (
+        "doctor required health signals ok (config_exists, db_open)"
+        if ok
+        else f"doctor reported unhealthy required signal(s): {', '.join(failed)}"
+    )
     return VerificationCheck(
         name="doctor-required-checks",
         required=True,

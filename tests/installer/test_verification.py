@@ -112,17 +112,35 @@ def _passing_runner(expected_version: str) -> ScriptedCommandRunner:
     )
 
 
-def _passing_env_runner(paths: ManagedPaths) -> ScriptedEnvCommandRunner:
-    canonical = json.dumps(
+def _healthy_doctor_payload() -> dict:
+    """A doctor() payload shaped like the real tools.doctor() output for a
+    healthy install: top-level ``ok`` is always True (hardcoded in tools.py), the
+    substantive required signals ``config_exists``/``db_open`` are True, and
+    Ollama is unreachable (which must NOT make the required doctor check fail)."""
+    return {
+        "ok": True,
+        "config_exists": True,
+        "db_open": True,
+        "ollama": {"ok": False, "state": "unreachable"},
+        "repo": {},
+        "running_servers": [],
+    }
+
+
+def _canonical_payload(paths: ManagedPaths) -> str:
+    return json.dumps(
         {
             "config_path": str(paths.config / "config.yaml"),
             "db_path": str(paths.sqlite / "repo-context.sqlite"),
         }
     )
+
+
+def _passing_env_runner(paths: ManagedPaths) -> ScriptedEnvCommandRunner:
     return ScriptedEnvCommandRunner(
         {
-            "doctor": _ok(json.dumps({"ok": True, "checks": {}})),
-            "canonical-paths": _ok(canonical),
+            "doctor": _ok(json.dumps(_healthy_doctor_payload())),
+            "canonical-paths": _ok(_canonical_payload(paths)),
         }
     )
 
@@ -296,7 +314,7 @@ def test_canonical_config_path_mismatch_fails_verification(tmp_path: Path) -> No
     )
     kwargs["env_runner"] = ScriptedEnvCommandRunner(
         {
-            "doctor": _ok(json.dumps({"ok": True})),
+            "doctor": _ok(json.dumps(_healthy_doctor_payload())),
             "canonical-paths": _ok(mismatched),
         }
     )
@@ -321,7 +339,7 @@ def test_canonical_database_path_mismatch_fails_verification(tmp_path: Path) -> 
     )
     kwargs["env_runner"] = ScriptedEnvCommandRunner(
         {
-            "doctor": _ok(json.dumps({"ok": True})),
+            "doctor": _ok(json.dumps(_healthy_doctor_payload())),
             "canonical-paths": _ok(mismatched),
         }
     )
@@ -380,20 +398,19 @@ def test_client_targets_failure_when_launcher_stale(tmp_path: Path, monkeypatch:
 
 
 def test_doctor_required_checks_failure_fails_verification(tmp_path: Path) -> None:
+    """A realistic unhealthy doctor payload: config file missing. Crucially the
+    top-level ``ok`` is still True (tools.doctor() hardcodes it), so this proves
+    the check inspects the substantive signal rather than trusting ``ok``."""
     paths = _paths(tmp_path)
     _touch_runtime_files(paths)
+    payload = _healthy_doctor_payload()
+    payload["ok"] = True  # tools.doctor() always reports ok: True
+    payload["config_exists"] = False  # ...even when config is genuinely missing
     kwargs = _base_kwargs(paths)
     kwargs["env_runner"] = ScriptedEnvCommandRunner(
         {
-            "doctor": _ok(json.dumps({"ok": False, "error": "index missing"})),
-            "canonical-paths": _ok(
-                json.dumps(
-                    {
-                        "config_path": str(paths.config / "config.yaml"),
-                        "db_path": str(paths.sqlite / "repo-context.sqlite"),
-                    }
-                )
-            ),
+            "doctor": _ok(json.dumps(payload)),
+            "canonical-paths": _ok(_canonical_payload(paths)),
         }
     )
 
@@ -402,7 +419,61 @@ def test_doctor_required_checks_failure_fails_verification(tmp_path: Path) -> No
     assert report.ok is False
     check = next(c for c in report.checks if c.name == "doctor-required-checks")
     assert check.ok is False
+    assert "config_exists" in check.details
     assert check.recovery
+
+
+def test_doctor_db_open_false_fails_verification_despite_top_level_ok(tmp_path: Path) -> None:
+    """The database health signal is also required and Ollama-independent."""
+    paths = _paths(tmp_path)
+    _touch_runtime_files(paths)
+    payload = _healthy_doctor_payload()
+    payload["ok"] = True
+    payload["db_open"] = False
+    kwargs = _base_kwargs(paths)
+    kwargs["env_runner"] = ScriptedEnvCommandRunner(
+        {
+            "doctor": _ok(json.dumps(payload)),
+            "canonical-paths": _ok(_canonical_payload(paths)),
+        }
+    )
+
+    report = verify_installation(paths, "9.9.9", frozenset(), **kwargs)
+
+    assert report.ok is False
+    check = next(c for c in report.checks if c.name == "doctor-required-checks")
+    assert check.ok is False
+    assert "db_open" in check.details
+
+
+def test_doctor_unreachable_ollama_does_not_fail_required_check(tmp_path: Path) -> None:
+    """Deterministic retrieval must never depend on Ollama: a doctor payload that
+    is healthy except for an unreachable Ollama must PASS the required doctor
+    check (the unreachable model is surfaced by the separate warning check)."""
+    paths = _paths(tmp_path)
+    _touch_runtime_files(paths)
+    payload = _healthy_doctor_payload()
+    payload["ollama"] = {"ok": False, "state": "unreachable", "error": "connection refused"}
+    kwargs = _base_kwargs(paths)
+    kwargs["env_runner"] = ScriptedEnvCommandRunner(
+        {
+            "doctor": _ok(json.dumps(payload)),
+            "canonical-paths": _ok(_canonical_payload(paths)),
+        }
+    )
+    kwargs["ollama_status_fn"] = lambda: {"state": "unreachable", "model": "qwen3:8b"}
+
+    report = verify_installation(paths, "9.9.9", frozenset(), **kwargs)
+
+    doctor_check = next(c for c in report.checks if c.name == "doctor-required-checks")
+    assert doctor_check.required is True
+    assert doctor_check.ok is True
+    # The unreachable Ollama is still surfaced -- but only as a warning.
+    ollama_check = next(c for c in report.checks if c.name == "ollama-optional")
+    assert ollama_check.required is False
+    assert ollama_check.ok is False
+    # Neither doctor nor the warning check should fail the overall install.
+    assert report.ok is True
 
 
 def test_doctor_invocation_crash_fails_verification(tmp_path: Path) -> None:
@@ -412,14 +483,7 @@ def test_doctor_invocation_crash_fails_verification(tmp_path: Path) -> None:
     kwargs["env_runner"] = ScriptedEnvCommandRunner(
         {
             "doctor": _fail("Traceback: ImportError"),
-            "canonical-paths": _ok(
-                json.dumps(
-                    {
-                        "config_path": str(paths.config / "config.yaml"),
-                        "db_path": str(paths.sqlite / "repo-context.sqlite"),
-                    }
-                )
-            ),
+            "canonical-paths": _ok(_canonical_payload(paths)),
         }
     )
 
