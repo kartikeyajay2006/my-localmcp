@@ -36,6 +36,17 @@ def test_claude_manual_command_uses_stable_launcher(monkeypatch):
     assert "neo-localmcp-server" in result["manual_mcp_user"]
 
 
+def test_client_blocks_honor_injected_server_command_and_config():
+    launcher = Path("/opt/.neo-localmcp/venv/bin/neo-localmcp-server")
+    config = Path("/opt/.neo-localmcp/config/config.yaml")
+    block = client_setup._mcp_server_block(server_command=launcher, config_path=config)["neo-localmcp"]
+    assert block["command"] == str(launcher)
+    assert block["env"]["NEO_LOCALMCP_CONFIG"] == str(config)
+    codex = client_setup._codex_block(server_command=launcher, config_path=config)
+    assert str(launcher) in codex
+    assert str(config) in codex
+
+
 def test_mcp_surface_is_small_and_intentional():
     names = asyncio.run(_tool_names())
     assert names == {
