@@ -17,11 +17,23 @@ from .state import (
     detect_state,
     fail_operation,
 )
+from .migration import (
+    MigrationAction,
+    MigrationConflict,
+    MigrationPlan,
+    MigrationResult,
+    apply_migration,
+    plan_migration,
+)
 
 __all__ = [
     "DetectedState",
     "InstallStateKind",
     "ManagedPaths",
+    "MigrationAction",
+    "MigrationConflict",
+    "MigrationPlan",
+    "MigrationResult",
     "MetadataCorruptError",
     "MetadataError",
     "MetadataMissingError",
@@ -30,7 +42,9 @@ __all__ = [
     "OperationStatus",
     "UnsafeManagedRoot",
     "begin_operation",
+    "apply_migration",
     "complete_operation",
     "detect_state",
     "fail_operation",
+    "plan_migration",
 ]
