@@ -12,7 +12,6 @@ already installed and wants to reconfigure).
 from __future__ import annotations
 
 import os
-import platform
 import sys
 import time
 from typing import Any
@@ -49,40 +48,52 @@ _FAKE_INSTALLED_MODELS = (
 _STEP_DELAY = 0.35
 
 
-def _os_label() -> str:
+# All fake paths are derived from the *live* OS (via sys.platform) so the
+# simulation shows real-looking, correctly-separated paths for whichever machine
+# it runs on: a Mac shows /Users/you/... with forward slashes, Windows shows
+# C:\Users\you\... with backslashes, Linux shows /home/you/....
+_OS_LABELS = {"windows": "Windows", "macos": "macOS", "linux": "Linux"}
+
+
+def _fake_os() -> str:
+    if sys.platform.startswith("win"):
+        return "windows"
     if sys.platform == "darwin":
-        return "macOS"
-    if os.name == "nt":
-        return "Windows"
-    return platform.system() or "this platform"
+        return "macos"
+    return "linux"
+
+
+def _os_label() -> str:
+    return _OS_LABELS[_fake_os()]
+
+
+def _fake_home() -> str:
+    return {"windows": r"C:\Users\you", "macos": "/Users/you", "linux": "/home/you"}[_fake_os()]
+
+
+def _join(*parts: str) -> str:
+    sep = "\\" if _fake_os() == "windows" else "/"
+    return _fake_home() + sep + sep.join(parts)
 
 
 def _fake_root() -> str:
-    if os.name == "nt":
-        return r"C:\Users\you\.neo-localmcp"
-    return "/Users/you/.neo-localmcp" if sys.platform == "darwin" else "~/.neo-localmcp"
+    return _join(".neo-localmcp")
 
 
 def _fake_client_meta(key: str) -> tuple[str, str, bool]:
     """Return (path, detail, manual) mirroring what client_setup.py really does."""
-    windows = os.name == "nt"
     if key == "claude-code":
-        path = (r"C:\Users\you\.claude\commands\neo-localmcp"
-                if windows else "~/.claude/commands/neo-localmcp")
-        return (path,
+        return (_join(".claude", "commands", "neo-localmcp"),
                 "Slash commands installed here; the MCP server is registered via "
                 "`claude mcp add --scope user` (no file edited directly).",
                 False)
     if key == "codex":
-        path = r"C:\Users\you\.codex\config.toml" if windows else "~/.codex/config.toml"
-        return (path,
+        return (_join(".codex", "config.toml"),
                 "A marked neo-localmcp block is written into config.toml "
                 "(shared by Codex CLI, IDE, and app).",
                 False)
     # claude-desktop: a .mcpb package you install manually in-app, NOT a JSON edit.
-    path = (r"C:\Users\you\.neo-localmcp\neo-localmcp.mcpb"
-            if windows else "~/.neo-localmcp/neo-localmcp.mcpb")
-    return (path,
+    return (_join(".neo-localmcp", "neo-localmcp.mcpb"),
             "Manual step: install this .mcpb in Claude Desktop via "
             "Settings > Extensions > Advanced settings. Not written automatically.",
             True)
