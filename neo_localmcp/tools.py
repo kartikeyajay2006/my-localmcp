@@ -333,7 +333,7 @@ def init() -> str:
         "product": IDENTITY.product_name,
         "config_path": str(path),
         "next": [
-            "Run setup once from anywhere: neo-localmcp setup --client all",
+            "Run client setup once from anywhere: neo-localmcp config clients setup --client all",
             "Then cd into the repo you want analyzed: cd /path/to/your/repo",
             "Index that repo: neo-localmcp index",
             "Ask for context: neo-localmcp context \"debug feature X: KnownSymbol, FileName.cs\"",
@@ -356,7 +356,7 @@ def where(repo_root: str = "auto") -> str:
         "repo_db": str(repo_memory.db_path()),
         "ollama_base_url": cfg.get("ollama", {}).get("base_url"),
         "summary_model": cfg.get("ollama", {}).get("summary_model"),
-        "note": "Run index/context from the repo you want analyzed. Setup can be run once from anywhere.",
+        "note": "Run index/context from the repo you want analyzed. Client setup (neo-localmcp config clients setup) can be run once from anywhere.",
     })
 
 
@@ -384,7 +384,7 @@ def doctor(repo_root: str = "auto") -> str:
             "Claude/Codex reason and create exact patches.",
             "Context lookup is deterministic by default; Ollama ranking is opt-in with --ollama-rank or MCP use_ollama=true.",
         ],
-        "commands": ["init", "where", "doctor", "status", "clients", "setup", "serve", "servers", "stop", "index", "reindex", "reset-repo", "reset-all", "test-determinism", "refresh", "lookup", "file", "context", "summarize", "apply-patch", "record-change", "model status"],
+        "commands": ["init", "where", "doctor", "status", "clients", "config clients setup", "config clients remove", "config clients status", "serve", "servers", "stop", "index", "reindex", "reset-repo", "reset-all", "test-determinism", "refresh", "lookup", "file", "context", "summarize", "apply-patch", "record-change", "model status"],
         "config": {"ollama_base_url": cfg.get("ollama", {}).get("base_url"), "summary_model": cfg.get("ollama", {}).get("summary_model"), "db_path": cfg.get("memory", {}).get("db_path")},
     }
     return json_out({"ok": True, **checks})
@@ -529,7 +529,7 @@ def _line_hint_from_reason(reason: str) -> str | None:
 def _add_candidate(candidates: dict[str, dict[str, Any]], path: str, reason: str, score: int, intent: str, *, line_hint: str | None = None, allow_reason_line_hint: bool = True) -> None:
     category = classify_path(path)
     if path not in candidates:
-        candidates[path] = {"path": path, "category": category, "score": category_boost(category, intent), "reasons": [], "line_hints": []}
+        candidates[path] = {"path": path, "category": category, "score": category_boost(category, intent), "reasons": [], "line_hints": [], "line_hint_weights": {}}
     item = candidates[path]
     # Score each unique evidence reason once. This prevents duplicate FTS/search rows or repeated refreshes
     # from changing deterministic scores across identical runs.
@@ -538,8 +538,16 @@ def _add_candidate(candidates: dict[str, dict[str, Any]], path: str, reason: str
         item["reasons"].append(reason)
         item["score"] += score
     hint = line_hint if line_hint is not None else (_line_hint_from_reason(reason) if allow_reason_line_hint else None)
-    if hint and hint not in item["line_hints"]:
-        item["line_hints"].append(hint)
+    if hint:
+        if hint not in item["line_hints"]:
+            item["line_hints"].append(hint)
+        # Track the strongest evidence weight tied to each hinted line so a file with
+        # several unrelated hit locations can later center on the most query-relevant
+        # one instead of whichever hint happens to sort first by line number.
+        m = re.search(r"(\d+)", hint)
+        if m:
+            line_no = int(m.group(1))
+            item["line_hint_weights"][line_no] = max(item["line_hint_weights"].get(line_no, 0), score)
 
 
 def _group_line_hints_for_guidance(item: dict[str, Any]) -> str:
@@ -780,11 +788,24 @@ def context_prepare(task: str, repo_root: str = "auto", max_files: int | None = 
             if exact and exact.get("start_line"):
                 center = int(exact["start_line"])
                 break
-        hint_numbers = [int(match.group(1)) for hint in item.get("line_hints", []) if (match := re.search(r"(\d+)", hint))]
-        center = center or (hint_numbers[0] if hint_numbers else 1)
+        if center is None:
+            weights = item.get("line_hint_weights") or {}
+            # Prefer the hint tied to the strongest matching evidence, not merely
+            # whichever hint happens to sort first by line number -- a file can have
+            # several distinct, unrelated hit locations, and the earliest one is not
+            # necessarily the most query-relevant. Ties break to the earliest line
+            # for determinism.
+            center = min(weights, key=lambda line: (-weights[line], line)) if weights else 1
         range_start, range_end = max(1, center - 20), center + 19
         ranges.append({"path": item["path"], "start_line": range_start, "end_line": range_end})
-        sections_for_memory.append({"path": item["path"], "start_line": range_start, "end_line": range_end, "match_kind": "fallback", "matched_name": None, "score": item.get("score")})
+        other_hint_lines = sorted({line for line in item.get("line_hint_weights", {}) if not (range_start <= line <= range_end)})
+        sections_for_memory.append({
+            "path": item["path"], "start_line": range_start, "end_line": range_end,
+            "match_kind": "fallback", "matched_name": None, "score": item.get("score"),
+            "hint_lines": other_hint_lines,
+        })
+    for item in candidates.values():
+        item.pop("line_hint_weights", None)
     excerpt_data = repo_memory.file_excerpts(ranges, root, max_chars=max(1000, min(int(token_budget), 8000) * 4))
     for excerpt in excerpt_data.get("excerpts", []):
         section = section_by_path.get(excerpt.get("path"))

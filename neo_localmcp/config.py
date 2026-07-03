@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import os
 from pathlib import Path
@@ -8,7 +9,48 @@ from typing import Any
 from .identity import IDENTITY
 
 APP_DIR = Path(os.environ.get("NEO_LOCALMCP_HOME", Path.home() / ".neo-localmcp")).expanduser()
-CONFIG_PATH = Path(os.environ.get("NEO_LOCALMCP_CONFIG", APP_DIR / "config.yaml")).expanduser()
+CONFIG_DIR = APP_DIR / "config"
+CONFIG_PATH = Path(os.environ.get("NEO_LOCALMCP_CONFIG", CONFIG_DIR / "config.yaml")).expanduser()
+SQLITE_DIR = APP_DIR / "sqlite"
+DEFAULT_DB_PATH = SQLITE_DIR / "repo-context.sqlite"
+CACHE_DIR = APP_DIR / "cache"
+PROCESS_REGISTRY_DIR = CACHE_DIR / "processes"
+
+_INITIAL_CONFIG_PATH = CONFIG_PATH
+_INITIAL_DEFAULT_DB_PATH = DEFAULT_DB_PATH
+
+
+def config_dir() -> Path:
+    return APP_DIR / "config"
+
+
+def config_path() -> Path:
+    explicit = os.environ.get("NEO_LOCALMCP_CONFIG")
+    if explicit:
+        return Path(explicit).expanduser()
+    if CONFIG_PATH != _INITIAL_CONFIG_PATH:
+        return Path(CONFIG_PATH).expanduser()
+    return config_dir() / "config.yaml"
+
+
+def sqlite_dir() -> Path:
+    return APP_DIR / "sqlite"
+
+
+def default_db_path() -> Path:
+    return sqlite_dir() / "repo-context.sqlite"
+
+
+def cache_dir() -> Path:
+    return APP_DIR / "cache"
+
+
+def cache_path(*parts: str) -> Path:
+    return cache_dir().joinpath(*parts)
+
+
+def process_registry_dir() -> Path:
+    return cache_path("processes")
 
 TEXT_EXTENSIONS = [
     ".cs", ".xaml", ".csproj", ".sln", ".json", ".xml", ".md", ".txt", ".props", ".targets",
@@ -49,16 +91,22 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "max_files": None,
         "max_file_bytes": 750_000,
         "summary_max_chars": 80_000,
+        # Glob patterns (fnmatch), matched against the directory name only, not a
+        # path. A plain name with no wildcard (".git") still matches only that exact
+        # name. ".venv*"/"venv*" additionally cover differently-named or versioned
+        # local virtualenvs (e.g. ".venv-phase14", ".venv-nlm-v1.0.10", "venvs") that
+        # an exact-name list would silently index as repository source -- see
+        # PROJECT_NOTES.md 2026-07-03.
         "exclude_dirs": [
             ".git", ".hg", ".svn", ".vs", ".vscode", ".idea", "bin", "obj", "node_modules",
-            ".venv", "venv", "dist", "build", "packages", ".nuget", "TestResults", "coverage",
+            ".venv*", "venv*", "dist", "build", "packages", ".nuget", "TestResults", "coverage",
             ".next", ".svelte-kit", ".turbo", "target", "out", "DerivedData", ".gradle",
             ".neo-localmcp",
         ],
         "include_extensions": TEXT_EXTENSIONS,
     },
     "memory": {
-        "db_path": str(APP_DIR / "repo-context.sqlite"),
+        "db_path": str(DEFAULT_DB_PATH),
         # Phase 3 (1.0.6): query/result metadata recording is observational only and
         # does not influence ranking by itself; see retrieval_boost for the separate,
         # capped signal that does. Off switch lives here, not a hidden env var.
@@ -82,6 +130,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
 }
 
 
+def _effective_default_config() -> dict[str, Any]:
+    defaults = copy.deepcopy(DEFAULT_CONFIG)
+    configured_db = str(defaults.get("memory", {}).get("db_path") or "")
+    if configured_db == str(_INITIAL_DEFAULT_DB_PATH):
+        defaults["memory"]["db_path"] = str(default_db_path())
+    return defaults
+
+
 def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     result = dict(base)
     for key, value in override.items():
@@ -93,16 +149,17 @@ def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]
 
 
 def ensure_config() -> Path:
-    APP_DIR.mkdir(parents=True, exist_ok=True)
-    if not CONFIG_PATH.exists():
-        CONFIG_PATH.write_text(json.dumps(DEFAULT_CONFIG, indent=2), encoding="utf-8")
-    return CONFIG_PATH
+    path = config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        path.write_text(json.dumps(_effective_default_config(), indent=2), encoding="utf-8")
+    return path
 
 
 def load_config() -> dict[str, Any]:
-    ensure_config()
-    raw = json.loads(CONFIG_PATH.read_text(encoding="utf-8")) if CONFIG_PATH.exists() else {}
-    cfg = deep_merge(DEFAULT_CONFIG, raw or {})
+    path = ensure_config()
+    raw = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    cfg = deep_merge(_effective_default_config(), raw or {})
     ollama_cfg = cfg.setdefault("ollama", {})
     legacy_timeout = int(ollama_cfg.get("timeout_seconds", 0) or 0)
     if legacy_timeout:
@@ -112,13 +169,14 @@ def load_config() -> dict[str, Any]:
 
 
 def save_config(config: dict[str, Any]) -> None:
-    APP_DIR.mkdir(parents=True, exist_ok=True)
+    path = config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
     config["identity"] = IDENTITY.as_dict()
-    CONFIG_PATH.write_text(json.dumps(config, indent=2), encoding="utf-8")
+    path.write_text(json.dumps(config, indent=2), encoding="utf-8")
 
 
 def db_path() -> Path:
-    return Path(load_config().get("memory", {}).get("db_path") or APP_DIR / "repo-context.sqlite").expanduser()
+    return Path(load_config().get("memory", {}).get("db_path") or default_db_path()).expanduser()
 
 
 def ollama_base_url() -> str:

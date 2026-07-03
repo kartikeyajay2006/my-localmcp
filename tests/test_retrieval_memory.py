@@ -152,6 +152,34 @@ def test_correcting_pull_elsewhere_does_not_boost(tmp_path, isolated_config):
     assert not any("memory boost" in r for r in reasons)
 
 
+def test_follow_up_pull_on_a_secondary_hint_still_counts_as_followed(tmp_path, isolated_config):
+    """Regression: when a candidate file has more than one legitimate hint location,
+    a follow-up file_excerpts pull on a listed-but-not-primary hint must be scored
+    as 'followed', not 'corrected' -- see PROJECT_NOTES.md 2026-07-03."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    lines = ["def PrimaryTarget():", "    return 'p'"]
+    lines += ["    # filler"] * 190
+    lines += ["def SecondaryTarget():", "    return 's'"]
+    (repo / "worker.py").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    secondary_line = next(i for i, line in enumerate(lines, start=1) if "def SecondaryTarget" in line)
+
+    raw = tools.prepare_context("PrimaryTarget SecondaryTarget", str(repo), token_budget=1500, max_files=1, output_format="json")
+    result = json.loads(raw)
+    excerpt = next(e for e in result["context_excerpts"] if e["path"] == "worker.py")
+    # The shown excerpt centers elsewhere (on the tie-break winner); confirm the
+    # secondary hint genuinely falls outside it, so this is a real regression check.
+    assert not (excerpt["start_line"] <= secondary_line <= excerpt["end_line"])
+
+    raw2 = tools.file_excerpts(
+        [{"path": "worker.py", "start_line": secondary_line, "end_line": secondary_line + 1}],
+        str(repo), retrieval_id=result["retrieval_id"],
+    )
+    feedback = json.loads(raw2)["retrieval_feedback"]
+    update = next(u for u in feedback["updates"] if u["path"] == "worker.py")
+    assert update["overlap"] is True
+
+
 def test_unknown_retrieval_id_reports_failure_without_raising(tmp_path, isolated_config):
     repo = tmp_path / "repo"
     repo.mkdir()

@@ -1,4 +1,6 @@
-"""End-to-end proof of the graceful upgrade cycle on Windows (1.0.7 P7c, single-venv
+"""Archived end-to-end proof of the legacy PowerShell upgrade cycle (not collected).
+
+Historical proof of the graceful upgrade cycle on Windows (1.0.7 P7c, single-venv
 scheme from 1.0.8).
 
 Runs the real install.ps1 / uninstall.ps1 scripts against a fully isolated
@@ -62,7 +64,7 @@ def _venv_dirs(app_home: Path) -> list[Path]:
 
 
 def _wait_for_one_registered_server(app_home: Path, timeout: float = 15.0) -> int:
-    servers_dir = app_home / "servers"
+    servers_dir = app_home / "cache" / "processes" / "servers"
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if servers_dir.exists():
@@ -129,7 +131,7 @@ def test_install_then_uninstall_while_server_is_live(tmp_path):
         assert not _venv_dirs(app_home)
         assert not (app_home / "bin").exists()
         # Data is preserved by default (no -RemoveData was passed).
-        assert (app_home / "config.yaml").exists()
+        assert (app_home / "config" / "config.yaml").exists()
     finally:
         # Best-effort cleanup: the server should already be gone; do not fail the
         # test over this, but don't leave a process behind if something went wrong.
