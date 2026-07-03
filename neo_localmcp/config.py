@@ -91,9 +91,15 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "max_files": None,
         "max_file_bytes": 750_000,
         "summary_max_chars": 80_000,
+        # Glob patterns (fnmatch), matched against the directory name only, not a
+        # path. A plain name with no wildcard (".git") still matches only that exact
+        # name. ".venv*"/"venv*" additionally cover differently-named or versioned
+        # local virtualenvs (e.g. ".venv-phase14", ".venv-nlm-v1.0.10", "venvs") that
+        # an exact-name list would silently index as repository source -- see
+        # PROJECT_NOTES.md 2026-07-03.
         "exclude_dirs": [
             ".git", ".hg", ".svn", ".vs", ".vscode", ".idea", "bin", "obj", "node_modules",
-            ".venv", "venv", "dist", "build", "packages", ".nuget", "TestResults", "coverage",
+            ".venv*", "venv*", "dist", "build", "packages", ".nuget", "TestResults", "coverage",
             ".next", ".svelte-kit", ".turbo", "target", "out", "DerivedData", ".gradle",
             ".neo-localmcp",
         ],
