@@ -547,7 +547,8 @@ def test_remove_runtime_is_noop_when_absent(tmp_path: Path) -> None:
 
 @pytest.mark.slow
 def test_real_candidate_build_and_promote(tmp_path: Path) -> None:
-    paths = ManagedPaths(root=tmp_path / ".neo-localmcp", platform="posix", home=tmp_path)
+    platform = "windows" if os.name == "nt" else "posix"
+    paths = ManagedPaths(root=tmp_path / ".neo-localmcp", platform=platform, home=tmp_path)
     paths.ensure_directories()
     expected_version = neo_localmcp.__version__
 

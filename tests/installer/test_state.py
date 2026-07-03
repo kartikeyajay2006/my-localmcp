@@ -53,6 +53,8 @@ def test_detects_data_only_state(tmp_path: Path) -> None:
 
 
 def test_detects_healthy_runtime(tmp_path: Path) -> None:
+    if os.name == "nt":
+        pytest.skip("POSIX executable fixture; Windows runtime is covered by its lifecycle test")
     paths = _paths(tmp_path)
     _write_runnable_python(paths)
 
@@ -73,6 +75,8 @@ def test_detects_broken_runtime_when_python_is_missing(tmp_path: Path) -> None:
 
 
 def test_detects_broken_runtime_when_package_import_fails(tmp_path: Path) -> None:
+    if os.name == "nt":
+        pytest.skip("POSIX executable fixture; Windows broken-runtime recovery has real coverage")
     paths = _paths(tmp_path)
     _write_runnable_python(paths, import_ok=False)
 

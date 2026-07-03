@@ -62,7 +62,7 @@ def _venv_dirs(app_home: Path) -> list[Path]:
 
 
 def _wait_for_one_registered_server(app_home: Path, timeout: float = 15.0) -> int:
-    servers_dir = app_home / "servers"
+    servers_dir = app_home / "cache" / "processes" / "servers"
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if servers_dir.exists():
@@ -129,7 +129,7 @@ def test_install_then_uninstall_while_server_is_live(tmp_path):
         assert not _venv_dirs(app_home)
         assert not (app_home / "bin").exists()
         # Data is preserved by default (no -RemoveData was passed).
-        assert (app_home / "config.yaml").exists()
+        assert (app_home / "config" / "config.yaml").exists()
     finally:
         # Best-effort cleanup: the server should already be gone; do not fail the
         # test over this, but don't leave a process behind if something went wrong.

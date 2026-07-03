@@ -77,20 +77,24 @@ def test_delete_registrations_removes_file(tmp_path):
 # --------------------------------------------------------------------------- #
 
 
+def _toml_path(path: Path) -> str:
+    return str(path).replace("\\", "\\\\")
+
+
 def test_codex_block_uses_injected_posix_venv_launcher(tmp_path):
     paths = _paths(tmp_path, "posix")
     block = client_setup._codex_block(server_command=paths.server_executable, config_path=paths.config / "config.yaml")
-    assert str(paths.server_executable).endswith("venv/bin/neo-localmcp-server")
-    assert str(paths.server_executable) in block
-    assert "bin/neo-localmcp-server" in block
+    assert paths.server_executable.as_posix().endswith("venv/bin/neo-localmcp-server")
+    assert _toml_path(paths.server_executable) in block
+    assert "bin\\\\neo-localmcp-server" in block
 
 
 def test_mcp_block_uses_injected_windows_venv_launcher(tmp_path):
     paths = _paths(tmp_path, "windows")
     block = client_setup._mcp_server_block(server_command=paths.server_executable, config_path=paths.config / "config.yaml")
     command = block["neo-localmcp"]["command"]
-    assert command.endswith("venv/Scripts/neo-localmcp-server.exe")
-    assert block["neo-localmcp"]["env"]["NEO_LOCALMCP_CONFIG"].endswith("config/config.yaml")
+    assert Path(command) == paths.server_executable
+    assert Path(block["neo-localmcp"]["env"]["NEO_LOCALMCP_CONFIG"]) == paths.config / "config.yaml"
 
 
 def test_setup_claude_code_manual_uses_injected_launcher(client_home, monkeypatch, tmp_path):
@@ -105,8 +109,8 @@ def test_injected_launcher_never_infers_legacy_bin_shim(tmp_path):
     block = client_setup._codex_block(server_command=paths.server_executable)
     # The legacy side-by-side layout wrote the launcher under <root>/bin; the
     # injected venv launcher must be used verbatim instead.
-    assert f"{paths.root}/bin/neo-localmcp-server" not in block
-    assert "venv/bin/neo-localmcp-server" in block
+    assert _toml_path(paths.root / "bin" / "neo-localmcp-server") not in block
+    assert _toml_path(paths.server_executable) in block
 
 
 # --------------------------------------------------------------------------- #
@@ -215,8 +219,8 @@ def test_restore_points_registrations_at_new_launcher(client_home, tmp_path):
     )
 
     codex_text = (client_home / ".codex" / "config.toml").read_text(encoding="utf-8")
-    assert str(new_launcher) in codex_text
-    assert str(old_launcher) not in codex_text
+    assert _toml_path(new_launcher) in codex_text
+    assert _toml_path(old_launcher) not in codex_text
     codex_record = {r.client: r for r in clients.read_registrations(paths)}["codex"]
     assert codex_record.server_command == str(new_launcher)
 
@@ -236,7 +240,7 @@ def test_restore_preserves_user_codex_content_byte_for_byte(client_home, tmp_pat
 
     text = codex.read_text(encoding="utf-8")
     assert '[user]' in text and 'keep = "me"' in text
-    assert str(paths.server_executable) in text
+    assert _toml_path(paths.server_executable) in text
 
 
 # --------------------------------------------------------------------------- #

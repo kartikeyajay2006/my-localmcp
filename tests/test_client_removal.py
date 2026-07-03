@@ -107,7 +107,7 @@ def test_setup_codex_with_injected_launcher_roundtrips(tmp_path, monkeypatch):
     launcher = tmp_path / ".neo-localmcp" / "venv" / "bin" / "neo-localmcp-server"
 
     client_setup.setup_codex_cli(apply=True, server_command=launcher)
-    assert str(launcher) in cfg.read_text(encoding="utf-8")
+    assert str(launcher).replace("\\", "\\\\") in cfg.read_text(encoding="utf-8")
 
     client_setup.remove_codex(apply=True)
     text = cfg.read_text(encoding="utf-8")

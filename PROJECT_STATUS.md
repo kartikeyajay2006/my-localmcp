@@ -4,7 +4,7 @@ Updated: 2026-07-02
 
 ## Current phase
 
-1.0.10 cross-platform setup-v2 implementation through Phase 13. The shared Python lifecycle and its macOS acceptance path are implemented; Windows x64/Claude Desktop parity, Linux CI, and final installer retirement remain Phases 14-16.
+1.0.10 cross-platform setup-v2 implementation through Phase 14. The shared Python lifecycle is verified on macOS and Windows x64; Linux CI and final installer retirement remain Phases 15-16. The targeted Claude Desktop/uv.exe tree smoke remains environment-deferred because no such process tree was available on the Windows host.
 
 `setup_v2.py` can install, reinstall, default-uninstall while preserving durable data, clean-install, and full-wipe from a local checkout. It builds and verifies a candidate runtime before promotion, stops Neo-owned processes, unloads only Neo-used Ollama models, migrates recognized legacy layouts, reconnects recorded clients, and verifies the installed CLI/MCP endpoint. The old PowerShell/shell installers remain authoritative for released 1.0.9 installs until cross-platform parity is complete.
 
@@ -19,6 +19,8 @@ Updated: 2026-07-02
 - Normal Ollama operations have bounded health, start, warm, and inference deadlines.
 
 ## Verified
+
+- **Setup v2 Phase 14 is verified on Windows x64**: promoted `python.exe`, `pip.exe`, `neo-localmcp.exe`, and `neo-localmcp-server.exe` remain runnable after staging relocation; a real disposable lifecycle passed live MCP reinstall/uninstall, durable-data reuse, clean/full wipe, cancellation refusal, broken/interrupted recovery, and unrelated-process survival. Ownership-scoped escalation killed only the registered test tree. Final suite: 281 passed, 4 platform/environment skips; compileall clean (Python 3.14.5, the available supported interpreter).
 
 - **Setup v2 through Phase 13 is verified on macOS in an isolated managed home**: the real lifecycle test completes install -> seed config/SQLite/client record -> start MCP -> live reinstall -> default uninstall with data preserved -> install reusing preserved data -> clean install -> full wipe. Real candidate promotion and the installed MCP handshake/doctor verification also pass.
 - **Client-removal success reporting is fail-safe**: automated registration removal now returns a machine-readable result, and setup v2 aborts before removing the runtime or managed root if cleanup fails. Claude Desktop's intentionally manual removal remains a visible warning rather than a false automated-success claim.
@@ -36,7 +38,7 @@ Updated: 2026-07-02
 
 ## Remaining validation
 
-- Run Phase 14 on Windows x64: verify promoted `Scripts/*.exe` launchers after staging-path relocation, live MCP/Claude Desktop lock release, ownership-scoped escalation, and the full destructive-semantics matrix.
+- Run the targeted Claude Desktop extension/`uv.exe` tree smoke on a Windows x64 host where that tree is available; it was absent here. Re-run the Phase 14 commands specifically under Python 3.12 when that interpreter is available (current Windows host had only supported Python 3.14.5).
 - Add Phase 15 Linux acceptance and three-OS CI gates.
 - Add explicit fresh-install client selection before setup v2 becomes the sole lifecycle entrypoint in Phase 16.
 

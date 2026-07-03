@@ -43,8 +43,8 @@ def test_client_blocks_honor_injected_server_command_and_config():
     assert block["command"] == str(launcher)
     assert block["env"]["NEO_LOCALMCP_CONFIG"] == str(config)
     codex = client_setup._codex_block(server_command=launcher, config_path=config)
-    assert str(launcher) in codex
-    assert str(config) in codex
+    assert str(launcher).replace("\\", "\\\\") in codex
+    assert str(config).replace("\\", "\\\\") in codex
 
 
 def test_mcp_surface_is_small_and_intentional():
@@ -107,7 +107,9 @@ def test_built_mcpb_embeds_current_package_bytes():
                 continue
             relative = source.relative_to(root).as_posix()
             assert relative in names, f"Bundle is missing {relative}"
-            assert archive.read(names[relative]) == source.read_bytes(), f"Bundle contains stale bytes for {relative}"
+            packaged = archive.read(names[relative]).replace(b"\r\n", b"\n")
+            checkout = source.read_bytes().replace(b"\r\n", b"\n")
+            assert packaged == checkout, f"Bundle contains stale bytes for {relative}"
 
 
 def test_context_worker_forces_utf8_stdout(monkeypatch):
