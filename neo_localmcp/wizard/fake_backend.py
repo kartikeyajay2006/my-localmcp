@@ -151,7 +151,7 @@ class FakeBackend:
                 time.sleep(_STEP_DELAY / 2)
             return OperationOutcome(
                 ok=True, status="succeeded",
-                title="Dry run complete — nothing was changed.",
+                title="Dry run complete - nothing was changed.",
                 detail_lines=("This is a simulation (--fake).",),
             )
 
@@ -177,7 +177,7 @@ class FakeBackend:
             detail_lines=(
                 f"Clients connected: {clients}",
                 f"Ollama: fast={self._fast_model}, summary={self._summary_model}",
-                "This was a simulation (--fake) — nothing on disk changed.",
+                "This was a simulation (--fake) - nothing on disk changed.",
             ),
             next_command="neo-localmcp doctor",
         )

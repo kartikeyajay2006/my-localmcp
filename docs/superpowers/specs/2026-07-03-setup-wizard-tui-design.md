@@ -3,6 +3,18 @@
 Date: 2026-07-03
 Branch: `feature/setup-wizard-tui`
 
+## Addendum 2 (UI simplification)
+
+The original UI was Textual (arrow-key widgets). At the owner's request it was
+replaced with a plain, stdlib-only, full-screen **numbered** wizard
+(`wizard/console.py`): clear screen, a running summary of answers at the top,
+one numbered question at a time. This dropped the `textual` dependency entirely
+(the `[wizard]` extra now only pins `psutil`, already a base dep) and removed
+`app.py` + `screens/`. Because the UI only ever talked to the `WizardBackend`
+Protocol, the swap touched no backend, lifecycle, or data code — `backend.py`,
+`fake_backend.py`, and `real_backend.py` were reused unchanged. The Textual
+version remains in git history (commit `0c31fcb`) if ever needed.
+
 ## Addendum (as-built)
 
 The wizard was built through in one pass (both the fake and real backends) at
