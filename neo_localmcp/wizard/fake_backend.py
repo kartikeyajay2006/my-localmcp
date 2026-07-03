@@ -31,19 +31,21 @@ from .backend import (
     OperationOutcome,
     StepEvent,
     WizardState,
+    human_size,
 )
 
 _SOURCE_VERSION = "1.0.10"
 
 # A believable `ollama list` result so the model-selection screen has real
-# choices to offer in the simulation.
-_FAKE_INSTALLED_MODELS = (
-    "qwen3:8b",
-    "qwen3-coder:30b",
-    "llama3.1:8b",
-    "nomic-embed-text:latest",
-    "deepseek-r1:14b",
-)
+# choices to offer in the simulation. Sizes are illustrative, in bytes.
+_FAKE_MODEL_SIZES_RAW = {
+    "qwen3:8b": 5_200_000_000,
+    "qwen3-coder:30b": 19_000_000_000,
+    "llama3.1:8b": 4_900_000_000,
+    "nomic-embed-text:latest": 274_000_000,
+    "deepseek-r1:14b": 9_000_000_000,
+}
+_FAKE_INSTALLED_MODELS = tuple(sorted(_FAKE_MODEL_SIZES_RAW))
 
 _STEP_DELAY = 0.35
 
@@ -160,6 +162,7 @@ class FakeBackend:
             summary_model=self._summary_model,
             state="ready",
             detail="Simulated `ollama list`: 5 models installed.",
+            model_sizes={name: human_size(size) for name, size in _FAKE_MODEL_SIZES_RAW.items()},
         )
 
     # -- operations ------------------------------------------------------- #
