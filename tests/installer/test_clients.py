@@ -86,7 +86,6 @@ def test_codex_block_uses_injected_posix_venv_launcher(tmp_path):
     block = client_setup._codex_block(server_command=paths.server_executable, config_path=paths.config / "config.yaml")
     assert paths.server_executable.as_posix().endswith("venv/bin/neo-localmcp-server")
     assert _toml_path(paths.server_executable) in block
-    assert "bin\\\\neo-localmcp-server" in block
 
 
 def test_mcp_block_uses_injected_windows_venv_launcher(tmp_path):

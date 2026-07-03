@@ -1,4 +1,4 @@
-name: setup-v2 cross-platform
+name: setup-v2 macOS and Windows
 
 on:
   push:
@@ -12,8 +12,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            lifecycle: tests/installer/test_linux_lifecycle.py
           - os: macos-latest
             lifecycle: tests/installer/test_macos_lifecycle.py
           - os: windows-latest

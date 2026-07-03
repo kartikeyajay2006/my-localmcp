@@ -4,7 +4,7 @@ Updated: 2026-07-02
 
 ## Current phase
 
-1.0.10 cross-platform setup-v2 implementation through Phase 14, with Phase 15's Linux acceptance test and three-OS GitHub Actions matrix implemented locally. The shared Python lifecycle is verified on macOS and Windows x64; Linux and fresh three-OS CI execution remain unverified until the workflow runs. Phase 16 installer retirement must wait for that gate. The targeted Claude Desktop/uv.exe tree smoke remains environment-deferred because no such process tree was available on the Windows host.
+1.0.10 setup-v2 implementation targets macOS and Windows for this release. Phase 15's native GitHub Actions gate is implemented for those two operating systems. Linux support has been explicitly deferred by owner decision and is not a 1.0.10 release gate. Phase 16 installer retirement waits for fresh macOS and Windows CI. The targeted Claude Desktop/uv.exe tree smoke remains environment-deferred because no such process tree was available on the Windows host.
 
 `setup_v2.py` can install, reinstall, default-uninstall while preserving durable data, clean-install, and full-wipe from a local checkout. It builds and verifies a candidate runtime before promotion, stops Neo-owned processes, unloads only Neo-used Ollama models, migrates recognized legacy layouts, reconnects recorded clients, and verifies the installed CLI/MCP endpoint. The old PowerShell/shell installers remain authoritative for released 1.0.9 installs until cross-platform parity is complete.
 
@@ -38,7 +38,7 @@ Updated: 2026-07-02
 
 ## Remaining validation
 
-- Run `.github/workflows/setup-v2.yml` from a clean checkout and require green Python 3.12 jobs on Ubuntu, macOS, and Windows. The Linux lifecycle test exists but has not run on Linux in this Windows-only session; do not infer Linux parity from collection or skips.
+- Run `.github/workflows/setup-v2.yml` from a clean checkout and require green Python 3.12 jobs on macOS and Windows.
 - Run the targeted Claude Desktop extension/`uv.exe` tree smoke on a Windows x64 host where that tree is available; it was absent here. Re-run the Phase 14 commands specifically under Python 3.12 when that interpreter is available (current Windows host had only supported Python 3.14.5).
 - Add Phase 15 Linux acceptance and three-OS CI gates.
 - Add explicit fresh-install client selection before setup v2 becomes the sole lifecycle entrypoint in Phase 16.
