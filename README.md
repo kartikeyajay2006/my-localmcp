@@ -118,60 +118,31 @@ cached by source hash so it's only regenerated when the file changes.
 Administration (`index`, `reindex`, `reset-*`, `config clients setup|remove|status`,
 `servers`, `stop`, ...) is deliberately CLI-only and never exposed as an MCP tool.
 No installed `neo-localmcp` command builds, rebuilds, or removes the managed
-runtime itself — that lifecycle work lives in `setup_v2.py` (see below) and the
-`.ps1`/`.sh` installers.
+runtime itself — lifecycle work lives in the checkout's `setup.py`.
 
 ## Install
 
-Requirements: Python 3.10 or newer. Windows and macOS are primary targets.
+Requirements: Python 3.12 or newer. Version 1.0.10 supports macOS and Windows;
+Linux support is deferred.
 
-Windows:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\install.ps1
-neo-localmcp config clients setup --client all
-```
-
-Or, on Windows, run `powershell -ExecutionPolicy Bypass -File .\setup.ps1` for an interactive wizard that detects current state and walks through install/upgrade/uninstall instead of requiring flags.
-
-macOS:
+Run the shared lifecycle from a local checkout:
 
 ```bash
-./install.sh
-neo-localmcp config clients setup --client all
-```
-
-Both installers are idempotent. On Windows (1.0.8+), `install.ps1` keeps exactly one virtual environment per version at `~/.neo-localmcp/.venv-nlm-v<version>`: it asks any running server to exit gracefully before touching venv files (rather than relying on side-by-side directories to dodge a locked upgrade target), removes any other version's venv, and skips the rebuild entirely if the target version is already installed. Pass `-DryRun` to preview, or `-Repair` to force a rebuild of the currently-targeted version. macOS's `install.sh` still uses the pre-1.0.8 side-by-side layout under `~/.neo-localmcp/venvs` pending parity (tracked in `docs/1.0.7_PLAN.md`). Uninstalling preserves configuration and repository memory unless the remove-data option is supplied:
-
-```powershell
-.\uninstall.ps1
-```
-
-```bash
-./uninstall.sh
-```
-
-### setup_v2.py (in development)
-
-`setup_v2.py` is a new, cross-platform install/reinstall/uninstall entrypoint
-under active development (currently verified on macOS; Windows/Linux parity and
-full documentation land in later tasks). It requires Python 3.12+ and, until
-cross-platform parity is verified, is a preview alongside the `.ps1`/`.sh`
-installers above, not a replacement for them yet:
-
-```bash
-python3 setup_v2.py install                       # install, or update in place; preserves memory/config
-python3 setup_v2.py install --clean --yes          # full wipe + fresh install (destructive; --yes required non-interactively)
-python3 setup_v2.py reinstall                      # replace the managed runtime; never touches durable data
-python3 setup_v2.py uninstall                      # remove the managed runtime only; durable data preserved
-python3 setup_v2.py uninstall --delete-memory --yes # full wipe, no reinstall (destructive; --yes required non-interactively)
-python3 setup_v2.py install --dry-run              # show detected state + ordered action plan; changes nothing
+python3 setup.py install --client codex --client claude-code
+python3 setup.py install --clean --yes             # full wipe + fresh install
+python3 setup.py reinstall                         # replace runtime; preserve durable data
+python3 setup.py uninstall                         # remove runtime; preserve durable data
+python3 setup.py uninstall --delete-memory --yes   # full wipe, no reinstall
+python3 setup.py install --dry-run                 # preview only
 ```
 
 Every subcommand supports `-h`/`--help`. `--clean` and `--delete-memory` are
 destructive (they delete the entire managed root) and require interactive
 confirmation or the explicit `--yes` flag; running one non-interactively
 without `--yes` is a safety refusal (exit code 2) before anything is touched.
+Omit `--client` to register no client surfaces. Repeat it for any combination of
+`claude-code`, `codex`, and `claude-desktop`. Legacy platform installers are
+preserved for reference under `_LegacyInstallers/`, but are not supported entrypoints.
 
 ## Quickstart: fresh repo (little or no code yet)
 
@@ -221,7 +192,7 @@ instruction persists across sessions instead of being repeated by hand.
 ## Client integration
 
 - Claude Code is configured using `claude mcp add` and receives `/neo-localmcp:*` command templates.
-- Claude Desktop uses the versioned package generated at `packages/claude-desktop/neo-localmcp-v<version>.mcpb`. Build it with `scripts/build-mcpb.ps1` or `scripts/build-mcpb.sh`, then install it through Settings > Extensions > Advanced settings. `install.ps1` also copies it to a fixed-name local copy at `~/.neo-localmcp/neo-localmcp.mcpb` so setup instructions don't need to track the version suffix.
+- Claude Desktop uses the versioned package generated at `packages/claude-desktop/neo-localmcp-v<version>.mcpb`. Build it with `scripts/build-mcpb.ps1` or `scripts/build-mcpb.sh`, then install it through Settings > Extensions > Advanced settings.
 - Codex app, CLI, and IDE share `~/.codex/config.toml`; setup writes one marked, replaceable block there.
 - MCP calls use a client workspace root when available. If none or several are exposed, pass `repo_root` explicitly or set `NEO_LOCALMCP_REPO`; the server refuses ambiguous automatic scope.
 
@@ -247,7 +218,7 @@ Before inference, neo-localmcp checks Ollama version, installed models, and runn
 
 States returned to Claude/Codex include `unreachable`, `model_missing`, `model_cold`, `warming`, `ready`, `busy`, `timed_out`, and `failed`. Failures preserve deterministic context. HTTP 503 is treated as busy and does not trigger a restart.
 
-Models may be shared with other agents. During ordinary MCP operation neo-localmcp never unloads a model automatically and does not alter Ollama's global parallelism or queue configuration. The one exception is the setup lifecycle (`setup_v2.py reinstall`/`uninstall`), which unloads only the models neo-localmcp itself configured — via `keep_alive: 0`, never by stopping the Ollama daemon — before replacing or removing the managed runtime.
+Models may be shared with other agents. During ordinary MCP operation neo-localmcp never unloads a model automatically and does not alter Ollama's global parallelism or queue configuration. The one exception is the setup lifecycle (`setup.py reinstall`/`uninstall`), which unloads only the models neo-localmcp itself configured — via `keep_alive: 0`, never by stopping the Ollama daemon — before replacing or removing the managed runtime.
 
 ## Verification
 

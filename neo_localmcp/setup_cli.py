@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Cross-platform setup v2 entrypoint: the thin install/reinstall/uninstall CLI.
+"""Cross-platform setup entrypoint: the thin install/reinstall/uninstall CLI.
 
 This module is deliberately dumb. It parses arguments, builds an
 ``OperationContext`` from real sources (``ManagedPaths.from_environment()``,
@@ -40,7 +40,7 @@ def _python_floor_message(floor: tuple[int, int] = PYTHON_FLOOR) -> str:
     return (
         f"neo-localmcp requires Python {floor_text}+ ; found {current}.\n"
         f"Install a Python {floor_text} or newer interpreter and re-run this script with it, e.g.:\n"
-        f"    python3.12 setup_v2.py install"
+        f"    python3.12 setup.py install"
     )
 
 
@@ -153,11 +153,10 @@ def _plan_key(operation: str, *, clean: bool = False, delete_memory: bool = Fals
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="setup_v2.py",
+        prog="setup.py",
         description=(
-            "neo-localmcp setup v2: install, reinstall, or uninstall the managed "
-            "runtime. This is the only supported lifecycle entrypoint until "
-            "cross-platform parity lets it replace the .ps1/.sh installers."
+            "neo-localmcp setup: install, reinstall, or uninstall the managed "
+            "runtime on macOS and Windows."
         ),
     )
     sub = parser.add_subparsers(dest="operation", required=True)
@@ -180,6 +179,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run",
         action="store_true",
         help="Print the detected state and the ordered action plan; make no changes.",
+    )
+    install_parser.add_argument(
+        "--client",
+        action="append",
+        choices=("claude-code", "codex", "claude-desktop"),
+        default=[],
+        help="Register this client after a fresh/clean install. Repeat for multiple clients; omit to register none.",
     )
     install_parser.set_defaults(operation="install")
 
@@ -261,6 +267,9 @@ def _render_dry_run(paths: ManagedPaths, args: argparse.Namespace, reporter: Rep
     reporter.info(f"DRY RUN: no changes will be made for '{args.operation}'.")
     reporter.info(f"Managed root: {paths.root}")
     reporter.info(f"Detected state: {state.kind.value}")
+    if args.operation == "install":
+        selected = ", ".join(args.client) if args.client else "none"
+        reporter.info(f"Selected clients: {selected}")
     for key, value in sorted(state.details.items()):
         reporter.info(f"  state.{key}: {value}")
 
@@ -281,7 +290,7 @@ def _render_dry_run(paths: ManagedPaths, args: argparse.Namespace, reporter: Rep
 
 
 def _source_root() -> Path:
-    return Path(__file__).resolve().parent
+    return Path(__file__).resolve().parents[1]
 
 
 def _source_version() -> str:
@@ -293,7 +302,7 @@ def _source_version() -> str:
 def build_context(reporter: Reporter | None = None) -> OperationContext:
     """Construct a real OperationContext from real sources.
 
-    ``source_root`` is this checkout (the directory containing setup_v2.py),
+    ``source_root`` is this checkout (the directory containing setup.py),
     ``python_executable`` is the interpreter currently running this script, and
     ``confirm`` is the real interactive/--yes confirmation gate.
     """
@@ -335,6 +344,8 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_USAGE_OR_REFUSAL
 
     context = build_context(reporter)
+    if args.operation == "install":
+        context.selected_clients = list(args.client)
 
     if getattr(args, "dry_run", False):
         _render_dry_run(context.paths, args, reporter)
