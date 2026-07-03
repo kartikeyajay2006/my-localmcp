@@ -3,6 +3,33 @@
 Date: 2026-07-03
 Branch: `feature/setup-wizard-tui`
 
+## Addendum (as-built)
+
+The wizard was built through in one pass (both the fake and real backends) at
+the owner's direction. Two requirements were added after the original design
+below and are reflected in the code:
+
+- **Menu-driven, not a fixed linear wizard.** The Home screen is an adaptive
+  main menu keyed on detected state. A first-time clone (state `absent`) sees
+  Install / Configure Ollama / Quit. A returning user (state `healthy`) sees
+  Reinstall-or-Repair / Configure Ollama / Manage clients / Uninstall / Quit.
+  This directly serves the "install, uninstall, reinstall, and config" ask and
+  the returning-user flow.
+- **Ollama models are chosen from the live `ollama list`.** The Ollama screen
+  probes Ollama (via `ollama_client.status()`), and when models are installed it
+  offers them as arrow-navigable radio choices for `fast_model` and
+  `summary_model`; when Ollama is unreachable or has no models it falls back to
+  free-text inputs. Standalone "Configure Ollama models" applies by writing
+  `config.yaml` only — no runtime rebuild.
+- **Stored prefs.** `wizard-prefs.json` under the managed config dir remembers
+  the user's last client selection and model choices to pre-fill later runs. It
+  is a UX convenience only; authoritative state still comes from `detect_state`,
+  client registrations, and `config.yaml`.
+- **Scope trim for safety:** clean-install (full-wipe-then-install) was left out
+  of the menu. Full wipe is reachable only under Uninstall, behind the same
+  typed-`DELETE ALL NEO-LOCALMCP DATA` gate the CLI uses, so there is exactly one
+  destructive path in the UI.
+
 ## Origin
 
 `setup.py` already implements a full, correct install/reinstall/uninstall

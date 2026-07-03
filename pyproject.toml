@@ -17,6 +17,10 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["pytest>=8.0"]
+# Guided terminal installer (`python setup_wizard.py`). psutil is already a
+# runtime dependency; textual is the TUI toolkit the wizard draws with. Kept out
+# of the base dependencies so the headless server/CLI never pulls in a UI stack.
+wizard = ["textual>=0.60,<7", "psutil>=5.9,<8"]
 
 [project.scripts]
 neo-localmcp = "neo_localmcp.cli:main"
