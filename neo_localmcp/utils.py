@@ -292,13 +292,23 @@ def rg_search(query: str, root: Path, max_results: int = 80) -> list[dict[str, A
             else:
                 rows.append({"raw": raw})
         return rows
-    needle = query.lower()
+    # No ripgrep on PATH (e.g. a CI image without it preinstalled): fall back to a
+    # pure-Python scan. The query is always regex syntax (tools.py sends a
+    # re.escape'd alternation like "(?:worker|RareMarkerNeedle)" to mirror rg's
+    # --ignore-case), so it must be compiled and searched as a regex, not matched
+    # as a literal substring -- a literal match of the whole "(?:...|...)" syntax
+    # would never occur in real source text and silently returns nothing.
+    try:
+        pattern = re.compile(query, re.IGNORECASE)
+    except re.error:
+        return []
     rows = []
     for p in iter_repo_files(root, max_files=3000):
         try:
             for idx, line in enumerate(read_text_file(p, 500_000).splitlines(), start=1):
-                if needle in line.lower():
-                    rows.append({"path": rel(p, root), "line": idx, "column": max(1, line.lower().find(needle) + 1), "text": line.strip()})
+                m = pattern.search(line)
+                if m:
+                    rows.append({"path": rel(p, root), "line": idx, "column": m.start() + 1, "text": line.strip()})
                     if len(rows) >= max_results:
                         return rows
         except Exception:
