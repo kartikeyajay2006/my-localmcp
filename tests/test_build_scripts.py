@@ -3,14 +3,15 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 
 def test_build_mcpb_sh_reads_version_with_macos_sed(tmp_path: Path) -> None:
-    if shutil.which("bash") is None:
-        pytest.skip("bash is unavailable on this Windows host")
+    if sys.platform != "darwin" or shutil.which("bash") is None:
+        pytest.skip("macOS shell packaging evidence")
     root = Path(__file__).parents[1]
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
