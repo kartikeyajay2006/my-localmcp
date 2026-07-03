@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from neo_localmcp import utils
 
 
@@ -67,3 +69,22 @@ def test_dirs_that_merely_contain_venv_substring_are_not_excluded(tmp_path, isol
     assert rels == {"real.py", "eventvenue/handler.py"}
     assert eligible == 2
     assert complete is True
+
+
+def test_rg_search_fallback_interprets_the_query_as_a_regex(tmp_path, isolated_config, monkeypatch):
+    """Regression: on a host without ripgrep on PATH (e.g. GitHub's macos-latest
+    CI runner has no rg preinstalled, unlike the windows-latest runner used
+    during local development), the pure-Python fallback path did a literal
+    substring match of the *entire* regex-syntax query string -- including the
+    '(?:...|...)' alternation syntax tools.py always sends it -- against each
+    line, so it silently matched nothing at all, for single or multi-term
+    batches alike. Surfaced live by CI on 2026-07-03; see PROJECT_NOTES.md."""
+    monkeypatch.setattr(utils, "which", lambda name: None)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "module_a.py").write_text("def handler():\n    # marks RareMarkerNeedle usage here\n    return 1\n", encoding="utf-8")
+
+    pattern = "(?:" + "|".join(re.escape(t) for t in ["worker", "RareMarkerNeedle"]) + ")"
+    rows = utils.rg_search(pattern, repo)
+
+    assert any(row.get("path") == "module_a.py" and row.get("line") == 2 for row in rows)
