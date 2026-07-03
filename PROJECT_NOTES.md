@@ -1,5 +1,12 @@
 # Project Notes
 
+## 2026-07-03 (8)
+
+- Owner found the Textual wizard over-engineered ("we went balls to the wall") and asked to simplify the UI to a plain full-screen numbered wizard: numbers to select options, a summary built up as you answer. Committed the Textual version first (`0c31fcb`) as a revert point, then replaced the UI.
+- Replaced `wizard/app.py` + `wizard/screens/` with a single stdlib `wizard/console.py` (clear-screen + running-summary + numbered `input()` loop). Dropped `textual` entirely: `[wizard]` extra now pins only `psutil` (already a base dep), `preflight.py`'s `WIZARD_DEPENDENCIES` is `("psutil",)`, and `setup_wizard.py` imports `run` from `console`. The `WizardBackend` seam paid off exactly as designed — `backend.py`/`fake_backend.py`/`real_backend.py` were reused with zero changes; only the UI layer swapped.
+- Replaced all non-ASCII glyphs (em-dash, middle-dot, ellipsis) with ASCII across the wizard, because piped/legacy Windows consoles rendered them as replacement chars; verified output is ASCII-only.
+- Verified on Windows: `compileall` clean; drove the fake install flow and the fake config-ollama flow end-to-end via piped numbered stdin — running summary builds correctly, live steps stream, menu adapts to installed state afterward, quit works. Still not run interactively by a human or on macOS.
+
 ## 2026-07-03 (7)
 
 - Built a guided terminal installer (`setup_wizard.py` + `neo_localmcp/wizard/`) on branch `feature/setup-wizard-tui`, per owner request to make install/uninstall/reinstall/config simple for end users. Textual-based TUI with arrow-key navigation and a dim-grey explainer line under every option. Brainstormed the design first (spec at `docs/superpowers/specs/2026-07-03-setup-wizard-tui-design.md`), then owner said to build it all the way through (fake + real backends), skipping formal tests.

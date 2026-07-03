@@ -127,22 +127,24 @@ Linux support is deferred.
 
 ### Guided installer (recommended)
 
-The friendliest way to install is the terminal wizard — a keyboard-navigable UI
-that walks you through install / reinstall / uninstall, choosing which AI clients
-to connect (with the exact config path shown for your OS), and picking Ollama
-models from those you actually have installed. It drives the same lifecycle as
-`setup.py` under the hood.
+The friendliest way to install is the terminal wizard — a plain full-screen
+numbered menu. It clears the screen, shows a running summary of your answers as
+you go, and asks one numbered question at a time. It walks you through install /
+reinstall / uninstall, choosing which AI clients to connect (with the exact
+config path shown for your OS), and picking Ollama models from those you actually
+have installed. It drives the same lifecycle as `setup.py` under the hood.
 
 ```bash
-pip install -e ".[wizard]"      # installs the wizard's deps (textual + psutil)
+pip install -e ".[wizard]"      # only needs psutil (already a base dependency)
 python setup_wizard.py
 ```
 
-If you skip the first line and run `python setup_wizard.py` on a bare clone, the
-wizard detects the missing dependencies and offers to install them for you before
-starting. Add `--fake` to walk the entire flow as a safe simulation that touches
-nothing on disk (`NEO_LOCALMCP_WIZARD_FAKE_STATE=healthy` simulates a returning,
-already-installed user).
+The wizard is plain-stdlib — there is no UI toolkit to install. If you run
+`python setup_wizard.py` on a bare clone and `psutil` is missing, the wizard
+detects it and offers to install it for you before starting. Add `--fake` to walk
+the entire flow as a safe simulation that touches nothing on disk
+(`NEO_LOCALMCP_WIZARD_FAKE_STATE=healthy` simulates a returning, already-installed
+user).
 
 Returning users: run `python setup_wizard.py` again any time to reinstall/update,
 reconfigure Ollama models against your current `ollama list`, add or remove

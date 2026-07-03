@@ -1,10 +1,10 @@
 """Stdlib-only dependency gate for the setup wizard.
 
-Nothing here may import ``textual``, ``psutil``, or any ``neo_localmcp`` module
-that imports them -- this runs on a bare interpreter straight off a fresh clone.
-Its only job is to make sure the wizard's dependencies are importable, offering
-to ``pip install`` them for the user if they are not, and then to re-exec so the
-freshly-installed packages are picked up cleanly.
+Nothing here may import ``psutil`` or any ``neo_localmcp`` module that imports it
+-- this runs on a bare interpreter straight off a fresh clone. Its only job is to
+make sure the wizard's one dependency is importable, offering to ``pip install``
+it for the user if it is not, and then to re-exec so the freshly-installed
+package is picked up cleanly.
 """
 
 from __future__ import annotations
@@ -15,7 +15,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-WIZARD_DEPENDENCIES = ("textual", "psutil")
+# psutil is the only third-party import the wizard (and the setup lifecycle it
+# drives) needs; it is already a base runtime dependency. The plain numbered UI
+# is stdlib-only, so there is no TUI toolkit to install.
+WIZARD_DEPENDENCIES = ("psutil",)
 WIZARD_EXTRA = ".[wizard]"
 
 

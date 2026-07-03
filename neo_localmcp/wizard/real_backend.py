@@ -54,11 +54,11 @@ _PREFIX_LEVELS = {
 
 _STATE_LABELS = {
     "absent": "Not installed yet on this machine.",
-    "data-only": "Data present, but no runtime — a previous uninstall kept your memory.",
+    "data-only": "Data present, but no runtime - a previous uninstall kept your memory.",
     "healthy": "Installed and healthy.",
-    "broken-runtime": "Installed but the runtime looks broken — a reinstall will repair it.",
-    "partial-operation": "A previous setup did not finish — a reinstall will recover it.",
-    "legacy-layout": "An older layout was detected — installing will migrate it.",
+    "broken-runtime": "Installed but the runtime looks broken - a reinstall will repair it.",
+    "partial-operation": "A previous setup did not finish - a reinstall will recover it.",
+    "legacy-layout": "An older layout was detected - installing will migrate it.",
 }
 
 
@@ -227,7 +227,7 @@ class RealBackend:
             emit(StepEvent("info", f"  {i}. {step}"))
         return OperationOutcome(
             ok=True, status="succeeded",
-            title="Dry run complete — nothing was changed.",
+            title="Dry run complete - nothing was changed.",
             detail_lines=(f"Planned operation: {key}",),
         )
 
@@ -238,7 +238,7 @@ class RealBackend:
         if result.status is OperationStatus.CANCELLED:
             return OperationOutcome(
                 ok=False, status=status,
-                title=f"{op.capitalize()} cancelled — nothing was changed.",
+                title=f"{op.capitalize()} cancelled - nothing was changed.",
             )
         if ok:
             details = [f"Actions: {', '.join(result.actions) or 'none'}"]

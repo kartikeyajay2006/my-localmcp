@@ -5,18 +5,19 @@ A friendlier front door than ``setup.py``: instead of remembering flags, run
 
     python setup_wizard.py
 
-and a keyboard-navigable TUI walks you through install / reinstall / uninstall,
-client registration, and Ollama model selection, explaining every option and the
-OS-specific paths involved as it goes. It drives the *same* lifecycle operations
-``setup.py`` uses (``neo_localmcp.installer``); it is a friendlier caller, not a
-second implementation.
+and a simple full-screen numbered wizard walks you through install / reinstall /
+uninstall, client registration, and Ollama model selection, explaining every
+option and the OS-specific paths involved and building up a summary of your
+answers as it goes. It drives the *same* lifecycle operations ``setup.py`` uses
+(``neo_localmcp.installer``); it is a friendlier caller, not a second
+implementation.
 
 This file is deliberately stdlib-only above the dependency gate. It must import
 and run on a bare interpreter straight off a fresh clone, because its whole job
-before drawing anything is to make sure the wizard's own dependencies
-(``textual`` + ``psutil``) are present -- offering to install them for you if
-they are not. Nothing that needs those packages may be imported until
-``ensure_dependencies`` has returned.
+before drawing anything is to make sure the wizard's one dependency (``psutil``,
+already a runtime dependency) is present -- offering to install it for you if it
+is not. Nothing that needs it may be imported until ``ensure_dependencies`` has
+returned.
 
 Flags:
     --fake   Run against an in-memory simulation. No processes, venvs, network,
@@ -55,7 +56,7 @@ def main() -> int:
     ensure_dependencies(REPO_ROOT, sys.argv)
 
     # Dependencies are guaranteed present past this point.
-    from neo_localmcp.wizard.app import run
+    from neo_localmcp.wizard.console import run
 
     return run(sys.argv[1:])
 
