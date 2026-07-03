@@ -163,11 +163,18 @@ class ConsoleWizard:
         prompt = ("Which clients should stay connected?"
                   if manage else "Which clients should connect to neo-localmcp?")
         self._header(prompt)
-        rows = []
-        for opt in options:
+        print(" neo-localmcp registers itself with each AI client you pick so that")
+        print(" client can call it. The path under each option is where that client")
+        print(" is configured on this OS.")
+        print()
+        for index, opt in enumerate(options, start=1):
             mark = "  (connected)" if opt.key in registered else ""
-            rows.append((opt.label + mark, opt.config_path))
-        self._print_options(rows)
+            manual = "  [manual step]" if opt.manual else ""
+            print(f"   {index}) {opt.label}{mark}{manual}")
+            print(f"        path: {opt.config_path}")
+            if opt.detail:
+                print(f"        {opt.detail}")
+            print()
         picks = self._ask_multi(len(options), default=default_indices)
         chosen = [options[i - 1].key for i in picks]
         self.state.selected_clients = chosen

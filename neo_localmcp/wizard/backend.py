@@ -59,12 +59,20 @@ class DetectedInfo:
 
 @dataclass(frozen=True)
 class ClientOption:
-    """One connectable AI client surface and where its config lives on this OS."""
+    """One connectable AI client surface and where/how it is configured on this OS.
+
+    ``config_path`` is the OS-specific location touched for this client, and
+    ``detail`` says *what* that path is (a slash-commands dir, a config.toml block,
+    or a .mcpb package). ``manual`` marks a surface the wizard cannot fully
+    automate -- Claude Desktop, which needs a manual .mcpb install in-app.
+    """
 
     key: str
     label: str
     config_path: str
     registered: bool
+    detail: str = ""
+    manual: bool = False
 
 
 @dataclass(frozen=True)
