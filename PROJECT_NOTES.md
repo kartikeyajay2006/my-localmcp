@@ -1,5 +1,10 @@
 # Project Notes
 
+## 2026-07-03 (11)
+
+- Owner wants to test the wizard on macOS and asked that paths auto-update per OS (Mac must show Mac-style paths). Real backend was already correct — it computes everything from the live OS (`ManagedPaths.from_environment()`, `client_setup.client_status()` via `platform.system()`/`Path.home()`, and `_os_label` returns "macOS" for posix+darwin), so on a real Mac it yields `/Users/name/...` forward-slash paths and the `.mcpb` under `~/.neo-localmcp`. Confirmed `_os_label` returns "macOS" for a simulated posix/darwin env.
+- Fake backend was the gap: it split only Windows-vs-not and showed `~/...` for everything non-Windows. Rewrote its path helpers to key on `sys.platform` (`_fake_os()` -> windows/macos/linux) and build paths with the correct home + separator per OS: Mac shows `/Users/you/...` (forward slashes), Windows `C:\Users\you\...` (backslashes), Linux `/home/you/...`. Verified all three by monkeypatching `sys.platform` on this Windows host. Removed now-unused `platform` import.
+
 ## 2026-07-03 (10)
 
 - Owner approved the direction ("exactly what I'm looking for") and asked to lock it in and polish the fake guided installer. Applied the clients-step treatment (a brief "what this step is about" explainer + labeled subtext) consistently to every step: added a `_explain()` helper in `console.py` and used it on the main menu, clients, Ollama step, both model pickers (fast = "smaller/fast is best", summary = "larger code model is best"), uninstall, and confirm. `_pick_model` gained a `hint` param so fast vs summary each explain their purpose. Walked the full fake install flow end-to-end on Windows to confirm every screen reads cleanly and the running summary builds (Operation -> Clients -> Ollama) by the confirm screen.
