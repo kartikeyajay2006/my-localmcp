@@ -125,6 +125,42 @@ runtime itself — lifecycle work lives in the checkout's `setup.py`.
 Requirements: Python 3.12 or newer. Version 1.0.10 supports macOS and Windows;
 Linux support is deferred.
 
+### Guided installer (recommended)
+
+The friendliest way to install is the terminal wizard — a plain full-screen
+numbered menu. It clears the screen, shows a running summary of your answers as
+you go, and asks one numbered question at a time. It walks you through install /
+reinstall / uninstall, choosing which AI clients to connect (with the exact
+config path shown for your OS), and picking Ollama models from those you actually
+have installed. It drives the same lifecycle as `setup.py` under the hood.
+
+```bash
+pip install -e ".[wizard]"      # only needs psutil (already a base dependency)
+python setup_wizard.py
+```
+
+The wizard is plain-stdlib — there is no UI toolkit to install. If you run
+`python setup_wizard.py` on a bare clone and `psutil` is missing, the wizard
+detects it and offers to install it for you before starting. Add `--fake` to walk
+the entire flow as a safe simulation that touches nothing on disk
+(`NEO_LOCALMCP_WIZARD_FAKE_STATE=healthy` simulates a returning, already-installed
+user).
+
+Returning users: run `python setup_wizard.py` again any time to reinstall/update,
+reconfigure Ollama models against your current `ollama list`, add or remove
+connected clients, or uninstall — the menu adapts to what's already installed, and
+your last choices are remembered in `~/.neo-localmcp/config/wizard-prefs.json`.
+
+### Direct CLI (`setup.py`)
+
+`setup.py` is the flag-driven equivalent (what the wizard calls). The interpreter
+you invoke it with — not the managed runtime it builds — imports `psutil` before
+anything else, so install that one package into your system/host Python first:
+
+```bash
+python3 -m pip install "psutil>=5.9,<8"
+```
+
 Run the shared lifecycle from a local checkout:
 
 ```bash
