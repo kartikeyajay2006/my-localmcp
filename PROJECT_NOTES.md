@@ -1,5 +1,9 @@
 # Project Notes
 
+## 2026-07-03 (10)
+
+- Owner approved the direction ("exactly what I'm looking for") and asked to lock it in and polish the fake guided installer. Applied the clients-step treatment (a brief "what this step is about" explainer + labeled subtext) consistently to every step: added a `_explain()` helper in `console.py` and used it on the main menu, clients, Ollama step, both model pickers (fast = "smaller/fast is best", summary = "larger code model is best"), uninstall, and confirm. `_pick_model` gained a `hint` param so fast vs summary each explain their purpose. Walked the full fake install flow end-to-end on Windows to confirm every screen reads cleanly and the running summary builds (Operation -> Clients -> Ollama) by the confirm screen.
+
 ## 2026-07-03 (9)
 
 - Owner spotted that the wizard's client-selection paths were wrong/misleading and asked to verify against `client_setup.py`. Confirmed: Claude Desktop is NOT configured by writing `claude_desktop_config.json` (the code explicitly says "Direct claude_desktop_config.json editing is intentionally no longer performed") — it's a `.mcpb` package at `~/.neo-localmcp/neo-localmcp.mcpb` that the user installs manually via Settings > Extensions > Advanced settings (`setup_claude_desktop` returns `applied: False, manual_install_required: True`). Claude Code isn't a single config file either: slash commands go to `~/.claude/commands/neo-localmcp` and the MCP server is registered via a `claude mcp add --scope user` CLI call.
