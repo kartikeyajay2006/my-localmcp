@@ -474,6 +474,12 @@ class ConsoleWizard:
     def _save_prefs(self, outcome) -> None:
         if self.state.dry_run or not outcome.ok:
             return
+        if self.state.operation == OP_UNINSTALL:
+            # Never write prefs after tearing something down: a full wipe deletes
+            # the whole managed root, and re-creating its config/ dir just to drop
+            # a prefs file back in would silently undermine that guarantee. A
+            # runtime-only uninstall has nothing new worth persisting either.
+            return
         prefs = dict(self.prefs)
         if self.state.operation in {OP_INSTALL, OP_MANAGE_CLIENTS}:
             prefs["last_clients"] = list(self.state.selected_clients)
