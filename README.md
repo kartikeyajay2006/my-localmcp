@@ -224,7 +224,7 @@ Models may be shared with other agents. During ordinary MCP operation neo-localm
 
 ```bash
 python -m pytest -q
-python -m compileall -q neo_localmcp
+python -m compileall -q neo_localmcp setup.py
 neo-localmcp ollama status
 neo-localmcp context "debug repository indexing: index_repo, refresh" --repo-root . --token-budget 1000
 ```

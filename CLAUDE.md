@@ -51,7 +51,7 @@ neo-localmcp context "debug repository indexing: index_repo, refresh" --repo-roo
 - `repo_memory.py` — SQLite persistence: repo/file/symbol index, `repo_fts`, and the retrieval-boost implicit-feedback memory (`get_boost_map`, `record_task_query`, `record_retrieval_feedback`).
 - `ollama_client.py` — Ollama lifecycle (status/start/warm/ensure), bounded inference (`num_predict`), never auto-downloads models.
 - `lifecycle.py` — server registry + graceful-stop (`neo-localmcp stop`), used by `setup.py` before touching runtime files.
-- `client_setup.py` — registers neo-localmcp with Claude Code / Claude Desktop / Codex. Only *registration* exists today — no `remove_*` functions yet (planned, see `docs/1.0.9_PLAN.md`).
+- `client_setup.py` — registers and deregisters neo-localmcp for Claude Code / Claude Desktop / Codex (`setup_*`/`remove_*` per surface, plus `remove_client`/`remove_clients` dispatchers). Claude Desktop removal is detect-and-warn only — the extension itself is removed through Claude's own UI, not automated.
 - `config.py` — single source of truth for `APP_DIR` (`~/.neo-localmcp` by default) and `config.yaml` defaults.
 - `query.py` — natural/hybrid task-string parsing into intent + strong/weak terms.
 - `identity.py` / `neo.toml` — product naming constants (only place that should ever need to change if the product is renamed).
@@ -90,6 +90,7 @@ neo-localmcp context "debug repository indexing: index_repo, refresh" --repo-roo
 - Section-summary cache is keyed on source-file content hash only, not code version —
   a cache entry from a buggy older release isn't invalidated by fixing the bug, only
   by the source file changing or a manual cache clear.
-- Retrieval-boost memory (`repo_memory.py`) is live-wired but unaudited: never
-  calibrated against real usage, and its survival across an upgrade has never been
-  asserted by a test (see `docs/1.0.9_PLAN.md`, phase 9g).
+- Retrieval-boost memory (`repo_memory.py`) is audited and upgrade-safe (1.0.9,
+  phase 9g), but modest by design: it only nudges once the same task string
+  recurs >= 3 times in one repo, so it helps repeated workflows, not first-time
+  tasks (see `PROJECT_STATUS.md` for the full audit evidence).
