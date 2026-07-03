@@ -365,7 +365,7 @@ def remove_claude_desktop(apply: bool = True) -> dict[str, Any]:
         "ok": False,
         "applied": False,
         "manual_removal_required": True,
-        "instructions": "In Claude Desktop open Settings > Extensions and uninstall neo-localmcp. If that hangs, stop its subprocess tree first (setup.ps1 menu option 3).",
+        "instructions": "In Claude Desktop open Settings > Extensions and uninstall neo-localmcp. If that hangs, run `python setup.py uninstall` from the checkout first.",
         "note": "Direct claude_desktop_config.json editing is intentionally never performed.",
     }
 

@@ -4,11 +4,11 @@ Updated: 2026-07-02
 
 ## Current phase
 
-1.0.10 setup-v2 implementation targets macOS and Windows for this release. Phase 15's native GitHub Actions gate is implemented for those two operating systems. Linux support has been explicitly deferred by owner decision and is not a 1.0.10 release gate. Phase 16 installer retirement waits for fresh macOS and Windows CI. The targeted Claude Desktop/uv.exe tree smoke remains environment-deferred because no such process tree was available on the Windows host.
+1.0.10 setup lifecycle work (Phases 1-16) is complete. `setup.py` is the sole supported lifecycle entrypoint on macOS and Windows; Linux is explicitly deferred. Legacy installer scripts are archived under `_LegacyInstallers/`. Native Python 3.12 CI is green on macOS and Windows (run 28632598884), and the real managed installation is running 1.0.10 from a clean canonical layout.
 
-`setup_v2.py` can install, reinstall, default-uninstall while preserving durable data, clean-install, and full-wipe from a local checkout. It builds and verifies a candidate runtime before promotion, stops Neo-owned processes, unloads only Neo-used Ollama models, migrates recognized legacy layouts, reconnects recorded clients, and verifies the installed CLI/MCP endpoint. The old PowerShell/shell installers remain authoritative for released 1.0.9 installs until cross-platform parity is complete.
+`setup.py` installs, reinstalls, default-uninstalls while preserving durable data, clean-installs, and full-wipes from a local checkout. It builds and verifies a candidate runtime before promotion, stops Neo-owned processes, unloads only Neo-used Ollama models, migrates recognized legacy layouts, reconnects explicitly selected/recorded clients, and verifies the installed CLI/MCP endpoint.
 
-1.0.9 onboarding-polish work (`docs/1.0.9_PLAN.md`) is complete and released: all phases 9a-9g (agent-integration doc, install-time Ollama presence/model check, versioned `.mcpb` packaging, called-out post-install indexing nudge, installer surface selection with path preview, the uninstaller overhaul with multi-select surfaces + granular data keep/delete, and the P5 retrieval-boost audit + upgrade-persistence guarantee + config-tuning) are implemented and verified. `__version__` is now `1.0.9`, bumped in lockstep across `neo_localmcp/__init__.py`, `pyproject.toml`, and `packages/claude-desktop/mcpb/manifest.json`; the versioned bundle `packages/claude-desktop/neo-localmcp-v1.0.9.mcpb` is built and the real `~/.neo-localmcp` CLI install was upgraded to 1.0.9 live (`doctor` ok, single `.venv-nlm-v1.0.9`).
+1.0.9 onboarding-polish work (`docs/1.0.9_PLAN.md`) is complete and released. Version 1.0.10 is synchronized across `neo_localmcp/__init__.py`, `pyproject.toml`, and the Claude Desktop manifest; its bundle is rebuilt during this closeout.
 
 ## Acceptance targets
 
@@ -19,6 +19,8 @@ Updated: 2026-07-02
 - Normal Ollama operations have bounded health, start, warm, and inference deadlines.
 
 ## Verified
+
+- **Native 1.0.10 release gate is green on macOS and Windows with Python 3.12**: GitHub Actions run 28632598884 passed fast tests, each platform's real lifecycle, and compileall. macOS completed in 1m32s; Windows completed in 14m55s.
 
 - **Setup v2 Phase 14 is verified on Windows x64**: promoted `python.exe`, `pip.exe`, `neo-localmcp.exe`, and `neo-localmcp-server.exe` remain runnable after staging relocation; a real disposable lifecycle passed live MCP reinstall/uninstall, durable-data reuse, clean/full wipe, cancellation refusal, broken/interrupted recovery, and unrelated-process survival. Ownership-scoped escalation killed only the registered test tree. Final suite: 281 passed, 4 platform/environment skips; compileall clean (Python 3.14.5, the available supported interpreter).
 
@@ -38,12 +40,9 @@ Updated: 2026-07-02
 
 ## Remaining validation
 
-- Run `.github/workflows/setup-v2.yml` from a clean checkout and require green Python 3.12 jobs on macOS and Windows.
 - Run the targeted Claude Desktop extension/`uv.exe` tree smoke on a Windows x64 host where that tree is available; it was absent here. Re-run the Phase 14 commands specifically under Python 3.12 when that interpreter is available (current Windows host had only supported Python 3.14.5).
-- Add Phase 15 Linux acceptance and three-OS CI gates.
-- Add explicit fresh-install client selection before setup v2 becomes the sole lifecycle entrypoint in Phase 16.
 
-- Run the installer, MCPB package, and client smoke tests on macOS (including graceful-stop and single-venv-per-version parity, currently Windows-only — see `docs/1.0.7_PLAN.md` 7d).
+- Run the targeted Claude Desktop `.mcpb` installation smoke manually on macOS/Windows.
 - Collect baseline versus assisted token measurements from real Claude/Codex tasks.
 - Local Ollama auto-start and model warm-up were verified from a genuine connection-refused state; readiness recovered in under 18 seconds without automatic model eviction.
 - Validate Claude Desktop installation from the generated `.mcpb` package.
@@ -54,7 +53,7 @@ Updated: 2026-07-02
 - Symbol extraction remains regex-based rather than a full Tree-sitter structural index.
 - Token counts are estimated from returned characters until client usage telemetry is available.
 - Compatibility alias `context_prepare` remains exposed for one release.
-- macOS/Linux install/uninstall scripts do not yet have the graceful-stop / single-venv-per-version upgrade flow (Windows-only so far).
+- Linux setup lifecycle and CI support are deferred beyond 1.0.10.
 - Section-summary caching is keyed on source-file content hash only, not on the neo-localmcp code version -- a cache entry generated by a buggy older version is not automatically invalidated when the bug is fixed; only a source-file content change (or manual cache clear) will regenerate it.
 - `start_service()` may silently use the wrong Ollama models directory depending on process ancestry (see Remaining validation above).
 - Retrieval-boost memory: "can this be counted on to improve retrieval over time?" is now a qualified yes, not the previous no. It provably works and survives upgrades (see Verified), and it can never hurt correctness -- it's capped far below structural evidence and never penalizes silence. But its impact is modest by design: it only nudges once the *same task string* recurs >= 3 times in one repo, so it helps repeated workflows in a repo, not first-time or one-off tasks, and its real-world benefit has still only been exercised in one controlled audit session, not measured across sustained multi-session usage. It is a safe, bounded nudge, not a broadly-learning ranker.

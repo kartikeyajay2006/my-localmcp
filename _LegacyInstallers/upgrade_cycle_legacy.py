@@ -1,4 +1,6 @@
-"""End-to-end proof of the graceful upgrade cycle on Windows (1.0.7 P7c, single-venv
+"""Archived end-to-end proof of the legacy PowerShell upgrade cycle (not collected).
+
+Historical proof of the graceful upgrade cycle on Windows (1.0.7 P7c, single-venv
 scheme from 1.0.8).
 
 Runs the real install.ps1 / uninstall.ps1 scripts against a fully isolated

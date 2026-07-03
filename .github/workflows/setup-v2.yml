@@ -30,4 +30,4 @@ jobs:
       - name: Native lifecycle
         run: python -m pytest -q -m slow ${{ matrix.lifecycle }}
       - name: Compile
-        run: python -m compileall -q neo_localmcp setup_v2.py
+        run: python -m compileall -q neo_localmcp setup.py

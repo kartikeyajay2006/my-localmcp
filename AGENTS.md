@@ -28,18 +28,14 @@ Don't treat chat history as the source of truth for project state — these file
 ## Commands
 
 ```bash
-# Windows
-powershell -ExecutionPolicy Bypass -File .\setup.ps1      # interactive install/upgrade/uninstall wizard
-powershell -ExecutionPolicy Bypass -File .\install.ps1     # non-interactive install/upgrade
-powershell -ExecutionPolicy Bypass -File .\uninstall.ps1
-
-# macOS (older side-by-side venv scheme, no graceful-stop yet — see "Known gaps" below)
-./install.sh
-./uninstall.sh
+# macOS / Windows (Python 3.12+)
+python setup.py install
+python setup.py reinstall
+python setup.py uninstall
 
 # Verification (run after any code change)
 python -m pytest -q
-python -m compileall -q neo_localmcp
+python -m compileall -q neo_localmcp setup.py
 
 # Manual smoke test
 neo-localmcp doctor
@@ -54,7 +50,7 @@ neo-localmcp context "debug repository indexing: index_repo, refresh" --repo-roo
 - `cli.py` — CLI subcommands (`index`, `context`, `doctor`, `servers`, `stop`, `setup`, ...). Administration is CLI-only, never exposed as an MCP tool.
 - `repo_memory.py` — SQLite persistence: repo/file/symbol index, `repo_fts`, and the retrieval-boost implicit-feedback memory (`get_boost_map`, `record_task_query`, `record_retrieval_feedback`).
 - `ollama_client.py` — Ollama lifecycle (status/start/warm/ensure), bounded inference (`num_predict`), never auto-downloads models.
-- `lifecycle.py` — server registry + graceful-stop (`neo-localmcp stop`), used by `install.ps1`/`uninstall.ps1` before touching venv files. Windows-only pattern so far.
+- `lifecycle.py` — server registry + graceful-stop (`neo-localmcp stop`), used by `setup.py` before touching runtime files.
 - `client_setup.py` — registers neo-localmcp with Codex / Codex Desktop / Codex. Only *registration* exists today — no `remove_*` functions yet (planned, see `docs/1.0.9_PLAN.md`).
 - `config.py` — single source of truth for `APP_DIR` (`~/.neo-localmcp` by default) and `config.yaml` defaults.
 - `query.py` — natural/hybrid task-string parsing into intent + strong/weak terms.
@@ -64,15 +60,10 @@ neo-localmcp context "debug repository indexing: index_repo, refresh" --repo-roo
 
 - **Version is defined once**, in `neo_localmcp/__init__.py`'s `__version__`. Every
   release bumps it in lockstep with `pyproject.toml`'s `version` and
-  `packages/Codex-desktop/mcpb/manifest.json` — the three must always match; several
-  scripts (`install.ps1`'s `Get-SourceVersion`, `setup.ps1`) parse `__init__.py`
-  directly as the source of truth.
-- **Windows is the primary, actively-developed platform.** `install.ps1`/`uninstall.ps1`/
-  `setup.ps1` have the current single-venv-per-version + graceful-stop upgrade flow.
-  `install.sh`/`uninstall.sh` (macOS/Linux) are still on the older side-by-side venv
-  scheme with no graceful stop — a known, tracked gap (`docs/1.0.7_PLAN.md`, phase 7d),
-  not an oversight. Don't silently "fix" this without checking that plan first; Unix
-  file-deletion semantics differ enough that the Windows fix may not even apply as-is.
+  `packages/claude-desktop/mcpb/manifest.json` — the three must always match.
+- **macOS and Windows are the supported 1.0.10 platforms.** `setup.py` is the sole
+  lifecycle policy surface. Linux support is deferred. Legacy platform installers
+  are retained under `_LegacyInstallers/` for historical reference only.
 - **Repository memory is centralized, not per-repo.** All indexed repos share one
   `~/.neo-localmcp/repo-context.sqlite`, distinguished internally by `repo_id`
   (canonical root + git remote). A "wipe memory" action affects every indexed repo,
@@ -91,7 +82,7 @@ neo-localmcp context "debug repository indexing: index_repo, refresh" --repo-roo
 
 ## Known gaps (see `PROJECT_STATUS.md` for the current authoritative list)
 
-- macOS/Linux install scripts lack graceful-stop / single-venv-per-version parity.
+- Linux setup lifecycle and CI evidence are deferred beyond 1.0.10.
 - `ollama_client.py`'s `start_service()` doesn't reliably inherit a custom
   `OLLAMA_MODELS` env var under some process ancestries (e.g. spawned under Codex
   Desktop's extension host) — falls back to the default models path silently instead

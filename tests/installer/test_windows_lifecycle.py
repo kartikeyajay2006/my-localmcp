@@ -21,7 +21,7 @@ from neo_localmcp.installer.types import Operation
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SETUP_V2 = REPO_ROOT / "setup_v2.py"
+SETUP = REPO_ROOT / "setup.py"
 
 
 def _run(executable: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -46,7 +46,7 @@ def _setup(home: Path, *args: str, stdin: str | None = None) -> subprocess.Compl
         "APPDATA": str(appdata),
     }
     return subprocess.run(
-        [sys.executable, str(SETUP_V2), *args],
+        [sys.executable, str(SETUP), *args],
         input=stdin,
         capture_output=True,
         text=True,
@@ -181,7 +181,7 @@ def test_promoted_windows_launchers_do_not_reference_staging(tmp_path: Path) -> 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows lifecycle evidence")
 @pytest.mark.slow
-def test_full_windows_lifecycle_via_setup_v2(tmp_path: Path) -> None:
+def test_full_windows_lifecycle_via_setup(tmp_path: Path) -> None:
     home = tmp_path / ".neo-localmcp"
     marker = "phase14-preserved-data"
     unrelated = subprocess.Popen(

@@ -1,8 +1,8 @@
-"""Real end-to-end macOS lifecycle acceptance test for setup_v2.py.
+"""Real end-to-end macOS lifecycle acceptance test for setup.py.
 
 This is the Task 13 Gate: prove the entire install -> reinstall -> uninstall ->
 install -> install --clean -> uninstall --delete-memory lifecycle works on this
-Mac end to end, driven exclusively through ``setup_v2.py`` (never `.ps1`/`.sh`),
+Mac end to end, driven exclusively through ``setup.py`` (never `.ps1`/`.sh`),
 against a temporary ``NEO_LOCALMCP_HOME``, without losing seeded durable data
 along the way (except where a full wipe is explicitly requested).
 
@@ -27,20 +27,20 @@ import pytest
 import neo_localmcp
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SETUP_V2 = REPO_ROOT / "setup_v2.py"
+SETUP = REPO_ROOT / "setup.py"
 EXPECTED_VERSION = neo_localmcp.__version__
 
-SETUP_V2_TIMEOUT_SECONDS = 600.0
+SETUP_TIMEOUT_SECONDS = 600.0
 
 
-def _run_setup_v2(argv: list[str], *, home: Path) -> subprocess.CompletedProcess:
+def _run_setup(argv: list[str], *, home: Path) -> subprocess.CompletedProcess:
     env = {**os.environ, "NEO_LOCALMCP_HOME": str(home)}
     return subprocess.run(
-        [sys.executable, str(SETUP_V2), *argv],
+        [sys.executable, str(SETUP), *argv],
         capture_output=True,
         text=True,
         env=env,
-        timeout=SETUP_V2_TIMEOUT_SECONDS,
+        timeout=SETUP_TIMEOUT_SECONDS,
     )
 
 
@@ -201,7 +201,7 @@ async def _drive_start_then_reinstall(home: Path) -> tuple[int, subprocess.Compl
     assert _pid_alive(pid)
     await _close_session(session, context)
 
-    result = await asyncio.to_thread(_run_setup_v2, ["reinstall"], home=home)
+    result = await asyncio.to_thread(_run_setup, ["reinstall"], home=home)
     return pid, result
 
 
@@ -214,14 +214,14 @@ async def _drive_start_and_close(home: Path) -> int:
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS lifecycle evidence")
 @pytest.mark.slow
-def test_full_macos_lifecycle_via_setup_v2(tmp_path: Path) -> None:
+def test_full_macos_lifecycle_via_setup(tmp_path: Path) -> None:
     home = tmp_path / ".neo-localmcp"
     marker_a = "marker-a-original-data"
 
     # ---------------------------------------------------------------- #
     # install -> seed config/SQLite/client record -> start MCP
     # ---------------------------------------------------------------- #
-    result = _run_setup_v2(["install", "--yes"], home=home)
+    result = _run_setup(["install", "--yes"], home=home)
     assert result.returncode == 0, f"install failed:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
     assert (home / "venv").exists()
 
@@ -243,7 +243,7 @@ def test_full_macos_lifecycle_via_setup_v2(tmp_path: Path) -> None:
     # ---------------------------------------------------------------- #
     # uninstall -> verify venv absent / data present
     # ---------------------------------------------------------------- #
-    result = _run_setup_v2(["uninstall", "--yes"], home=home)
+    result = _run_setup(["uninstall", "--yes"], home=home)
     assert result.returncode == 0, f"uninstall failed:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
 
     assert not (home / "venv").exists(), "uninstall should remove the managed venv"
@@ -252,7 +252,7 @@ def test_full_macos_lifecycle_via_setup_v2(tmp_path: Path) -> None:
     # ---------------------------------------------------------------- #
     # install -> verify reuse message/data
     # ---------------------------------------------------------------- #
-    result = _run_setup_v2(["install", "--yes"], home=home)
+    result = _run_setup(["install", "--yes"], home=home)
     assert result.returncode == 0, f"reuse install failed:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
     combined_output = result.stdout + result.stderr
     assert "preserved memory" in combined_output.lower() or "reusing" in combined_output.lower(), (
@@ -264,7 +264,7 @@ def test_full_macos_lifecycle_via_setup_v2(tmp_path: Path) -> None:
     # ---------------------------------------------------------------- #
     # install --clean --yes -> verify old data absent / new endpoint healthy
     # ---------------------------------------------------------------- #
-    result = _run_setup_v2(["install", "--clean", "--yes"], home=home)
+    result = _run_setup(["install", "--clean", "--yes"], home=home)
     assert result.returncode == 0, f"clean install failed:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
 
     assert not _durable_marker_present(home, marker=marker_a), "clean install must wipe prior durable data"
@@ -278,7 +278,7 @@ def test_full_macos_lifecycle_via_setup_v2(tmp_path: Path) -> None:
     # ---------------------------------------------------------------- #
     # uninstall --delete-memory --yes -> verify root absent
     # ---------------------------------------------------------------- #
-    result = _run_setup_v2(["uninstall", "--delete-memory", "--yes"], home=home)
+    result = _run_setup(["uninstall", "--delete-memory", "--yes"], home=home)
     assert result.returncode == 0, f"full wipe failed:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
 
     assert not home.exists(), "uninstall --delete-memory must remove the entire managed root"

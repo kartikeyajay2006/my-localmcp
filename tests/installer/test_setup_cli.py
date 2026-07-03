@@ -1,7 +1,7 @@
-"""Parser / help / exit-code / dry-run / safety-refusal tests for setup_v2.py.
+"""Parser / help / exit-code / dry-run / safety-refusal tests for setup.py.
 
 These tests exercise the thin CLI dispatcher in isolation, invoking
-``setup_v2.main()`` in-process (fast) and, for the Python-floor guard, via a
+``setup.main()`` in-process (fast) and, for the Python-floor guard, via a
 real subprocess (so a faked ``sys.version_info`` cannot be short-circuited by
 import caching).
 
@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SETUP_V2 = REPO_ROOT / "setup_v2.py"
+SETUP = REPO_ROOT / "setup.py"
 
 
 def _run(argv: list[str], *, env: dict[str, str] | None = None, stdin_data: str | None = None) -> subprocess.CompletedProcess:
@@ -29,7 +29,7 @@ def _run(argv: list[str], *, env: dict[str, str] | None = None, stdin_data: str 
 
     full_env = {**os.environ, **(env or {})}
     return subprocess.run(
-        [sys.executable, str(SETUP_V2), *argv],
+        [sys.executable, str(SETUP), *argv],
         capture_output=True,
         text=True,
         env=full_env,
@@ -101,6 +101,20 @@ def test_install_rejects_delete_memory_flag_as_usage_error() -> None:
     assert result.returncode == 2
 
 
+def test_install_accepts_explicit_repeatable_client_selection(tmp_path: Path) -> None:
+    result = _run(
+        ["install", "--client", "codex", "--client", "claude-code", "--dry-run"],
+        env=_isolated_env(tmp_path),
+    )
+    assert result.returncode == 0
+    assert "Selected clients: codex, claude-code" in result.stdout
+
+
+def test_install_rejects_unknown_client() -> None:
+    result = _run(["install", "--client", "unknown", "--dry-run"])
+    assert result.returncode == 2
+
+
 # --------------------------------------------------------------------------- #
 # Step 2: Python-floor bootstrap
 # --------------------------------------------------------------------------- #
@@ -117,10 +131,10 @@ def test_python_floor_guard_runs_before_package_import(tmp_path: Path) -> None:
     script.write_text(
         "import sys\n"
         "sys.version_info = (3, 8, 0, 'final', 0)\n"
-        f"sys.argv = [{str(SETUP_V2)!r}, 'install']\n"
-        f"with open({str(SETUP_V2)!r}) as f:\n"
+        f"sys.argv = [{str(SETUP)!r}, 'install']\n"
+        f"with open({str(SETUP)!r}) as f:\n"
         "    source = f.read()\n"
-        f"exec(compile(source, {str(SETUP_V2)!r}, 'exec'), {{'__name__': '__main__'}})\n",
+        f"exec(compile(source, {str(SETUP)!r}, 'exec'), {{'__name__': '__main__'}})\n",
         encoding="utf-8",
     )
     result = subprocess.run(
@@ -140,7 +154,7 @@ def test_python_floor_guard_runs_before_package_import(tmp_path: Path) -> None:
 def test_python_floor_message_content() -> None:
     import importlib.util
 
-    spec = importlib.util.spec_from_file_location("setup_v2_floor_check", SETUP_V2)
+    spec = importlib.util.spec_from_file_location("setup_floor_check", SETUP)
     assert spec is not None and spec.loader is not None
     # We only inspect the constant/function; do not execute main().
     module = importlib.util.module_from_spec(spec)

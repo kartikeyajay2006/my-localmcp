@@ -330,7 +330,7 @@ def _restore_and_verify(
         ctx.reporter.error(message)
         ctx.reporter.warn(
             "Recovery: the managed runtime is intact and was NOT removed. "
-            f"Re-run `python3 setup_v2.py {operation.value}` to reconnect clients, "
+            f"Re-run `python3 setup.py {operation.value}` to reconnect clients, "
             f"or point clients manually at {server_command}."
         )
         warnings.append(message)
