@@ -72,6 +72,13 @@ class ConsoleWizard:
             if desc:
                 print(f"        {desc}")
 
+    @staticmethod
+    def _explain(*lines: str) -> None:
+        """Print a short, indented 'what this step is about' blurb, then a gap."""
+        for line in lines:
+            print(f" {line}")
+        print()
+
     # -- input primitives ------------------------------------------------- #
 
     def _ask_int(self, low: int, high: int, default: int | None = None) -> int:
@@ -148,6 +155,10 @@ class ConsoleWizard:
         self.state = WizardState()
         rows = self._menu_rows()
         self._header("What would you like to do?")
+        self._explain(
+            "neo-localmcp is a local MCP server that gives your AI tools fast,",
+            "deterministic repository context. This wizard sets it up and connects it.",
+        )
         self._print_options([(title, desc) for _, title, desc in rows])
         choice = self._ask_int(1, len(rows))
         return rows[choice - 1][0]
@@ -163,10 +174,11 @@ class ConsoleWizard:
         prompt = ("Which clients should stay connected?"
                   if manage else "Which clients should connect to neo-localmcp?")
         self._header(prompt)
-        print(" neo-localmcp registers itself with each AI client you pick so that")
-        print(" client can call it. The path under each option is where that client")
-        print(" is configured on this OS.")
-        print()
+        self._explain(
+            "neo-localmcp registers itself with each AI client you pick so that",
+            "client can call it. The path under each option is where that client",
+            "is configured on this OS.",
+        )
         for index, opt in enumerate(options, start=1):
             mark = "  (connected)" if opt.key in registered else ""
             manual = "  [manual step]" if opt.manual else ""
@@ -180,9 +192,9 @@ class ConsoleWizard:
         self.state.selected_clients = chosen
         self.summary.append(("Clients", ", ".join(chosen) or "none"))
 
-    def _pick_model(self, label: str, models: tuple[str, ...], current: str) -> str:
+    def _pick_model(self, label: str, hint: str, models: tuple[str, ...], current: str) -> str:
         self._header(f"Choose the {label}:")
-        print(" (installed models from `ollama list`)")
+        self._explain(hint, "Listed below are the models from your `ollama list`.")
         default = models.index(current) + 1 if current in models else 1
         for index, model in enumerate(models, start=1):
             mark = "  (current)" if model == current else ""
@@ -192,9 +204,14 @@ class ConsoleWizard:
 
     def _flow_ollama(self, *, optional: bool) -> None:
         info = self.backend.ollama_info()
-        self._header("Ollama models  (optional - neo-localmcp works without Ollama)")
-        print(f" {info.detail}")
-        if optional and not self._ask_yesno("\n Configure Ollama models now?",
+        self._header("Ollama models  (optional)")
+        self._explain(
+            "Ollama is optional. When present, neo-localmcp uses it locally to",
+            "re-rank results and summarize files. Deterministic context always",
+            "works without it, so this step is safe to skip.",
+            f"Status: {info.detail}",
+        )
+        if optional and not self._ask_yesno("Configure Ollama models now?",
                                             default=info.reachable):
             self.state.configure_ollama = False
             self.summary.append(("Ollama", "not configured"))
@@ -202,9 +219,14 @@ class ConsoleWizard:
         self.state.configure_ollama = True
         self.state.ollama_base_url = self._ask_text("\n Ollama base URL", info.base_url)
         if info.reachable and info.installed_models:
-            fast = self._pick_model("fast model (ranking)", info.installed_models, info.fast_model)
-            summary = self._pick_model("summary model (file summaries)",
-                                       info.installed_models, info.summary_model)
+            fast = self._pick_model(
+                "fast model (ranking)",
+                "Used to quickly re-rank candidate files. A smaller, fast model is best.",
+                info.installed_models, info.fast_model)
+            summary = self._pick_model(
+                "summary model (file summaries)",
+                "Used to write file/section summaries on request. A larger code model is best.",
+                info.installed_models, info.summary_model)
         else:
             self._header("Ollama models")
             print(" No installed models detected - enter names manually.\n")
@@ -216,6 +238,11 @@ class ConsoleWizard:
 
     def _flow_uninstall(self) -> bool:
         self._header("Uninstall neo-localmcp")
+        self._explain(
+            "Choose how much to remove. 'Runtime only' disconnects clients and",
+            "deletes the venv but keeps your indexed memory/data, so a later",
+            "reinstall is instant. 'Full wipe' deletes everything permanently.",
+        )
         self._print_options([
             ("Remove runtime only", "keeps all memory/data (recommended)"),
             ("Full wipe", "delete the entire managed root and ALL stored data"),
@@ -235,6 +262,10 @@ class ConsoleWizard:
 
     def _confirm(self, *, allow_dry_run: bool) -> bool:
         self._header("Review and confirm")
+        self._explain(
+            "Nothing has changed yet. Your choices are summarized above. If you",
+            "want to see the exact steps without touching anything, use dry run.",
+        )
         if allow_dry_run:
             self.state.dry_run = self._ask_yesno(
                 "Preview only (dry run - show the plan, change nothing)?", default=False)
