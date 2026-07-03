@@ -77,7 +77,12 @@ class ClientOption:
 
 @dataclass(frozen=True)
 class OllamaInfo:
-    """Result of probing Ollama (the `ollama list` equivalent) plus current config."""
+    """Result of probing Ollama (the `ollama list` equivalent) plus current config.
+
+    ``installed_models`` is always alphabetically sorted. ``model_sizes`` maps a
+    model name to a human-readable size (e.g. "4.9 GB"); a missing entry means
+    the size wasn't available.
+    """
 
     reachable: bool
     base_url: str
@@ -86,6 +91,17 @@ class OllamaInfo:
     summary_model: str
     state: str  # ready / model_cold / model_missing / unreachable / disabled / ...
     detail: str = ""
+    model_sizes: dict[str, str] = field(default_factory=dict)
+
+
+def human_size(num_bytes: float) -> str:
+    """Format a byte count as a short human-readable size, e.g. "4.9 GB"."""
+    size = float(num_bytes)
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024 or unit == "GB":
+            return f"{int(size)} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} TB"
 
 
 @dataclass(frozen=True)

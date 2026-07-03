@@ -5,12 +5,22 @@ so far, asks one numbered question at a time, and reads a number. It drives the
 same :class:`WizardBackend` the rest of the package uses, so install / reinstall
 / uninstall / Ollama-config / client-management all go through the exact same
 lifecycle code ``setup.py`` uses.
+
+Every prompt accepts "b"/"back" to return to the previous question, in addition
+to whatever else it accepts (a number, y/n, or free text). Navigation is a small
+phase machine (see ``_run_phases``): each phase is a bound method that either
+raises ``_Skip`` immediately (nothing to ask given the current answers) or asks
+its question(s) and returns; typing "back" makes the *next* phase run backward.
+Phases are re-evaluated live every time they're visited, so changing an earlier
+answer (e.g. turning Ollama config off) correctly skips the phases that
+depended on it, in both directions.
 """
 
 from __future__ import annotations
 
 import os
 import sys
+from typing import Callable
 
 from .backend import (
     CLIENT_LABELS,
@@ -31,6 +41,22 @@ def _clear() -> None:
     os.system("cls" if os.name == "nt" else "clear")
 
 
+class _GoBack(Exception):
+    """Raised by an input primitive when the user types 'b'/'back'."""
+
+
+class _Skip(Exception):
+    """Raised by a phase that has nothing to ask given the current answers."""
+
+
+class _Abort(Exception):
+    """Raised when the user explicitly declines to proceed at a final confirm."""
+
+
+def _is_back(raw: str) -> bool:
+    return raw.strip().lower() in {"b", "back"}
+
+
 class ConsoleWizard:
     def __init__(self, backend: WizardBackend, fake: bool) -> None:
         self.backend = backend
@@ -39,6 +65,12 @@ class ConsoleWizard:
         self.prefs = backend.load_prefs()
         self.state = WizardState()
         self.summary: list[tuple[str, str]] = []
+        # Set per-dispatch to parameterize shared phase methods.
+        self._ollama_optional = False
+        self._clients_manage_mode = False
+        # True once the clients phase has actually run this dispatch, so the
+        # running summary can show full per-client detail (not just "chose none").
+        self._clients_chosen = False
 
     # -- rendering -------------------------------------------------------- #
 
@@ -55,11 +87,14 @@ class ConsoleWizard:
         print(f" {d.state_label}")
         if d.registered_clients:
             print(f" Connected clients: {', '.join(d.registered_clients)}")
-        if self.summary:
+        if self.summary or self._clients_chosen:
             print()
             print(" Your choices so far:")
             for label, value in self.summary:
                 print(f"   {label}: {value}")
+            if self._clients_chosen:
+                for line in self._client_detail_lines():
+                    print(line)
         print("-" * _WIDTH)
         if question:
             print(f" {question}")
@@ -79,12 +114,25 @@ class ConsoleWizard:
             print(f" {line}")
         print()
 
-    # -- input primitives ------------------------------------------------- #
+    def _set_summary(self, label: str, value: str) -> None:
+        """Set (or replace) one line of the running summary.
+
+        Phases can be revisited via 'back', so this must overwrite rather than
+        append -- otherwise redoing a step would duplicate its summary line.
+        """
+        self.summary = [(l, v) for l, v in self.summary if l != label]
+        self.summary.append((label, value))
+
+    # -- input primitives --------------------------------------------------
+    # Every primitive accepts "b"/"back" (raising _GoBack) in addition to its
+    # normal input, and shows its default (if any) as "[Default: ...]".
 
     def _ask_int(self, low: int, high: int, default: int | None = None) -> int:
-        hint = f" [{default}]" if default is not None else ""
+        hint = f" [Default: {default}]" if default is not None else ""
         while True:
-            raw = self._input(f"\n Enter a number {low}-{high}{hint}: ")
+            raw = self._input(f"\n Enter a number {low}-{high}{hint} (or b to go back): ")
+            if _is_back(raw):
+                raise _GoBack
             if not raw and default is not None:
                 return default
             if raw.isdigit() and low <= int(raw) <= high:
@@ -92,23 +140,31 @@ class ConsoleWizard:
             print(f"   Please enter a number between {low} and {high}.")
 
     def _ask_multi(self, count: int, default: list[int] | None = None) -> list[int]:
+        default = default or []
+        hint = f" [Default: {', '.join(str(i) for i in default) or 'none'}]"
         while True:
-            raw = self._input("\n Numbers (space-separated), or Enter to keep the default: ")
+            raw = self._input(f"\n Numbers (space-separated){hint} (or b to go back): ")
+            if _is_back(raw):
+                raise _GoBack
             if not raw:
-                return list(default) if default is not None else []
+                return list(default)
             parts = raw.replace(",", " ").split()
             if all(p.isdigit() and 1 <= int(p) <= count for p in parts):
                 return sorted({int(p) for p in parts})
             print(f"   Enter space-separated numbers 1-{count}, or Enter for the default.")
 
     def _ask_text(self, prompt: str, default: str = "") -> str:
-        shown = f"{prompt} [{default}]: " if default else f"{prompt}: "
-        raw = self._input(f" {shown}")
+        hint = f" [Default: {default}]" if default else ""
+        raw = self._input(f" {prompt}{hint} (or b to go back): ")
+        if _is_back(raw):
+            raise _GoBack
         return raw or default
 
     def _ask_yesno(self, prompt: str, default: bool = False) -> bool:
-        suffix = " [Y/n]: " if default else " [y/N]: "
-        raw = self._input(f" {prompt}{suffix}").strip().lower()
+        hint = "[Default: Y] (y/n/b)" if default else "[Default: N] (y/n/b)"
+        raw = self._input(f" {prompt} {hint}: ").strip().lower()
+        if _is_back(raw):
+            raise _GoBack
         if not raw:
             return default
         return raw in {"y", "yes"}
@@ -120,6 +176,32 @@ class ConsoleWizard:
         except (EOFError, KeyboardInterrupt):
             print()
             raise KeyboardInterrupt from None
+
+    # -- phase driver ------------------------------------------------------
+    # Each phase is a zero-arg bound method. Moving forward after a phase
+    # succeeds, or backward after it raises _GoBack; a phase that raises _Skip
+    # (nothing to ask given current state) is passed over in whichever
+    # direction we're already moving. _Abort ends the whole flow immediately
+    # (used for an explicit "No" at a final confirm) without running anything.
+
+    def _run_phases(self, phases: list[Callable[[], None]]) -> bool:
+        idx = 0
+        direction = 1
+        while 0 <= idx < len(phases):
+            try:
+                phases[idx]()
+            except _GoBack:
+                direction = -1
+                idx += direction
+                continue
+            except _Skip:
+                idx += direction
+                continue
+            except _Abort:
+                return False
+            direction = 1
+            idx += 1
+        return idx >= len(phases)
 
     # -- menu ------------------------------------------------------------- #
 
@@ -152,6 +234,7 @@ class ConsoleWizard:
     def _main_menu(self) -> str:
         self.detected = self.backend.detect()
         self.summary = []
+        self._clients_chosen = False
         self.state = WizardState()
         rows = self._menu_rows()
         self._header("What would you like to do?")
@@ -163,12 +246,19 @@ class ConsoleWizard:
         choice = self._ask_int(1, len(rows))
         return rows[choice - 1][0]
 
-    # -- flows ------------------------------------------------------------ #
+    # -- phase: clients ----------------------------------------------------
 
-    def _flow_clients(self, *, manage: bool) -> None:
+    def _phase_clients(self) -> None:
+        manage = self._clients_manage_mode
         options = self.backend.client_options()
         registered = {opt.key for opt in options if opt.registered}
-        default_keys = registered if manage else set(self.prefs.get("last_clients") or [])
+        if self.state.selected_clients:
+            # Revisiting via "back": keep what was already picked this session.
+            default_keys = set(self.state.selected_clients)
+        elif manage:
+            default_keys = registered
+        else:
+            default_keys = set(self.prefs.get("last_clients") or [])
         default_indices = [i for i, o in enumerate(options, 1) if o.key in default_keys]
 
         prompt = ("Which clients should stay connected?"
@@ -190,19 +280,15 @@ class ConsoleWizard:
         picks = self._ask_multi(len(options), default=default_indices)
         chosen = [options[i - 1].key for i in picks]
         self.state.selected_clients = chosen
-        self.summary.append(("Clients", ", ".join(chosen) or "none"))
+        self._clients_chosen = True
 
-    def _pick_model(self, label: str, hint: str, models: tuple[str, ...], current: str) -> str:
-        self._header(f"Choose the {label}:")
-        self._explain(hint, "Listed below are the models from your `ollama list`.")
-        default = models.index(current) + 1 if current in models else 1
-        for index, model in enumerate(models, start=1):
-            mark = "  (current)" if model == current else ""
-            print(f"   {index}) {model}{mark}")
-        choice = self._ask_int(1, len(models), default=default)
-        return models[choice - 1]
+    # -- phases: ollama ------------------------------------------------------
 
-    def _flow_ollama(self, *, optional: bool) -> None:
+    def _phase_ollama_yesno(self) -> None:
+        if not self._ollama_optional:
+            # Standalone "Configure Ollama models" already means yes; nothing to ask.
+            self.state.configure_ollama = True
+            raise _Skip
         info = self.backend.ollama_info()
         self._header("Ollama models  (optional)")
         self._explain(
@@ -211,32 +297,82 @@ class ConsoleWizard:
             "works without it, so this step is safe to skip.",
             f"Status: {info.detail}",
         )
-        if optional and not self._ask_yesno("Configure Ollama models now?",
-                                            default=info.reachable):
-            self.state.configure_ollama = False
-            self.summary.append(("Ollama", "not configured"))
-            return
-        self.state.configure_ollama = True
-        self.state.ollama_base_url = self._ask_text("\n Ollama base URL", info.base_url)
-        if info.reachable and info.installed_models:
-            fast = self._pick_model(
-                "fast model (ranking)",
-                "Used to quickly re-rank candidate files. A smaller, fast model is best.",
-                info.installed_models, info.fast_model)
-            summary = self._pick_model(
-                "summary model (file summaries)",
-                "Used to write file/section summaries on request. A larger code model is best.",
-                info.installed_models, info.summary_model)
-        else:
-            self._header("Ollama models")
-            print(" No installed models detected - enter names manually.\n")
-            fast = self._ask_text("fast model", info.fast_model)
-            summary = self._ask_text("summary model", info.summary_model)
-        self.state.fast_model = fast
-        self.state.summary_model = summary
-        self.summary.append(("Ollama", f"fast={fast}, summary={summary}"))
+        self.state.configure_ollama = self._ask_yesno(
+            "Configure Ollama models now?", default=info.reachable)
+        if not self.state.configure_ollama:
+            self._set_summary("Ollama", "not configured")
 
-    def _flow_uninstall(self) -> bool:
+    def _phase_ollama_baseurl(self) -> None:
+        if not self.state.configure_ollama:
+            raise _Skip
+        info = self.backend.ollama_info()
+        self._header("Ollama endpoint")
+        self._explain(
+            "This is the base URL neo-localmcp will talk to Ollama on -- almost",
+            "always the local default unless you run Ollama remotely.",
+        )
+        self.state.ollama_base_url = self._ask_text("Ollama base URL", info.base_url)
+
+    def _pick_model(self, label: str, hint: list[str], info, current: str) -> str:
+        self._header(f"Choose the {label}:")
+        self._explain(*hint, "Listed below are the models from your `ollama list`,")
+        print(" sorted alphabetically:\n")
+        models = info.installed_models
+        default = models.index(current) + 1 if current in models else 1
+        for index, model in enumerate(models, start=1):
+            size = info.model_sizes.get(model)
+            size_text = f"  ({size})" if size else ""
+            mark = "  (current)" if model == current else ""
+            print(f"   {index}) {model}{size_text}{mark}")
+        choice = self._ask_int(1, len(models), default=default)
+        return models[choice - 1]
+
+    def _phase_ollama_fast(self) -> None:
+        if not self.state.configure_ollama:
+            raise _Skip
+        info = self.backend.ollama_info()
+        if info.reachable and info.installed_models:
+            self.state.fast_model = self._pick_model(
+                "fast model (ranking)",
+                [
+                    "This is the model used to quickly re-rank candidate files before",
+                    "showing them to your AI tool -- e.g. for a task like 'fix the login",
+                    "bug', it decides which files are probably relevant. A smaller,",
+                    "faster model is best here; you don't need a large coder model.",
+                ],
+                info, self.state.fast_model or info.fast_model)
+        else:
+            self._header("Fast model (ranking)")
+            self._explain(
+                "No installed models were detected, so enter the name manually.",
+                "This is the model used to quickly re-rank candidate files, e.g. for",
+                "'fix the login bug' it decides which files are probably relevant.",
+            )
+            self.state.fast_model = self._ask_text("Fast model", info.fast_model)
+
+    def _phase_ollama_summary(self) -> None:
+        if not self.state.configure_ollama:
+            raise _Skip
+        info = self.backend.ollama_info()
+        if info.reachable and info.installed_models:
+            self.state.summary_model = self._pick_model(
+                "summary model (file summaries)",
+                ["Used to write file/section summaries on request. A larger,",
+                 "code-capable model gives better summaries than the fast model."],
+                info, self.state.summary_model or info.summary_model)
+        else:
+            self._header("Summary model (file summaries)")
+            self._explain(
+                "No installed models were detected, so enter the name manually.",
+                "Used to write file/section summaries on request.",
+            )
+            self.state.summary_model = self._ask_text("Summary model", info.summary_model)
+        self._set_summary(
+            "Ollama", f"fast={self.state.fast_model}, summary={self.state.summary_model}")
+
+    # -- phase: uninstall ---------------------------------------------------
+
+    def _phase_uninstall_mode(self) -> None:
         self._header("Uninstall neo-localmcp")
         self._explain(
             "Choose how much to remove. 'Runtime only' disconnects clients and",
@@ -248,28 +384,65 @@ class ConsoleWizard:
             ("Full wipe", "delete the entire managed root and ALL stored data"),
         ])
         choice = self._ask_int(1, 2, default=1)
-        full = choice == 2
-        if full:
-            print(f"\n A full wipe permanently deletes everything under")
-            print(f"   {self.detected.managed_root}")
-            typed = self._ask_text(f'\n Type "{FULL_WIPE_PHRASE}" to confirm')
-            if typed != FULL_WIPE_PHRASE:
-                print("\n Not confirmed - cancelled.")
-                return False
-        self.state.full_wipe = full
-        self.summary.append(("Mode", "full wipe" if full else "runtime only"))
-        return self._ask_yesno("\n Proceed?", default=not full)
+        self.state.full_wipe = choice == 2
+        self._set_summary("Mode", "full wipe" if self.state.full_wipe else "runtime only")
 
-    def _confirm(self, *, allow_dry_run: bool) -> bool:
+    def _phase_uninstall_wipe_confirm(self) -> None:
+        if not self.state.full_wipe:
+            raise _Skip
+        self._header("Confirm full wipe")
+        self._explain(
+            "A full wipe permanently deletes everything under:",
+            f"  {self.detected.managed_root}",
+        )
+        while True:
+            typed = self._ask_text(f'Type "{FULL_WIPE_PHRASE}" to confirm')
+            if typed == FULL_WIPE_PHRASE:
+                return
+            print(f'\n   That did not match. Type exactly: {FULL_WIPE_PHRASE}')
+
+    # -- phase: confirm ------------------------------------------------------
+
+    def _client_detail_lines(self) -> list[str]:
+        if not self.state.selected_clients:
+            return ["   Clients: none"]
+        options = {opt.key: opt for opt in self.backend.client_options()}
+        lines = ["   Clients:"]
+        for i, key in enumerate(self.state.selected_clients, start=1):
+            opt = options.get(key)
+            label = CLIENT_LABELS.get(key, key)
+            if opt is None:
+                lines.append(f"     {i}) {label}")
+                continue
+            manual = "  [manual step]" if opt.manual else ""
+            lines.append(f"     {i}) {label}{manual}")
+            lines.append(f"          path: {opt.config_path}")
+            if opt.detail:
+                lines.append(f"          {opt.detail}")
+        return lines
+
+    def _confirm(self, *, allow_dry_run: bool, default_proceed: bool = True) -> None:
         self._header("Review and confirm")
         self._explain(
-            "Nothing has changed yet. Your choices are summarized above. If you",
-            "want to see the exact steps without touching anything, use dry run.",
+            "Nothing has changed yet. Everything above under 'Your choices so",
+            "far' is exactly what will happen if you proceed. Use dry run to",
+            "preview the steps without changing anything.",
         )
+        print(f"   Managed root: {self.detected.managed_root}")
+        print()
+
         if allow_dry_run:
             self.state.dry_run = self._ask_yesno(
                 "Preview only (dry run - show the plan, change nothing)?", default=False)
-        return self._ask_yesno("Proceed?", default=True)
+        if not self._ask_yesno("Proceed?", default=default_proceed):
+            raise _Abort
+
+    def _phase_confirm(self) -> None:
+        default_proceed = not (self.state.operation == OP_UNINSTALL and self.state.full_wipe)
+        self._confirm(
+            allow_dry_run=self.state.operation in {OP_INSTALL, OP_REINSTALL},
+            default_proceed=default_proceed,
+        )
 
     # -- execution -------------------------------------------------------- #
 
@@ -311,6 +484,8 @@ class ConsoleWizard:
         self.backend.save_prefs(prefs)
         self.prefs = prefs
 
+    # -- dispatch ----------------------------------------------------------- #
+
     def _dispatch(self, op: str) -> None:
         self.state = WizardState(operation=op)
         labels = {
@@ -318,28 +493,46 @@ class ConsoleWizard:
             OP_CONFIG_OLLAMA: "configure Ollama", OP_MANAGE_CLIENTS: "manage clients",
         }
         self.summary = [("Operation", labels.get(op, op))]
+        self._clients_chosen = False
+        self._ollama_optional = op == OP_INSTALL
+        self._clients_manage_mode = op == OP_MANAGE_CLIENTS
 
         if op == OP_INSTALL:
-            self._flow_clients(manage=False)
-            self._flow_ollama(optional=True)
-            if self._confirm(allow_dry_run=True):
-                self._run()
+            phases = [
+                self._phase_clients,
+                self._phase_ollama_yesno,
+                self._phase_ollama_baseurl,
+                self._phase_ollama_fast,
+                self._phase_ollama_summary,
+                self._phase_confirm,
+            ]
         elif op == OP_REINSTALL:
             existing = ", ".join(self.detected.registered_clients) or "none"
-            self.summary.append(("Clients", f"kept as-is ({existing})"))
-            if self._confirm(allow_dry_run=True):
-                self._run()
+            self._set_summary("Clients", f"kept as-is ({existing})")
+            phases = [self._phase_confirm]
         elif op == OP_CONFIG_OLLAMA:
-            self._flow_ollama(optional=False)
-            if self._confirm(allow_dry_run=False):
-                self._run()
+            phases = [
+                self._phase_ollama_yesno,
+                self._phase_ollama_baseurl,
+                self._phase_ollama_fast,
+                self._phase_ollama_summary,
+                self._phase_confirm,
+            ]
         elif op == OP_MANAGE_CLIENTS:
-            self._flow_clients(manage=True)
-            if self._confirm(allow_dry_run=False):
-                self._run()
+            phases = [self._phase_clients, self._phase_confirm]
         elif op == OP_UNINSTALL:
-            if self._flow_uninstall():
-                self._run()
+            phases = [
+                self._phase_uninstall_mode,
+                self._phase_uninstall_wipe_confirm,
+                self._phase_confirm,
+            ]
+        else:
+            return
+
+        if self._run_phases(phases):
+            self._run()
+        else:
+            print("\n Cancelled - nothing was changed.")
 
     # -- loop ------------------------------------------------------------- #
 

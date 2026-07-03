@@ -38,6 +38,7 @@ from .backend import (
     ClientOption,
     DetectedInfo,
     EmitFn,
+    human_size,
     OllamaInfo,
     OperationOutcome,
     StepEvent,
@@ -175,7 +176,8 @@ class RealBackend:
             )
         state = str(probe.get("state", "unreachable"))
         reachable = state not in {"unreachable", "timed_out", "disabled", "failed"}
-        installed = tuple(str(m) for m in probe.get("installed_models", []) if m)
+        installed = sorted({str(m) for m in probe.get("installed_models", []) if m})
+        sizes = self._model_sizes(base_url) if reachable and installed else {}
         if reachable and installed:
             detail = f"`ollama list`: {len(installed)} model(s) installed at {base_url}."
         elif reachable:
@@ -184,9 +186,31 @@ class RealBackend:
             detail = (f"Ollama not reachable at {base_url} "
                       f"({probe.get('error') or state}). neo-localmcp works without it.")
         return OllamaInfo(
-            reachable=reachable, base_url=base_url, installed_models=installed,
+            reachable=reachable, base_url=base_url, installed_models=tuple(installed),
             fast_model=fast, summary_model=summary, state=state, detail=detail,
+            model_sizes=sizes,
         )
+
+    @staticmethod
+    def _model_sizes(base_url: str) -> dict[str, str]:
+        """Best-effort per-model size from `ollama list`'s underlying /api/tags.
+
+        Never raises -- an empty result just means sizes aren't shown, the
+        model names themselves already came back fine from ``status()``.
+        """
+        try:
+            code, tags = ollama_client._request_json("/api/tags", timeout=5)
+            if code != 200:
+                return {}
+            sizes: dict[str, str] = {}
+            for item in tags.get("models", []):
+                name = str(item.get("name") or item.get("model") or "")
+                size = item.get("size")
+                if name and isinstance(size, (int, float)):
+                    sizes[name] = human_size(size)
+            return sizes
+        except Exception:  # noqa: BLE001 - size display is a nice-to-have, never fatal
+            return {}
 
     # -- operations ------------------------------------------------------- #
 
