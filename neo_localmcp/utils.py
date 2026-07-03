@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import os
 import re
@@ -126,6 +127,15 @@ def is_probably_text(path: Path) -> bool:
     return path.suffix.lower() in includes or path.name in includes or path.name in {"Dockerfile", "Makefile", "Rakefile", "Gemfile"}
 
 
+def _is_excluded_dir(name: str, patterns: Iterable[str]) -> bool:
+    """Match a directory name against configured exclude_dirs glob patterns.
+
+    fnmatch treats a pattern with no wildcard characters as a literal exact
+    match, so plain names (".git") behave exactly as before this was patterns.
+    """
+    return any(fnmatch.fnmatch(name, pattern) for pattern in patterns)
+
+
 def scan_repo_files(
     repo_root: str | Path | None = None,
     folder: str = ".",
@@ -139,7 +149,7 @@ def scan_repo_files(
     cfg = load_config()
     root = repo_root_or_cwd(repo_root)
     start = safe_path(folder, root)
-    exclude_dirs = set(cfg.get("repo", {}).get("exclude_dirs", []))
+    exclude_dirs = list(cfg.get("repo", {}).get("exclude_dirs", []))
     configured_limit = cfg.get("repo", {}).get("max_files")
     limit_value = max_files if max_files is not None else configured_limit
     limit = int(limit_value) if limit_value not in (None, "", 0, "0") else None
@@ -150,7 +160,7 @@ def scan_repo_files(
     found: list[Path] = []
     eligible = 0
     for dirpath, dirnames, filenames in os.walk(start):
-        dirnames[:] = sorted(d for d in dirnames if d not in exclude_dirs and not d.endswith(".egg-info") and d != "__pycache__" and not d.startswith(".neo-localmcp"))
+        dirnames[:] = sorted(d for d in dirnames if not _is_excluded_dir(d, exclude_dirs) and not d.endswith(".egg-info") and d != "__pycache__" and not d.startswith(".neo-localmcp"))
         for filename in sorted(filenames):
             p = Path(dirpath) / filename
             if not is_probably_text(p):
@@ -282,13 +292,23 @@ def rg_search(query: str, root: Path, max_results: int = 80) -> list[dict[str, A
             else:
                 rows.append({"raw": raw})
         return rows
-    needle = query.lower()
+    # No ripgrep on PATH (e.g. a CI image without it preinstalled): fall back to a
+    # pure-Python scan. The query is always regex syntax (tools.py sends a
+    # re.escape'd alternation like "(?:worker|RareMarkerNeedle)" to mirror rg's
+    # --ignore-case), so it must be compiled and searched as a regex, not matched
+    # as a literal substring -- a literal match of the whole "(?:...|...)" syntax
+    # would never occur in real source text and silently returns nothing.
+    try:
+        pattern = re.compile(query, re.IGNORECASE)
+    except re.error:
+        return []
     rows = []
     for p in iter_repo_files(root, max_files=3000):
         try:
             for idx, line in enumerate(read_text_file(p, 500_000).splitlines(), start=1):
-                if needle in line.lower():
-                    rows.append({"path": rel(p, root), "line": idx, "column": max(1, line.lower().find(needle) + 1), "text": line.strip()})
+                m = pattern.search(line)
+                if m:
+                    rows.append({"path": rel(p, root), "line": idx, "column": m.start() + 1, "text": line.strip()})
                     if len(rows) >= max_results:
                         return rows
         except Exception:

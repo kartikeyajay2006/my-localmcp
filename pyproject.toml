@@ -4,14 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "neo-localmcp"
-version = "1.0.9"
+version = "1.0.10"
 description = "Agent-ready deterministic repo context for Claude/Codex with local Ollama-assisted preprocessing."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 authors = [{ name = "neo-localmcp" }]
 license = { text = "MIT" }
 dependencies = [
-  "mcp[cli]>=1.27,<2"
+  "mcp[cli]>=1.27,<2",
+  "psutil>=5.9,<8"
 ]
 
 [project.optional-dependencies]
@@ -19,6 +20,12 @@ test = ["pytest>=8.0"]
 
 [project.scripts]
 neo-localmcp = "neo_localmcp.cli:main"
+neo-localmcp-server = "neo_localmcp.server:main"
+
+[tool.pytest.ini_options]
+markers = [
+  "slow: real runtime/lifecycle integration tests",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]

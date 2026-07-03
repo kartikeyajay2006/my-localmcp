@@ -13,10 +13,16 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from .config import APP_DIR, load_config, ollama_base_url
+from . import config
+from .config import load_config, ollama_base_url
 
-STATE_PATH = APP_DIR / "ollama-supervisor.json"
-LOCK_PATH = APP_DIR / "ollama-supervisor.lock"
+
+def _state_path() -> Path:
+    return config.cache_path("ollama", "supervisor.json")
+
+
+def _lock_path() -> Path:
+    return config.cache_path("ollama", "supervisor.lock")
 
 
 class SupervisorLockTimeout(RuntimeError):
@@ -31,16 +37,17 @@ class _SupervisorLock:
 
     def __enter__(self) -> "_SupervisorLock":
         deadline = time.monotonic() + self.timeout
-        APP_DIR.mkdir(parents=True, exist_ok=True)
+        lock_path = _lock_path()
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
         while True:
             try:
-                LOCK_PATH.mkdir()
-                (LOCK_PATH / "owner").write_text(f"{os.getpid()}\n{time.time()}\n", encoding="utf-8")
+                lock_path.mkdir()
+                (lock_path / "owner").write_text(f"{os.getpid()}\n{time.time()}\n", encoding="utf-8")
                 return self
             except FileExistsError:
                 try:
-                    if time.time() - LOCK_PATH.stat().st_mtime > max(120, self.timeout * 2):
-                        shutil.rmtree(LOCK_PATH, ignore_errors=True)
+                    if time.time() - lock_path.stat().st_mtime > max(120, self.timeout * 2):
+                        shutil.rmtree(lock_path, ignore_errors=True)
                         continue
                 except OSError:
                     pass
@@ -49,7 +56,7 @@ class _SupervisorLock:
                 time.sleep(0.1)
 
     def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
-        shutil.rmtree(LOCK_PATH, ignore_errors=True)
+        shutil.rmtree(_lock_path(), ignore_errors=True)
 
 
 def _cfg() -> dict[str, Any]:
@@ -81,14 +88,15 @@ def _is_local(base_url: str) -> bool:
 
 def _read_state() -> dict[str, Any]:
     try:
-        return json.loads(STATE_PATH.read_text(encoding="utf-8"))
+        return json.loads(_state_path().read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
 
 
 def _write_state(data: dict[str, Any]) -> None:
-    APP_DIR.mkdir(parents=True, exist_ok=True)
-    STATE_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    path = _state_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
 def _request_json(
@@ -246,7 +254,7 @@ def ensure(model: str | None = None, purpose: str = "ranking", auto_start: bool 
     failed_at = float(state.get("failed_at") or 0)
     if failed_at and time.time() - failed_at < cooldown:
         return {"ok": False, "state": "unreachable", "action": "circuit_open", "base_url": ollama_base_url(), "model": _model_for(purpose, model), "retry_after_seconds": round(cooldown - (time.time() - failed_at), 1)}
-    APP_DIR.mkdir(parents=True, exist_ok=True)
+    config.cache_dir().mkdir(parents=True, exist_ok=True)
     try:
         with _SupervisorLock(float(cfg.get("startup_timeout_seconds", 20)) + float(cfg.get("warm_timeout_seconds", 90))):
             current = status(model, purpose)
@@ -269,10 +277,32 @@ def ensure(model: str | None = None, purpose: str = "ranking", auto_start: bool 
         return {"ok": False, "state": "busy", "action": "ensure_lock_timeout", "base_url": ollama_base_url(), "model": _model_for(purpose, model)}
 
 
+def unload_model(model: str, timeout: float | None = None) -> dict[str, Any]:
+    """Request Ollama unload a named model via ``keep_alive: 0``. Never raises.
+
+    Connection refused, timeout, missing model, and HTTP error all degrade to a
+    non-``ok`` result instead of propagating, so lifecycle operations (reinstall/
+    uninstall) can treat unload as best-effort and never block on it.
+    """
+    bounded = float(timeout) if timeout is not None else float(_cfg().get("health_timeout_seconds", 5))
+    started = time.monotonic()
+    try:
+        code, payload = _request_json("/api/generate", method="POST", body={"model": model, "prompt": "", "stream": False, "keep_alive": 0}, timeout=bounded)
+    except (TimeoutError, socket.timeout) as exc:
+        return {"ok": False, "model": model, "state": "timed_out", "action": "unload_timed_out", "error": str(exc) or "unload timed out", "elapsed_seconds": round(time.monotonic() - started, 3)}
+    except Exception as exc:
+        return {"ok": False, "model": model, "state": "failed", "action": "unload_failed", "error": str(exc), "elapsed_seconds": round(time.monotonic() - started, 3)}
+    elapsed = round(time.monotonic() - started, 3)
+    if code == 404:
+        return {"ok": False, "model": model, "state": "model_missing", "action": "unload_skipped", "error": payload.get("error") or "model not found", "elapsed_seconds": elapsed}
+    if code != 200:
+        return {"ok": False, "model": model, "state": "failed", "action": "unload_failed", "error": payload.get("error") or f"HTTP {code}", "elapsed_seconds": elapsed}
+    return {"ok": True, "model": model, "state": "model_cold", "action": "unloaded", "elapsed_seconds": elapsed}
+
+
 def unload(model: str | None = None, purpose: str = "ranking") -> dict[str, Any]:
     chosen = _model_for(purpose, model)
-    code, payload = _request_json("/api/generate", method="POST", body={"model": chosen, "prompt": "", "stream": False, "keep_alive": 0}, timeout=float(_cfg().get("health_timeout_seconds", 5)))
-    return {"ok": code == 200, "state": "model_cold" if code == 200 else "failed", "action": "unloaded" if code == 200 else "unload_failed", "model": chosen, "error": payload.get("error")}
+    return unload_model(chosen)
 
 
 def chat(prompt: str, model: str | None = None, purpose: str = "summary", num_predict: int | None = None) -> dict[str, Any]:

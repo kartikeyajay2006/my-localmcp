@@ -571,6 +571,11 @@ def record_retrieval_feedback(retrieval_id: str, repo_root: str | Path | None, r
         s_start = int(suggestion.get("start_line") or 1)
         s_end = int(suggestion.get("end_line") or s_start)
         overlap = not (end < s_start or start > s_end)
+        if not overlap:
+            # A file can have more than one legitimate hit location; a file with a
+            # secondary hint listed alongside the primary excerpt (but too far away
+            # to share its window) still counts as followed if the pull lands on it.
+            overlap = any(start <= int(line) <= end for line in suggestion.get("hint_lines") or [])
         _bump_feedback(conn, rid, term_key, path, suggestion.get("matched_name"), followed=overlap)
         updates.append({"path": path, "overlap": overlap})
     conn.commit()

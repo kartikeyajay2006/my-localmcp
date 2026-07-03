@@ -35,6 +35,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
+import psutil
+
 from . import config
 
 DEFAULT_POLL_SECONDS = 0.4
@@ -45,7 +47,7 @@ def _servers_root() -> Path:
     # Resolved dynamically from config.APP_DIR (not bound at import) so it follows
     # both the NEO_LOCALMCP_HOME env used by spawned servers and the test fixture's
     # APP_DIR override, without any caller needing to remember to patch it.
-    return config.APP_DIR / "servers"
+    return config.process_registry_dir() / "servers"
 
 
 def _servers_dir() -> Path:
@@ -62,12 +64,18 @@ def _stop_path(pid: int) -> Path:
     return _servers_dir() / f"{pid}.stop"
 
 
-# --- process liveness (stdlib only, no psutil) -------------------------------
+# --- process liveness + PID-reuse protection --------------------------------
 
 
-def pid_alive(pid: int) -> bool:
+def pid_alive(pid: int, create_time: float | None = None) -> bool:
     if pid <= 0:
         return False
+    if create_time is not None:
+        try:
+            process = psutil.Process(pid)
+            return process.is_running() and abs(process.create_time() - float(create_time)) <= 0.02
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            return False
     if os.name == "nt":
         import ctypes
 
@@ -109,11 +117,24 @@ def force_terminate(pid: int) -> bool:
 # --- registry ----------------------------------------------------------------
 
 
-def register_server(version: str) -> dict[str, Any]:
+def register_server(version: str, source: str = "managed-runtime") -> dict[str, Any]:
     pid = os.getpid()
+    process = psutil.Process(pid)
+    try:
+        create_time = float(process.create_time())
+        parent_pid = int(process.ppid())
+        command_line = list(process.cmdline())
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+        create_time = time.time()
+        parent_pid = os.getppid()
+        command_line = list(sys.argv)
     data = {
         "pid": pid,
+        "parent_pid": parent_pid,
+        "create_time": create_time,
         "executable": sys.executable,
+        "command_line": command_line,
+        "source": source,
         "started_at": time.time(),
         "version": version,
     }
@@ -156,7 +177,7 @@ def list_servers(prune: bool = True) -> list[dict[str, Any]]:
                     pass
             continue
         pid = int(entry["pid"])
-        alive = pid_alive(pid)
+        alive = pid_alive(pid, entry.get("create_time"))
         if not alive and prune:
             # A server that died without unregistering (crash / force-kill). Clean up.
             unregister_server(pid)
