@@ -331,7 +331,9 @@ def verify_registrations(
             config = Path(record.config_path) if record.config_path else client_setup._codex_cli_config_path()
             text = config.read_text(encoding="utf-8") if config.exists() else ""
             region = _codex_marked_region(text) or ""
-            ok = expected in region
+            match = _COMMAND_RE.search(region)
+            configured = _unescape_toml(match.group(1)) if match else None
+            ok = configured == expected
             checks.append(
                 RegistrationCheck(CODEX, ok, "launcher matches" if ok else f"expected {expected} in codex config")
             )

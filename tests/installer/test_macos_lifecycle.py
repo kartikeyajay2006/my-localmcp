@@ -212,6 +212,7 @@ async def _drive_start_and_close(home: Path) -> int:
     return pid
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS lifecycle evidence")
 @pytest.mark.slow
 def test_full_macos_lifecycle_via_setup_v2(tmp_path: Path) -> None:
     home = tmp_path / ".neo-localmcp"

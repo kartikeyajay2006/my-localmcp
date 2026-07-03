@@ -198,6 +198,50 @@ def rehome_scripts(bindir: Path, old_prefix: str, new_prefix: str) -> tuple[str,
     return tuple(rehomed)
 
 
+def rehome_windows_launchers(
+    scripts_dir: Path, old_prefix: str, new_prefix: str
+) -> tuple[str, ...]:
+    """Relocate distlib/pip Windows launchers after moving a virtualenv.
+
+    Windows console-script launchers contain an appended shebang with the
+    absolute interpreter path.  The launcher executable is otherwise
+    relocatable, and its embedded zip payload supports a changed prepended
+    length, so replacing the exact venv prefix regenerates the effective
+    shebang without depending on PowerShell or a package-index reinstall.
+    """
+
+    directory = Path(scripts_dir)
+    if old_prefix == new_prefix or not directory.is_dir():
+        return ()
+    old_variants = {
+        old_prefix.encode("utf-8"),
+        old_prefix.replace("/", "\\").encode("utf-8"),
+    }
+    new_variants = {
+        old_prefix.encode("utf-8"): new_prefix.encode("utf-8"),
+        old_prefix.replace("/", "\\").encode("utf-8"): new_prefix.replace(
+            "/", "\\"
+        ).encode("utf-8"),
+    }
+    relocated: list[str] = []
+    for entry in sorted(directory.glob("*.exe")):
+        try:
+            payload = entry.read_bytes()
+        except OSError:
+            continue
+        if not any(old in payload for old in old_variants):
+            continue
+        rewritten = payload
+        for old, new in new_variants.items():
+            rewritten = rewritten.replace(old, new)
+        try:
+            entry.write_bytes(rewritten)
+        except OSError:
+            continue
+        relocated.append(entry.name)
+    return tuple(relocated)
+
+
 class RealRuntimeFileSystem:
     def exists(self, path: Path) -> bool:
         return Path(path).exists()
@@ -604,11 +648,18 @@ def promote_candidate(
     # A moved venv keeps script shebangs pointing at the staging path; rehome
     # them to the promoted location before validating from the final path.
     final_location = installed_location(paths)
-    rehome_scripts(
-        final_location.python_executable.parent,
-        str(candidate.venv),
-        str(target),
-    )
+    if paths.platform == "windows":
+        rehome_windows_launchers(
+            final_location.python_executable.parent,
+            str(candidate.venv),
+            str(target),
+        )
+    else:
+        rehome_scripts(
+            final_location.python_executable.parent,
+            str(candidate.venv),
+            str(target),
+        )
 
     if reporter is not None:
         reporter.action("Validating promoted runtime.")

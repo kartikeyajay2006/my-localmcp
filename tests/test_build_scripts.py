@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
+import pytest
+
 
 def test_build_mcpb_sh_reads_version_with_macos_sed(tmp_path: Path) -> None:
+    if shutil.which("bash") is None:
+        pytest.skip("bash is unavailable on this Windows host")
     root = Path(__file__).parents[1]
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()

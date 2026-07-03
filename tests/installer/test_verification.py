@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Sequence
@@ -22,7 +23,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _paths(tmp_path: Path) -> ManagedPaths:
-    paths = ManagedPaths(root=tmp_path / ".neo-localmcp", platform="posix", home=tmp_path)
+    platform = "windows" if os.name == "nt" else "posix"
+    paths = ManagedPaths(root=tmp_path / ".neo-localmcp", platform=platform, home=tmp_path)
     paths.ensure_directories()
     return paths
 
@@ -640,7 +642,8 @@ def test_real_installed_endpoint_verifies_and_leaves_no_registered_pid(tmp_path:
     handshake probe must never leave a registered server PID behind."""
     from neo_localmcp.installer.runtime import build_candidate, promote_candidate
 
-    paths = ManagedPaths(root=tmp_path / ".neo-localmcp", platform="posix", home=tmp_path)
+    platform = "windows" if os.name == "nt" else "posix"
+    paths = ManagedPaths(root=tmp_path / ".neo-localmcp", platform=platform, home=tmp_path)
     paths.ensure_directories()
     expected_version = neo_localmcp.__version__
 
