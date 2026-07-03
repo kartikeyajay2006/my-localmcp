@@ -1,5 +1,10 @@
 # Project Notes
 
+## 2026-07-03 (9)
+
+- Owner spotted that the wizard's client-selection paths were wrong/misleading and asked to verify against `client_setup.py`. Confirmed: Claude Desktop is NOT configured by writing `claude_desktop_config.json` (the code explicitly says "Direct claude_desktop_config.json editing is intentionally no longer performed") — it's a `.mcpb` package at `~/.neo-localmcp/neo-localmcp.mcpb` that the user installs manually via Settings > Extensions > Advanced settings (`setup_claude_desktop` returns `applied: False, manual_install_required: True`). Claude Code isn't a single config file either: slash commands go to `~/.claude/commands/neo-localmcp` and the MCP server is registered via a `claude mcp add --scope user` CLI call.
+- Fixed both backends to tell the truth: `ClientOption` gained `detail` (what the path is) and `manual` (can't be automated) fields. Real backend now shows the `.mcpb` path for Claude Desktop (from `paths.root / "neo-localmcp.mcpb"`), labels Claude Code as slash-commands-dir + CLI registration, and labels Codex as a config.toml block; `apply_client_changes` surfaces Claude Desktop's manual `.mcpb` install instructions instead of silently reporting success. Fake backend mirrors the same paths/details. Console clients screen now leads with a brief explainer of the step and prints each option as label + `path:` + what-it-is, with Claude Desktop tagged `[manual step]`. Verified real `client_options()` resolves the correct live paths on this Windows host; fake render confirmed.
+
 ## 2026-07-03 (8)
 
 - Owner found the Textual wizard over-engineered ("we went balls to the wall") and asked to simplify the UI to a plain full-screen numbered wizard: numbers to select options, a summary built up as you answer. Committed the Textual version first (`0c31fcb`) as a revert point, then replaced the UI.

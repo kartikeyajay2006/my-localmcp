@@ -63,16 +63,29 @@ def _fake_root() -> str:
     return "/Users/you/.neo-localmcp" if sys.platform == "darwin" else "~/.neo-localmcp"
 
 
-def _fake_client_path(key: str) -> str:
+def _fake_client_meta(key: str) -> tuple[str, str, bool]:
+    """Return (path, detail, manual) mirroring what client_setup.py really does."""
     windows = os.name == "nt"
     if key == "claude-code":
-        return (r"C:\Users\you\.claude\commands\neo-localmcp"
+        path = (r"C:\Users\you\.claude\commands\neo-localmcp"
                 if windows else "~/.claude/commands/neo-localmcp")
+        return (path,
+                "Slash commands installed here; the MCP server is registered via "
+                "`claude mcp add --scope user` (no file edited directly).",
+                False)
     if key == "codex":
-        return r"C:\Users\you\.codex\config.toml" if windows else "~/.codex/config.toml"
-    # claude-desktop
-    return (r"C:\Users\you\AppData\Roaming\Claude\claude_desktop_config.json"
-            if windows else "~/Library/Application Support/Claude/claude_desktop_config.json")
+        path = r"C:\Users\you\.codex\config.toml" if windows else "~/.codex/config.toml"
+        return (path,
+                "A marked neo-localmcp block is written into config.toml "
+                "(shared by Codex CLI, IDE, and app).",
+                False)
+    # claude-desktop: a .mcpb package you install manually in-app, NOT a JSON edit.
+    path = (r"C:\Users\you\.neo-localmcp\neo-localmcp.mcpb"
+            if windows else "~/.neo-localmcp/neo-localmcp.mcpb")
+    return (path,
+            "Manual step: install this .mcpb in Claude Desktop via "
+            "Settings > Extensions > Advanced settings. Not written automatically.",
+            True)
 
 
 class FakeBackend:
@@ -114,15 +127,18 @@ class FakeBackend:
         )
 
     def client_options(self) -> list[ClientOption]:
-        return [
-            ClientOption(
+        options = []
+        for key in CLIENT_KEYS:
+            path, detail, manual = _fake_client_meta(key)
+            options.append(ClientOption(
                 key=key,
                 label=CLIENT_LABELS[key],
-                config_path=_fake_client_path(key),
+                config_path=path,
                 registered=key in self._registered,
-            )
-            for key in CLIENT_KEYS
-        ]
+                detail=detail,
+                manual=manual,
+            ))
+        return options
 
     def ollama_info(self) -> OllamaInfo:
         return OllamaInfo(

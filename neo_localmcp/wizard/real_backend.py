@@ -125,17 +125,37 @@ class RealBackend:
             paths = status.get("paths", {})
         except Exception:  # noqa: BLE001
             paths = {}
-        path_by_key = {
-            "claude-code": paths.get("claude_code_commands", {}).get("path", ""),
-            "codex": paths.get("codex_cli_config", {}).get("path", ""),
-            "claude-desktop": paths.get("claude_desktop_config", {}).get("path", ""),
+        claude_code = paths.get("claude_code_commands", {}).get("path", "")
+        codex = paths.get("codex_cli_config", {}).get("path", "")
+        mcpb = str(self._paths.root / "neo-localmcp.mcpb")
+        rows = {
+            "claude-code": (
+                claude_code,
+                "Slash commands installed here; the MCP server is registered via "
+                "`claude mcp add --scope user` (no file edited directly).",
+                False,
+            ),
+            "codex": (
+                codex,
+                "A marked neo-localmcp block is written into config.toml "
+                "(shared by Codex CLI, IDE, and app).",
+                False,
+            ),
+            "claude-desktop": (
+                mcpb,
+                "Manual step: install this .mcpb in Claude Desktop via "
+                "Settings > Extensions > Advanced settings. Not written automatically.",
+                True,
+            ),
         }
         return [
             ClientOption(
                 key=key,
                 label=CLIENT_LABELS[key],
-                config_path=path_by_key.get(key, "") or "(path unavailable)",
+                config_path=rows[key][0] or "(path unavailable)",
                 registered=key in registered,
+                detail=rows[key][1],
+                manual=rows[key][2],
             )
             for key in CLIENT_KEYS
         ]
@@ -301,11 +321,16 @@ class RealBackend:
         add = [c for c in target if c not in current]
         remove = [c for c in current if c not in target]
         failures: list[str] = []
+        manual: list[str] = []
         for c in add:
             emit(StepEvent("action", f"Connecting {CLIENT_LABELS.get(c, c)} ..."))
             try:
-                client_setup.setup_client(c, apply=True,
-                                          server_command=self._paths.server_executable)
+                res = client_setup.setup_client(
+                    c, apply=True, server_command=self._paths.server_executable)
+                if isinstance(res, dict) and res.get("manual_install_required"):
+                    note = str(res.get("instructions") or "Manual install required.")
+                    emit(StepEvent("warning", f"  {note}"))
+                    manual.append(f"{CLIENT_LABELS.get(c, c)}: {note}")
             except Exception as exc:  # noqa: BLE001
                 failures.append(f"{c}: {exc}")
                 emit(StepEvent("error", f"  failed: {exc}"))
@@ -325,11 +350,13 @@ class RealBackend:
         if failures:
             return OperationOutcome(
                 ok=False, status="failed", title="Some client changes failed.",
-                detail_lines=tuple(failures),
+                detail_lines=tuple(failures + manual),
             )
+        details = [f"Connected: {', '.join(target) or 'none'}"]
+        details.extend(manual)
         return OperationOutcome(
             ok=True, status="succeeded", title="Client connections updated.",
-            detail_lines=(f"Connected: {', '.join(target) or 'none'}",),
+            detail_lines=tuple(details),
         )
 
     # -- prefs ------------------------------------------------------------ #
