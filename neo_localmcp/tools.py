@@ -529,7 +529,7 @@ def _line_hint_from_reason(reason: str) -> str | None:
 def _add_candidate(candidates: dict[str, dict[str, Any]], path: str, reason: str, score: int, intent: str, *, line_hint: str | None = None, allow_reason_line_hint: bool = True) -> None:
     category = classify_path(path)
     if path not in candidates:
-        candidates[path] = {"path": path, "category": category, "score": category_boost(category, intent), "reasons": [], "line_hints": []}
+        candidates[path] = {"path": path, "category": category, "score": category_boost(category, intent), "reasons": [], "line_hints": [], "line_hint_weights": {}}
     item = candidates[path]
     # Score each unique evidence reason once. This prevents duplicate FTS/search rows or repeated refreshes
     # from changing deterministic scores across identical runs.
@@ -538,8 +538,16 @@ def _add_candidate(candidates: dict[str, dict[str, Any]], path: str, reason: str
         item["reasons"].append(reason)
         item["score"] += score
     hint = line_hint if line_hint is not None else (_line_hint_from_reason(reason) if allow_reason_line_hint else None)
-    if hint and hint not in item["line_hints"]:
-        item["line_hints"].append(hint)
+    if hint:
+        if hint not in item["line_hints"]:
+            item["line_hints"].append(hint)
+        # Track the strongest evidence weight tied to each hinted line so a file with
+        # several unrelated hit locations can later center on the most query-relevant
+        # one instead of whichever hint happens to sort first by line number.
+        m = re.search(r"(\d+)", hint)
+        if m:
+            line_no = int(m.group(1))
+            item["line_hint_weights"][line_no] = max(item["line_hint_weights"].get(line_no, 0), score)
 
 
 def _group_line_hints_for_guidance(item: dict[str, Any]) -> str:
@@ -780,11 +788,24 @@ def context_prepare(task: str, repo_root: str = "auto", max_files: int | None = 
             if exact and exact.get("start_line"):
                 center = int(exact["start_line"])
                 break
-        hint_numbers = [int(match.group(1)) for hint in item.get("line_hints", []) if (match := re.search(r"(\d+)", hint))]
-        center = center or (hint_numbers[0] if hint_numbers else 1)
+        if center is None:
+            weights = item.get("line_hint_weights") or {}
+            # Prefer the hint tied to the strongest matching evidence, not merely
+            # whichever hint happens to sort first by line number -- a file can have
+            # several distinct, unrelated hit locations, and the earliest one is not
+            # necessarily the most query-relevant. Ties break to the earliest line
+            # for determinism.
+            center = min(weights, key=lambda line: (-weights[line], line)) if weights else 1
         range_start, range_end = max(1, center - 20), center + 19
         ranges.append({"path": item["path"], "start_line": range_start, "end_line": range_end})
-        sections_for_memory.append({"path": item["path"], "start_line": range_start, "end_line": range_end, "match_kind": "fallback", "matched_name": None, "score": item.get("score")})
+        other_hint_lines = sorted({line for line in item.get("line_hint_weights", {}) if not (range_start <= line <= range_end)})
+        sections_for_memory.append({
+            "path": item["path"], "start_line": range_start, "end_line": range_end,
+            "match_kind": "fallback", "matched_name": None, "score": item.get("score"),
+            "hint_lines": other_hint_lines,
+        })
+    for item in candidates.values():
+        item.pop("line_hint_weights", None)
     excerpt_data = repo_memory.file_excerpts(ranges, root, max_chars=max(1000, min(int(token_budget), 8000) * 4))
     for excerpt in excerpt_data.get("excerpts", []):
         section = section_by_path.get(excerpt.get("path"))

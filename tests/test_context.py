@@ -198,3 +198,27 @@ def test_reindexing_unchanged_markdown_file_is_a_cheap_noop(tmp_path, isolated_c
     second = repo_memory.refresh(str(repo))
     assert second["indexed_or_updated"] == 0
     assert second["unchanged"] == first["indexed_files"]
+
+
+def test_excerpt_centers_on_highest_weight_hint_not_first_by_line(tmp_path, isolated_config):
+    """Regression: a file matched at multiple unrelated line numbers must center
+    its excerpt on the hint tied to the actually-relevant (highest-weight, e.g.
+    strong-term) match, not whichever hint happens to sort first by line number.
+    The strong term here is deliberately plain text inside another function
+    (not itself a def/class symbol name), matching the real live repro where
+    'num_predict' was a parameter mention inside ollama_client.py's chat(), not
+    a symbol in its own right -- so the pre-existing exact-symbol-name shortcut
+    does not apply and the fallback hint-centering logic is actually exercised.
+    See PROJECT_NOTES.md 2026-07-03."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    lines = ["def entrypoint():", "    # worker text here", "    return 'ok'"]
+    lines += ["    # filler"] * 100
+    lines += ["def handler():", "    # marks RareMarkerNeedle usage here", "    return 1"]
+    (repo / "module_a.py").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    raw = tools.prepare_context("worker RareMarkerNeedle", str(repo), token_budget=1500, max_files=1, output_format="json")
+    result = json.loads(raw)
+    excerpt = next(e for e in result["context_excerpts"] if e["path"] == "module_a.py")
+    target_line = next(i for i, line in enumerate(lines, start=1) if "RareMarkerNeedle" in line)
+    assert excerpt["start_line"] <= target_line <= excerpt["end_line"]
