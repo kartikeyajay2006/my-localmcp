@@ -358,7 +358,7 @@ class ConsoleWizard:
         self.state.configure_ollama = self._ask_yesno(
             "Configure Ollama models now?", default=info.reachable)
         if not self.state.configure_ollama:
-            self._set_summary("Ollama", "not configured")
+            self._set_summary("Ollama", "skipped config")
 
     def _phase_ollama_baseurl(self) -> None:
         if not self.state.configure_ollama:
@@ -466,9 +466,9 @@ class ConsoleWizard:
 
     def _client_detail_lines(self) -> list[str]:
         if not self.state.selected_clients:
-            return ["   Clients: none"]
+            return ["   Chosen clients: none"]
         options = {opt.key: opt for opt in self.backend.client_options()}
-        lines = ["   Clients:"]
+        lines = ["   Chosen clients:"]
         for i, key in enumerate(self.state.selected_clients, start=1):
             opt = options.get(key)
             label = CLIENT_LABELS.get(key, key)
