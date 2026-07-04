@@ -9,3 +9,4 @@ build/
 .pytest_cache/
 .DS_Store
 .vscode/settings.json
+.wizard_preview/
