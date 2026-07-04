@@ -1,4 +1,4 @@
-# Wizard: mid-session Preview Dummy toggle + persisted preview state
+# Wizard: mid-session Preview Dummy toggle, persisted preview state, colorization
 
 Date: 2026-07-04
 Status: approved, ready for planning
@@ -20,7 +20,7 @@ used to walk the whole flow safely. Two gaps prompted this change:
 
 ## Scope
 
-Two independent, additive changes to `neo_localmcp/wizard/`:
+Three independent, additive changes to `neo_localmcp/wizard/`:
 
 - **A. Mid-session toggle.** At the main menu only, typing `d`/`dummy`
   instead of a number switches the running wizard from the real backend to
@@ -30,9 +30,14 @@ Two independent, additive changes to `neo_localmcp/wizard/`:
   running the preview through an install, then later an uninstall, actually
   shows the right "before" state each time — without ever touching any real
   managed root, venv, or client config.
+- **D. Colorization.** Structural chrome (headers, section rules, the
+  `[Preview Dummy]` tag) and semantic/status text (success, error,
+  destructive-confirm) get ANSI color, applied wizard-wide (not just the
+  dummy path), with automatic fallback to plain text when unsupported.
 
-Both changes are purely additive to the fake/dummy path; the real backend and
-real lifecycle code are untouched.
+A and B are scoped to the fake/dummy path only; D touches both real and fake
+runs since it's purely presentational. The real backend and real lifecycle
+code are untouched by all three.
 
 ## A. Mid-session `D` toggle
 
@@ -119,6 +124,46 @@ dict seeded at construction; these now read from/write into the same loaded
 state and get included in the write-back so `last_clients`/model prefs
 persist across preview runs too.
 
+## D. Colorization
+
+**Goal:** apply color to both structural chrome and semantic/status output
+across the whole wizard, for scannability — not just the dummy-mode path.
+
+**Implementation:** stdlib-only, raw ANSI escape codes — no new dependency,
+keeping the existing "no TUI toolkit" convention intact. A small
+`_ansi.py` (or a section in `console.py`) defines:
+
+- On import/startup, enable ANSI processing on Windows consoles that don't
+  have it by default (a one-line `os.system("")` call is sufficient to
+  trigger this on modern Windows Terminal/cmd.exe; no `ctypes`/`ansicon`
+  dependency needed).
+- A `_color(text, code)` helper and named wrappers (`_bold`, `_dim`, `_cyan`,
+  `_yellow`, `_green`, `_red`) that wrap `text` in the corresponding ANSI
+  escape and reset sequence.
+- A module-level `_COLOR_ENABLED` flag computed once at startup:
+  `False` if `NO_COLOR` env var is set (any value, per the no-color.org
+  convention) OR `sys.stdout.isatty()` is `False` (covers piped test input
+  and redirected output); `True` otherwise. When disabled, every color
+  wrapper is a no-op passthrough, so piped/test output is unaffected byte
+  for byte except for the actual text.
+
+**Palette (roles, not literal hex — standard 16-color ANSI):**
+
+| Role | Color | Used for |
+|---|---|---|
+| Header / section title | cyan, bold | Title bar (`" neo-localmcp setup wizard"`), `"="*_WIDTH` rules, question line in `_header` |
+| `[Preview Dummy]` tag | yellow | The title-bar suffix from section B, both `--fake` and mid-session toggle |
+| Descriptions / hints | dim | `_explain(...)` blurbs, per-option `desc` lines in `_print_options`, path/detail lines under client options, `[Default: ...]` hints |
+| Success | green | Operation outcome title/detail lines when `outcome.ok` is true, `"(connected)"`/registered markers |
+| Error / destructive | red, bold | Operation outcome when `outcome.ok` is false, the full-wipe confirm phase's warning text and the typed-`DELETE`-phrase prompt |
+| Option titles / body text | default (no color) | Numbered option titles, running-summary values, general body copy — left plain so colored elements stand out against it |
+
+**Where colors are applied (call sites, not a rewrite):** `_header`,
+`_print_options`, `_explain`, `_confirm`/`_phase_uninstall_wipe_confirm`
+(destructive-path text), and the outcome-printing block in `_run` are updated
+to wrap their existing strings in the relevant color helper — no change to
+control flow, phase structure, or what text is shown, only how it's styled.
+
 ## Non-goals / deferred
 
 - No un-toggle back to the real backend once `D` is used mid-session (decided
@@ -128,6 +173,12 @@ persist across preview runs too.
   path.
 - No YAML or other new dependency — plain JSON is sufficient for a
   developer-inspectable scratch file.
+- No new dependency for colorization either — raw ANSI only, matching the
+  existing stdlib-only convention.
+- No configurable palette/theme — one fixed palette for now; an explicit
+  `--no-color` flag is deferred since `NO_COLOR`/`isatty` auto-detection
+  covers the known cases (piped test input, redirected output, opt-out env
+  var).
 
 ## Testing
 
@@ -138,3 +189,7 @@ persist across preview runs too.
   contents at each step match the rules above.
 - New coverage: `D` at the main menu switches `self.backend` to a
   `FakeBackend` instance and the header immediately shows `[Preview Dummy]`.
+- New coverage: with `NO_COLOR` set (or stdout piped, as tests already do),
+  no ANSI escape sequences appear anywhere in captured output; with color
+  forced on, key strings (header title, `[Preview Dummy]` tag, an error
+  outcome) contain the expected escape codes.
