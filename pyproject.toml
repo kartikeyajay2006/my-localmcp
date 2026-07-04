@@ -16,7 +16,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=8.0"]
+# pytest-xdist parallelizes the suite across CPU cores (-n auto). Measured ~5x
+# faster locally on Windows (~165s -> ~34s) with no isolation failures across
+# repeated runs; the tests already isolate via tmp_path fixtures.
+test = ["pytest>=8.0", "pytest-xdist>=3.0"]
 # Guided terminal installer (`python setup_wizard.py`). It is a plain stdlib
 # numbered wizard, so its only dependency is psutil, which is already a base
 # runtime dependency. The extra exists so `pip install -e ".[wizard]"` is a
