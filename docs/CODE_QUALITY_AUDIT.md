@@ -28,6 +28,7 @@ producing this report. Line numbers reference the working tree at the branch bas
 |---|--------|---------|
 | 1 | `tools.py` | Comments exemplary; real problem is size — 1054 lines, `context_prepare` is a ~233-line 8-job function. 6 findings (1 high). |
 | 2 | `repo_memory.py` | Cleanest large module; well-factored, benchmark-quality docstrings. 5 minor findings (1 med), nothing high. |
+| 3 | `query.py` | Compact and readable; main issue is two hand-synced word-set copies (DRY). 5 findings (1 med), nothing high. |
 | — | `config.py` | Solid tuning comments, but `.claude` missing from `exclude_dirs` (high, causes worktree pollution), constants/functions DRY split, JSON-in-.yaml drift. 4 findings (1 high, 2 med). |
 
 ---
@@ -254,3 +255,58 @@ indexing / retrieval-boost" query did not surface anything my own reads had not
 already covered; it re-ranked the memory functions sensibly and added no false
 leads worth recording. Datapoint: on this well-factored module the model was
 neither especially helpful nor harmful — it neither found nor invented a finding.
+
+---
+
+## 3. `neo_localmcp/query.py` (197 lines)
+
+**Verdict:** Compact, readable, single-purpose. The parsing logic is honest and
+the two subtle comments (69, 91-92) explain real WHY decisions. The main quality
+issues are DRY (two hand-maintained word-set copies that must agree) and a couple
+of redundant/inline constructs. The already-filed retrieval bugs (#23 identifier
+weighting, #24 overloaded "migration") originate here but are *behavioral* — out
+of scope for this quality pass and not re-filed.
+
+### Findings
+
+**3.1 — `FILLER_WORDS` and `INTENT_KEYWORDS` duplicate the same word sets, maintained by hand in two places (DRY) — `query.py:7-20` and `22-28` — severity: med**
+Every word in `INTENT_KEYWORDS` (the 5 intent sets, ~50 words) is ALSO listed in
+`FILLER_WORDS` — deliberately, per the "Intent words should set intent, not become
+grep terms" comment (13). But the two lists are maintained separately: adding a new
+intent keyword (say `"teardown"` to `refactor`) requires also remembering to add it
+to `FILLER_WORDS`, or it silently becomes a weak grep term. Nothing enforces the
+invariant "every intent keyword is a filler word." *Direction:* derive
+`FILLER_WORDS` as `_PURE_FILLER | set().union(*(w for _, w in INTENT_KEYWORDS))`
+so the invariant holds by construction and the two lists can't drift.
+
+**3.2 — `infer_intent` computes `best`/`score` then discards `best` for the top four intents — `query.py:61-78` — severity: low**
+Lines 66 computes `best, score = max(...)`, but 70-77 then hard-code the
+debug>feature>refactor>test precedence, so `best` is only ever returned (78) for
+the `explain` case. A reader has to trace all the way down to realise the `max()`
+result is mostly vestigial. *Direction:* the precedence is a deliberate documented
+choice (69) — make it fully explicit: check `score <= 0 → "context"`, then walk an
+ordered `("debug","feature","refactor","test","explain")` tuple returning the first
+with a nonzero score. That removes the misleading `max()`/`best` dance entirely.
+
+**3.3 — `category_boost` inlines four near-identical dict literals — `query.py:173-180` — severity: low**
+Four separate `{...}.get(category, 0)` maps, one per intent branch, that share most
+keys and differ only in the numbers. It's readable as-is (the numbers ARE the
+policy and seeing them side by side has value), but a reader can't easily diff
+"what changes between debug and test policy" without eyeballing four dicts.
+*Direction:* optional — a single `_CATEGORY_BOOST[intent][category]` nested table
+(or keeping the dicts but naming them `_DEV_BOOST`, `_TEST_BOOST`, etc.) would make
+the policy diffable. Low priority; the inline form is not wrong.
+
+**3.4 — `_split_focus` only splits on the FIRST colon, silently — `query.py:35-39` — severity: low**
+`text.split(":", 1)` means a task like `"debug: fix the C:/path/thing"` puts
+everything after the first colon into focus, and a second colon is treated as prose.
+Harmless in practice (tasks rarely have two colons) and arguably correct, but it's
+an undocumented assumption. *Direction:* a one-line comment noting "focus is
+everything after the first colon; later colons are prose" would make the intent
+explicit. Trivially low.
+
+**3.5 — Positive: no noise comments; the two comments present (69, 91-92) are both real WHY.** Clean on the comment-quality axis.
+
+**Ollama leads for query.py:** not separately run (module is small and was fully
+read); the earlier fast-rank runs never surfaced query.py as a complexity concern,
+consistent with my read that it is not one.
