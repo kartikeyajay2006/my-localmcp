@@ -26,7 +26,11 @@ jobs:
       - name: Install test dependencies
         run: python -m pip install -e ".[test]"
       - name: Fast tests
-        run: python -m pytest -q -m "not slow"
+        # -n auto parallelizes across the runner's CPU cores (~5x faster on
+        # Windows). Only the fast suite is parallelized; the native-lifecycle
+        # tests below build real venvs and manipulate real process trees, so
+        # they stay serial to avoid cross-worker collisions.
+        run: python -m pytest -q -m "not slow" -n auto
       - name: Native lifecycle
         run: python -m pytest -q -m slow ${{ matrix.lifecycle }}
       - name: Compile
