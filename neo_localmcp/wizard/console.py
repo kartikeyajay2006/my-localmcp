@@ -35,7 +35,7 @@ from .backend import (
     WizardState,
 )
 
-_WIDTH = 64
+_WIDTH = 80
 
 
 def _clear() -> None:
@@ -82,14 +82,20 @@ class ConsoleWizard:
     def _header(self, question: str = "") -> None:
         _clear()
         d = self.detected
+
+        # Content - Header title bar
         print(_ansi.cyan_bold("=" * _WIDTH))
         title = _ansi.cyan_bold(" neo-localmcp setup wizard")
         if self.fake:
             title += "   " + _ansi.yellow("[Preview Dummy]")
         print(title)
         print(_ansi.cyan_bold("=" * _WIDTH))
+        
+        # System Info
         print(f" {d.os_label} | Python {d.python_version}")
         print(f" {d.state_label}")
+
+        # User choices
         if d.registered_clients:
             print(f" Connected clients: {', '.join(d.registered_clients)}")
         if self.summary or self._clients_chosen:
@@ -100,7 +106,11 @@ class ConsoleWizard:
             if self._clients_chosen:
                 for line in self._client_detail_lines():
                     print(line)
+        
+        # Barrier
         print("-" * _WIDTH)
+        
+        # Prompt
         if question:
             print(_ansi.cyan_bold(f" {question}"))
             print()
@@ -108,15 +118,15 @@ class ConsoleWizard:
     @staticmethod
     def _print_options(rows: list[tuple[str, str]]) -> None:
         for index, (title, desc) in enumerate(rows, start=1):
-            print(f"   {index}) {title}")
+            print(f"   {index}) {title}") # Option
             if desc:
-                print(_ansi.dim(f"        {desc}"))
+                print(_ansi.dim(f"        {desc}")) #Subtext
 
     @staticmethod
     def _explain(*lines: str) -> None:
         """Print a short, indented 'what this step is about' blurb, then a gap."""
         for line in lines:
-            print(_ansi.dim(f" {line}"))
+            print(f" {line}")
         print()
 
     def _set_summary(self, label: str, value: str) -> None:
@@ -318,9 +328,10 @@ class ConsoleWizard:
         info = self.backend.ollama_info()
         self._header("Ollama models  (optional)")
         self._explain(
-            "Ollama is optional. When present, neo-localmcp uses it locally to",
-            "re-rank results and summarize files. Deterministic context always",
-            "works without it, so this step is safe to skip.",
+            "Ollama is optional. When present, it allows for:" \
+            " - Re-rank results via fast models" \
+            " - Summarize files " \
+            "Deterministic context will always work regardless, so it's safe to skip.\n",
             f"Status: {info.detail}",
         )
         self.state.configure_ollama = self._ask_yesno(
@@ -446,20 +457,34 @@ class ConsoleWizard:
                 lines.append(f"          {opt.detail}")
         return lines
 
+    _CONFIRM_VERBS = {
+        OP_INSTALL: "Install",
+        OP_REINSTALL: "Reinstall",
+        OP_UNINSTALL: "Uninstall",
+        OP_CONFIG_OLLAMA: "Apply",
+        OP_MANAGE_CLIENTS: "Apply",
+    }
+
     def _confirm(self, *, allow_dry_run: bool, default_proceed: bool = True) -> None:
         self._header("Review and confirm")
         self._explain(
-            "Nothing has changed yet. Everything above under 'Your choices so",
-            "far' is exactly what will happen if you proceed. Use dry run to",
-            "preview the steps without changing anything.",
+            "No changes have been made yet. Your current choices are shown above",
+            "and will be applied accordingly.",
         )
+        if self.fake:
+            print(_ansi.yellow(
+                " ** Preview Dummy is active -- choosing Yes will show a demo output."
+                " No changes will be made at all."))
+            print()
         print(f"   Managed root: {self.detected.managed_root}")
         print()
 
         if allow_dry_run:
             self.state.dry_run = self._ask_yesno(
                 "Preview only (dry run - show the plan, change nothing)?", default=False)
-        if not self._ask_yesno("Proceed?", default=default_proceed):
+        verb = self._CONFIRM_VERBS.get(self.state.operation, "Proceed")
+        prompt = "Proceed?" if verb == "Proceed" else f"{verb} as shown?"
+        if not self._ask_yesno(prompt, default=default_proceed):
             raise _Abort
 
     def _phase_confirm(self) -> None:
