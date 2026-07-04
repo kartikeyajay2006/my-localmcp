@@ -33,6 +33,8 @@ producing this report. Line numbers reference the working tree at the branch bas
 | 5 | `server.py` | Clean FastMCP registry; repeated error-wrapper (DRY) + undocumented subprocess asymmetry. 4 findings (2 med). |
 | — | `config.py` | Solid tuning comments, but `.claude` missing from `exclude_dirs` (high, causes worktree pollution), constants/functions DRY split, JSON-in-.yaml drift. 4 findings (1 high, 2 med). |
 | 6 | `ollama_client.py` | Sound state-machine + fallback contract; pervasive result-dict DRY and a few mega-lines. 4 findings (2 med). |
+| 7 | `lifecycle.py` | **Clean, nothing actionable** — best-documented module in the repo; a model to emulate. |
+| 8 | `client_setup.py` | Good I/O comments; `remove_codex` reads config 3x, `setup_claude_code` migration dense, scope-detect duplicated. 5 findings (2 med). |
 
 ---
 
@@ -458,3 +460,81 @@ Instead it was exercised *directly* and heavily via the perf log (Entries 2-4,
 8-10) - the observed cold/warm/cache behavior (load-dominated 30B cost, clean
 fallback, accurate bounded output) matches the code's design, corroborating that
 the state machine works as written.
+
+---
+
+## 7. `neo_localmcp/lifecycle.py` (304 lines)
+
+**Verdict: clean, nothing actionable.** This is the best-documented module in the
+repo and a model for the rest of it. The module docstring (1-25) explains the entire
+stop-file/self-exit design and *why* a signal wouldn't work on Windows; `pid_alive`
+(70-102) documents the `WaitForSingleObject`-vs-`GetExitCodeProcess` choice and the
+NULL-handle interpretation; `_graceful_self_exit` (265-278) explains why `os._exit`
+is deliberate and what invariant (no long-lived in-process state) makes it safe.
+Functions are short, single-purpose, and the section-comment dividers
+(`# --- registry ---`) aid navigation without being noise. No DRY, KISS, or SOLID
+issues found; no missing WHY comments; no noise comments. I looked specifically for
+something to flag here and did not manufacture one - this module is genuinely good.
+
+(One micro-note, not a finding: `force_terminate` at 109 has an inline
+`# maps to TerminateProcess on Windows` comment duplicating the module docstring's
+explanation; harmless and arguably helpful at the call site.)
+
+---
+
+## 8. `neo_localmcp/client_setup.py` (460 lines)
+
+**Verdict:** Mostly clean with good WHY-comments on the genuinely tricky I/O
+(`_read_config_for_edit` 53-61, `_atomic_write_text` 64-77, the marked-block
+strip/replace 109-132). The quality problems are concentrated in two spots: the
+`setup_claude_code` migration function is dense, and `remove_codex` re-reads the
+config file three times to build one return dict. Scope-detection is also duplicated.
+
+### Findings
+
+**8.1 - `remove_codex` re-reads + re-parses the config file 3x inside one return dict - `client_setup.py:340, 350, 355` - severity: med**
+`block_present` is computed at 340 (`path.read_text(...)`), then the return dict
+recomputes essentially the same `"# BEGIN neo-localmcp" in path.read_text(...)`
+check TWICE more - once in the `ok` expression (350) and once in `block_present_after`
+(355) - each doing a fresh disk read + full-file parse. Three reads of the same file
+in one function, and the `ok`/`block_present_after` expressions are near-identical
+inline booleans that are hard to read. *Direction:* read the post-write text once
+into a local (`after_text = path.read_text(...) if path.exists() else ""`) and derive
+`block_present_after`/`ok` from it. Removes 2 redundant disk reads and clarifies the
+return. This is the clearest actionable item in the module.
+
+**8.2 - `setup_claude_code` is a ~55-line function with an inline 3-iteration migration loop (SRP/KISS) - `client_setup.py:149-204` - severity: med**
+The function installs slash commands AND runs the full MCP-registration migration
+(detect existing scope, remove it, re-add at user scope, fall back to classic add)
+all inline in one `if apply:` block with a `for _ in range(3):` loop and multiple
+nested breaks. The migration logic (167-193) is the hard part and deserves to be its
+own `_migrate_claude_code_registration(claude, launcher) -> list[str]` helper,
+leaving `setup_claude_code` to read as "install commands; migrate registration;
+return status." The `for _ in range(3)` bound is also unexplained - why 3 attempts?
+*Direction:* extract the migration helper and add a one-line WHY on the retry bound.
+
+**8.3 - Scope-detection ternary is duplicated verbatim between setup and remove - `client_setup.py:178` and `298` - severity: low**
+`"local" if "scope: local" in combined else ("user" if "scope: user" in combined
+else ("project" if "scope: project" in combined else None))` appears identically in
+both `setup_claude_code` (178) and `remove_claude_code` (298). *Direction:* a
+`_detect_registered_scope(combined: str) -> str | None` helper used by both. Small,
+but it is exact duplication of a fiddly nested ternary.
+
+**8.4 - `remove_codex`'s `ok` is a triple-negative boolean that is genuinely hard to parse - `client_setup.py:350` - severity: low**
+`"ok": not (apply and block_present and (path.exists() and "# BEGIN..." in
+path.read_text(...)))`. Reading whether success means true requires unwinding a
+`not(... and ... and (... and ...))`. *Direction:* compute
+`block_present_after` first (see 8.1), then `ok = not (apply and block_present and
+block_present_after)` reads as "if we tried to remove a present block, it must be
+gone." Depends on 8.1.
+
+**8.5 - Positive: the transactional-write and newline-preservation comments are exactly right.**
+`_atomic_write_text` (64-67) and `_read_config_for_edit` (54-55) both explain real
+cross-platform WHY (crash-safety, CRLF-vs-LF preservation) that a maintainer would
+otherwise not know to keep. `setup_claude_desktop`'s "intentionally no longer
+performed" note (227) prevents a plausible "why don't we just edit the JSON" regression.
+Good comment hygiene.
+
+**Ollama leads for lifecycle/client_setup:** not run through the reranker (installer/
+client-integration code is outside what the ranking prompt is designed to review, and
+both modules were fully read). No leads to record.
