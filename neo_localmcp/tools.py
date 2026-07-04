@@ -637,6 +637,7 @@ def _best_heading_section(path: str, symbol_hits: list[dict[str, Any]], interpre
 
 
 def context_prepare(task: str, repo_root: str = "auto", max_files: int | None = None, limit: int = 6, use_ollama: bool = False, model: str | None = None, output_format: str = "json", token_budget: int = 3000) -> str:
+    """Core retrieval implementation; prepare_context is the MCP/CLI adapter over this."""
     root = repo_root_or_cwd(repo_root)
     status_data = repo_memory.status(root)
     refreshed = False
@@ -872,6 +873,7 @@ Candidate files, scores, reasons, and line hints:
 
 
 def prepare_context(task: str, repo_root: str = "auto", token_budget: int = 3000, max_files: int = 6, use_ollama: bool = False, model: str | None = None, output_format: str = "mcp_text") -> str:
+    """MCP/CLI-facing adapter -- see context_prepare for the core implementation."""
     return context_prepare(task, repo_root, max_files=None, limit=max_files, use_ollama=use_ollama, model=model, output_format=output_format, token_budget=token_budget)
 
 
