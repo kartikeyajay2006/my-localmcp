@@ -58,6 +58,12 @@ async def _resolve_repo_root(repo_root: str, ctx: Context) -> str:
 
 
 def _context_prepare_worker(task: str, repo_root: str, max_files: int, token_budget: int, use_ollama: bool, model: Optional[str]) -> str:
+    # Isolated in a subprocess -- unlike every other tool in this file, which calls
+    # tools.* in-process -- because this is the heaviest, Ollama-touching path; a
+    # hang or crash here must not take down the stdio server. The worker also
+    # enforces UTF-8 I/O (see PYTHONIOENCODING/PYTHONUTF8 below), a subprocess
+    # encoding fix from PROJECT_NOTES 1.0.1/1.0.3. Do not "simplify" this back to
+    # an in-process call without re-solving both problems first.
     payload = {
         "task": task,
         "repo_root": repo_root,
