@@ -29,6 +29,8 @@ producing this report. Line numbers reference the working tree at the branch bas
 | 1 | `tools.py` | Comments exemplary; real problem is size — 1054 lines, `context_prepare` is a ~233-line 8-job function. 6 findings (1 high). |
 | 2 | `repo_memory.py` | Cleanest large module; well-factored, benchmark-quality docstrings. 5 minor findings (1 med), nothing high. |
 | 3 | `query.py` | Compact and readable; main issue is two hand-synced word-set copies (DRY). 5 findings (1 med), nothing high. |
+| 4 | `cli.py` | Textbook thin argparse dispatcher; only cosmetic findings. 4 findings, all low. |
+| 5 | `server.py` | Clean FastMCP registry; repeated error-wrapper (DRY) + undocumented subprocess asymmetry. 4 findings (2 med). |
 | — | `config.py` | Solid tuning comments, but `.claude` missing from `exclude_dirs` (high, causes worktree pollution), constants/functions DRY split, JSON-in-.yaml drift. 4 findings (1 high, 2 med). |
 
 ---
@@ -310,3 +312,90 @@ explicit. Trivially low.
 **Ollama leads for query.py:** not separately run (module is small and was fully
 read); the earlier fast-rank runs never surfaced query.py as a complexity concern,
 consistent with my read that it is not one.
+
+---
+
+## 4. `neo_localmcp/cli.py` (319 lines)
+
+**Verdict:** Clean, textbook. A thin argparse dispatcher: each `cmd_*` is a
+one-line delegation to `tools.*`, and `build_parser` is a flat, readable
+subcommand registry. No behavior lives here that belongs elsewhere — exactly the
+right separation (administration is CLI-only, per CLAUDE.md, and it holds). Almost
+nothing actionable; the findings are cosmetic.
+
+### Findings
+
+**4.1 — `print_json_text` is a no-op wrapper around `print` — `cli.py:14-15` — severity: low**
+`def print_json_text(text): print(text)` adds an indirection with no value; every
+`cmd_*` calls it, but half the file calls bare `print(json.dumps(...))` directly
+(e.g. 51, 66, 73, 79) — so there are *two* printing conventions in one file for no
+reason. *Direction:* drop `print_json_text` and use `print` everywhere, or route
+the bare-`json.dumps` sites through it — pick one. Trivial, but it's a real
+inconsistency a reader notices immediately.
+
+**4.2 — `apply-patch` file open is unmanaged (no `with`) — `cli.py:175` — severity: low**
+`open(args.patch_file, ...).read()` leaks the file handle (relies on CPython refcount
+GC to close it). Harmless for a one-shot CLI, but it's the one spot in the file that
+doesn't use a context manager and would trip a linter (`SIM115`). *Direction:* wrap
+in `with open(...) as f:` or use `Path(args.patch_file).read_text(encoding="utf-8")`.
+
+**4.3 — `--client` choices list is duplicated verbatim across three subparsers — `cli.py:210, 215, 239` — severity: low**
+The `choices=["all", "claude-code", "claude-desktop", "codex", "codex-cli",
+"codex-desktop"]` list appears three times (setup, remove, deprecated remove-client).
+Plus the help strings differ subtly ("Defaults to Claude Code, Claude Desktop, Codex
+CLI, and Codex Desktop" vs "Defaults to Claude Code, Codex, and Claude Desktop") —
+a small doc inconsistency. *Direction:* hoist the choices to a module constant
+`_CLIENT_CHOICES` and reuse; align the default-description text.
+
+**4.4 — Positive: the deprecation comment (89) and `stop`/`reset` help strings are clear and honest.** No noise comments. Good module.
+
+---
+
+## 5. `neo_localmcp/server.py` (222 lines)
+
+**Verdict:** Clean and appropriately thin — a FastMCP tool registry over `tools.*`
+plus the one genuinely subtle piece, `_resolve_repo_root`, which is well-commented
+where it matters. Two real structural notes: a repeated error-wrapper (DRY) and an
+in-process-vs-subprocess asymmetry that deserves a WHY comment at the tool level.
+
+### Findings
+
+**5.1 — The `try/except Exception → json error` wrapper is copy-pasted in 9 tool functions (DRY) — `server.py:97-101, 118-122, 128-131, 137-140, 146-149, 155-158, 164-167, 173-176, 182-185` — severity: med**
+Every async `@mcp.tool()` repeats the identical shape: resolve root, call
+`tools.*`, `except Exception as exc: return json.dumps({"ok": False, "error":
+str(exc)}, ...)`. Nine copies. This is the most repetitive block in the module and
+the error JSON drifts slightly (some add `"action": "provide repo_root"`, most
+don't). *Direction:* a small decorator `@_tool_guard` (or a helper
+`_safe(coro)`) that wraps the body and standardises the error envelope would remove
+~27 lines and guarantee a consistent error shape across every tool. This is the
+one worthwhile refactor in the file.
+
+**5.2 — `prepare_context` runs in a subprocess while every other tool runs in-process — an undocumented asymmetry — `server.py:60-91` vs `110-197` — severity: med**
+`prepare_context` shells out to `python -m neo_localmcp.context_worker` (60-91)
+with its own timeout + safety cap, but `file_excerpts`, `repo_lookup`,
+`repo_status`, `summarize_file`, etc. call `tools.*` directly in-process. There IS
+a real WHY (isolating the heaviest/Ollama-touching call so a hang or crash can't
+take down the stdio server, plus the UTF-8 subprocess-encoding fix from
+PROJECT_NOTES 1.0.1/1.0.3), but nothing at `prepare_context`/`_context_prepare_worker`
+says so. A maintainer could "simplify" it back to an in-process call and silently
+reintroduce a solved class of hang/encoding bug. *Direction:* a 2-line WHY comment
+on `_context_prepare_worker` ("isolated in a subprocess because it is the heaviest,
+Ollama-touching path; a hang/crash here must not take down the stdio loop, and the
+worker enforces UTF-8 I/O — see PROJECT_NOTES 1.0.1/1.0.3"). This is precisely the
+non-obvious WHY comment CLAUDE.md's standard exists for, and it's missing.
+
+**5.3 — The MCP `prepare_context`/`context_prepare` alias pair mirrors the tools.py adapter pair — same naming-collision friction as finding 1.5 — `server.py:94-107` — severity: low**
+Here the alias is at least labelled ("Compatibility alias for prepare_context;
+retained for one release", 106), which is better than the tools.py pair (1.5). The
+one-release-alias is also called out in the server instructions and PROJECT_STATUS.
+Noted for consistency; the docstring here is adequate. Cross-reference finding 1.5.
+
+**5.4 — Positive: `main()`'s lifecycle-registration comment (201-203) and the "never let bookkeeping prevent serving" comment (213) are exactly right** — both explain a real WHY (graceful stop, fail-open bookkeeping). `_resolve_repo_root`'s UNC-path handling (50-51) could use a one-line note, but the ambiguity-refusal errors (56-57) are self-documenting. Good comment hygiene overall.
+
+**Ollama leads for cli/server:** the fast-rank pass surfaced `server.py` as a
+secondary read for the "context_prepare" query (Entry 4) and vaguely flagged
+"unclear dependencies / external state" in it — which, charitably, points at the
+subprocess-worker indirection (finding 5.2). Verified: the model did NOT identify
+the actual asymmetry or its WHY; it produced a generic "might depend on external
+state" hunch. Junior-dev-grade: directionally near a real finding (5.2) but too
+vague to be the basis for it. Recorded as a datapoint.
