@@ -522,7 +522,6 @@ class ConsoleWizard:
         )
 
     # -- execution -------------------------------------------------------- #
-
     def _run(self) -> None:
         self._header("Working...")
         op = self.state.operation
