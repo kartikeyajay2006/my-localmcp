@@ -34,9 +34,16 @@ the wrong comparison (against other caching tricks). The more accurate frame:
 - **Auditable retrieval behavior.** `test-determinism` re-runs the same query
   N times and checks output hashes match; `record-change` closes the loop
   between "shown" and "actually edited."
-- **Built-in model upgradability.** Ranking is never cached, so swapping
-  `fast_model`/`summary_model` has zero memory-correctness implications by
-  construction — see `PROJECT_STATUS.md` for the verification.
+- **Built-in model upgradability.** Ranking is never cached and
+  `retrieval_boost` memory has no model column, so swapping
+  `fast_model`/`summary_model` (via `set-ollama`/config) can never corrupt or
+  invalidate memory — by construction. Cached *summaries* are the one thing
+  tagged with their producing model; on a swap they keep being served as-is
+  (still tagged with the previous model) until the source file changes or the
+  cache is cleared, which is intended: summaries are advisory enrichment, not
+  authoritative, so an older model's description of an *unchanged* file stays
+  valid. See `PROJECT_STATUS.md` for the verification and the deliberate
+  status-quo decision behind this (issue #8).
 - **Not a frontier-model replacement.** The goal is context routing that lets
   a frontier model (and your local hardware, if capable) spend its budget on
   reasoning instead of rediscovering the same files every session.
