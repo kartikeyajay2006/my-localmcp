@@ -27,6 +27,10 @@ known PROJECT_STATUS limitation, stated for honesty).
 | 4 | `context --ollama-rank` (warm) | ~14.5 | ~13,300 | qwen3:8b | total 14.5 / eval 14.1 / 1507 tok | reranker corrected worktree pollution |
 | 5 | `lookup` (symbol) | 0.30 | ~500 | — | — | precise, no worktree pollution; end_line loose |
 | 6 | `file` (around-line) | 0.41 | ~600 | — | — | correct excerpt window (52–71 for line 61) |
+| 7 | `test-determinism` (5 runs) | 7.6 | ~2,000 | — | — | ok=true, 1 unique hash, 0 mismatches |
+| 8 | `summarize --heading` (SLOW, cold) | 28.0 | ~800 | qwen3-coder:30b | total 15.1 / eval 1.35 / 81 tok | ~13.7s is 30B model load; summary accurate |
+| 9 | `summarize --heading` (cache hit) | 0.57 | ~600 | qwen3-coder:30b (cached) | — | content-hash cache: 0.57s vs 28s |
+| 10 | `summarize --heading` (SLOW, warm) | 4.0 | ~700 | qwen3-coder:30b | total 3.1 / eval 1.16 / 72 tok | warm model: no reload, fast eval |
 
 (Detailed entries below; table filled incrementally.)
 
@@ -84,3 +88,31 @@ known PROJECT_STATUS limitation, stated for honesty).
 - **Wall:** 0.41 s. **Out:** ~600 tokens. **Ollama:** n/a.
 - **Result:** correct centered excerpt (lines 52–71 for a requested center of 61),
   10 symbols, `fresh: true`. Behaves as designed.
+
+### Entry 7 — `test-determinism` (5 runs)
+- **Invocation:** `neo-localmcp test-determinism "debug repository indexing: index_repo, refresh" --repo-root . --runs 5`
+- **Wall:** 7.63 s (~1.5 s/run). **Out:** ~2,000 tokens.
+- **Result:** `ok: true`, 5 runs, **1 unique hash**, zero mismatches. Deterministic
+  core confirmed stable across repeated runs (Ollama intentionally off for this test).
+
+### Entries 8–10 — `summarize --heading` (SLOW path, `qwen3-coder:30b`) — never exercised in prior runs
+- **Invocation (cold):** `neo-localmcp summarize docs/ARCHITECTURE.md --repo-root . --heading "Safety model"`
+- **Cold (Entry 8):** 28.0 s wall. Self-reported: `total_duration` 15.08 s,
+  `eval_duration` 1.35 s, `eval_count` 81 tokens, `timeout` 200 s, `truncated`
+  false. **Key finding:** eval is only 1.35 s — the ~13.7 s gap between wall (28 s)
+  and eval (1.35 s) is the one-time 30B-model load into VRAM (plus a few seconds of
+  Ollama HTTP/CLI overhead). The 30B summary model's cost is **load-dominated**,
+  not generation-dominated, for a bounded section summary.
+- **Cache hit (Entry 9):** re-running the SAME heading returned in **0.57 s** with
+  `cached: true`, `model: qwen3-coder:30b`. The content-hash section-summary cache
+  works exactly as designed — a ~49x speedup over regeneration.
+- **Warm, new section (Entry 10):** summarizing a *different* heading while the
+  model stayed loaded took **4.0 s** wall (`total_duration` 3.13 s, `eval` 1.16 s,
+  72 tokens). Confirms: once loaded (`keep_alive: 30m`), per-summary cost is a few
+  seconds; the expensive event is the first cold load only.
+- **Output quality:** the summary was factually accurate against the actual section
+  text (verified by reading `docs/ARCHITECTURE.md`'s Safety model section directly)
+  and correctly shaped as `summary:` + `keywords:` (8 keywords, within cap). No
+  truncation, no runaway. On this run the SLOW path behaved well.
+- **Determinism:** Ollama summary text is non-deterministic (generation); the cache
+  makes a *repeat* deterministic only because it returns the stored copy.
