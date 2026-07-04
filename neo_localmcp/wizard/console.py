@@ -19,9 +19,12 @@ depended on it, in both directions.
 from __future__ import annotations
 
 import os
+import shutil
 import sys
+import textwrap
 from typing import Callable
 
+from . import _ansi
 from .backend import (
     CLIENT_LABELS,
     FULL_WIPE_PHRASE,
@@ -34,11 +37,26 @@ from .backend import (
     WizardState,
 )
 
-_WIDTH = 64
+_WIDTH = 80
+_MAX_TEXT_WIDTH = 100
 
 
 def _clear() -> None:
     os.system("cls" if os.name == "nt" else "clear")
+
+
+def _text_width() -> int:
+    """Wrap prose at 100 columns, or narrower if the terminal itself is narrower."""
+    cols = shutil.get_terminal_size(fallback=(_MAX_TEXT_WIDTH, 24)).columns
+    return max(20, min(_MAX_TEXT_WIDTH, cols))
+
+
+def _wrap(text: str, indent: str = " ", subsequent_indent: str | None = None) -> list[str]:
+    """Wrap ``text`` to the current text width, indenting every physical line."""
+    sub = indent if subsequent_indent is None else subsequent_indent
+    return textwrap.wrap(
+        text, width=_text_width(), initial_indent=indent, subsequent_indent=sub,
+    ) or [indent.rstrip()]
 
 
 class _GoBack(Exception):
@@ -51,6 +69,10 @@ class _Skip(Exception):
 
 class _Abort(Exception):
     """Raised when the user explicitly declines to proceed at a final confirm."""
+
+
+class _ToggleDummy(Exception):
+    """Raised by the main-menu prompt when the user types 'd'/'dummy'."""
 
 
 def _is_back(raw: str) -> bool:
@@ -77,14 +99,20 @@ class ConsoleWizard:
     def _header(self, question: str = "") -> None:
         _clear()
         d = self.detected
-        print("=" * _WIDTH)
-        title = " neo-localmcp setup wizard"
+
+        # Content - Header title bar
+        print(_ansi.cyan_bold("=" * _WIDTH))
+        title = _ansi.cyan_bold(" neo-localmcp setup wizard")
         if self.fake:
-            title += "   (SIMULATION - nothing changes)"
+            title += "   " + _ansi.yellow("[Preview Dummy]")
         print(title)
-        print("=" * _WIDTH)
+        print(_ansi.cyan_bold("=" * _WIDTH))
+        
+        # System Info
         print(f" {d.os_label} | Python {d.python_version}")
         print(f" {d.state_label}")
+
+        # User choices
         if d.registered_clients:
             print(f" Connected clients: {', '.join(d.registered_clients)}")
         if self.summary or self._clients_chosen:
@@ -95,23 +123,29 @@ class ConsoleWizard:
             if self._clients_chosen:
                 for line in self._client_detail_lines():
                     print(line)
+        
+        # Barrier
         print("-" * _WIDTH)
+        
+        # Prompt
         if question:
-            print(f" {question}")
+            print(_ansi.cyan_bold(f" {question}"))
             print()
 
     @staticmethod
     def _print_options(rows: list[tuple[str, str]]) -> None:
         for index, (title, desc) in enumerate(rows, start=1):
-            print(f"   {index}) {title}")
+            print(f"   {index}) {title}") # Option
             if desc:
-                print(f"        {desc}")
+                for line in _wrap(desc, indent="        "):
+                    print(_ansi.dim(line)) #Subtext
 
     @staticmethod
     def _explain(*lines: str) -> None:
         """Print a short, indented 'what this step is about' blurb, then a gap."""
         for line in lines:
-            print(f" {line}")
+            for wrapped in _wrap(line, indent=" "):
+                print(wrapped)
         print()
 
     def _set_summary(self, label: str, value: str) -> None:
@@ -127,10 +161,17 @@ class ConsoleWizard:
     # Every primitive accepts "b"/"back" (raising _GoBack) in addition to its
     # normal input, and shows its default (if any) as "[Default: ...]".
 
-    def _ask_int(self, low: int, high: int, default: int | None = None) -> int:
+    def _ask_int(
+        self, low: int, high: int, default: int | None = None,
+        allow_dummy_toggle: bool = False,
+    ) -> int:
         hint = f" [Default: {default}]" if default is not None else ""
+        toggle_hint = " (or d for preview dummy mode)" if allow_dummy_toggle else ""
         while True:
-            raw = self._input(f"\n Enter a number {low}-{high}{hint} (or b to go back): ")
+            raw = self._input(
+                f"\n Enter a number {low}-{high}{hint} (or b to go back){toggle_hint}: ")
+            if allow_dummy_toggle and raw.strip().lower() in {"d", "dummy"}:
+                raise _ToggleDummy
             if _is_back(raw):
                 raise _GoBack
             if not raw and default is not None:
@@ -232,19 +273,33 @@ class ConsoleWizard:
         return rows
 
     def _main_menu(self) -> str:
+        while True:
+            self.detected = self.backend.detect()
+            self.summary = []
+            self._clients_chosen = False
+            self.state = WizardState()
+            rows = self._menu_rows()
+            self._header("What would you like to do?")
+            self._explain(
+                "neo-localmcp is a local MCP server that gives your AI tools fast,",
+                "deterministic repository context. This wizard sets it up and connects it.",
+            )
+            self._print_options([(title, desc) for _, title, desc in rows])
+            try:
+                choice = self._ask_int(1, len(rows), allow_dummy_toggle=not self.fake)
+            except _ToggleDummy:
+                self._enter_preview_dummy()
+                continue
+            return rows[choice - 1][0]
+
+    def _enter_preview_dummy(self) -> None:
+        """One-way switch to the FakeBackend for the rest of this process."""
+        from .fake_backend import FakeBackend
+
+        self.backend = FakeBackend()
+        self.fake = True
         self.detected = self.backend.detect()
-        self.summary = []
-        self._clients_chosen = False
-        self.state = WizardState()
-        rows = self._menu_rows()
-        self._header("What would you like to do?")
-        self._explain(
-            "neo-localmcp is a local MCP server that gives your AI tools fast,",
-            "deterministic repository context. This wizard sets it up and connects it.",
-        )
-        self._print_options([(title, desc) for _, title, desc in rows])
-        choice = self._ask_int(1, len(rows))
-        return rows[choice - 1][0]
+        self.prefs = self.backend.load_prefs()
 
     # -- phase: clients ----------------------------------------------------
 
@@ -270,12 +325,14 @@ class ConsoleWizard:
             "is configured on this OS.",
         )
         for index, opt in enumerate(options, start=1):
-            mark = "  (connected)" if opt.key in registered else ""
+            mark = _ansi.green("  (connected)") if opt.key in registered else ""
             manual = "  [manual step]" if opt.manual else ""
             print(f"   {index}) {opt.label}{mark}{manual}")
-            print(f"        path: {opt.config_path}")
+            for line in _wrap(f"path: {opt.config_path}", indent="        "):
+                print(_ansi.dim(line))
             if opt.detail:
-                print(f"        {opt.detail}")
+                for line in _wrap(opt.detail, indent="        "):
+                    print(_ansi.dim(line))
             print()
         picks = self._ask_multi(len(options), default=default_indices)
         chosen = [options[i - 1].key for i in picks]
@@ -292,15 +349,16 @@ class ConsoleWizard:
         info = self.backend.ollama_info()
         self._header("Ollama models  (optional)")
         self._explain(
-            "Ollama is optional. When present, neo-localmcp uses it locally to",
-            "re-rank results and summarize files. Deterministic context always",
-            "works without it, so this step is safe to skip.",
+            "Ollama is optional. When present, it allows for:",
+            "  - Re-ranking results via fast models",
+            "  - Summarizing files",
+            "Deterministic context will always work regardless, so it's safe to skip.",
             f"Status: {info.detail}",
         )
         self.state.configure_ollama = self._ask_yesno(
             "Configure Ollama models now?", default=info.reachable)
         if not self.state.configure_ollama:
-            self._set_summary("Ollama", "not configured")
+            self._set_summary("Ollama", "skipped config")
 
     def _phase_ollama_baseurl(self) -> None:
         if not self.state.configure_ollama:
@@ -391,23 +449,26 @@ class ConsoleWizard:
         if not self.state.full_wipe:
             raise _Skip
         self._header("Confirm full wipe")
-        self._explain(
-            "A full wipe permanently deletes everything under:",
-            f"  {self.detected.managed_root}",
-        )
+        for line in _wrap("A full wipe permanently deletes everything under:", indent=" "):
+            print(_ansi.red_bold(line))
+        print(_ansi.red_bold(f"   {self.detected.managed_root}"))
+        print()
         while True:
             typed = self._ask_text(f'Type "{FULL_WIPE_PHRASE}" to confirm')
             if typed == FULL_WIPE_PHRASE:
                 return
-            print(f'\n   That did not match. Type exactly: {FULL_WIPE_PHRASE}')
+            print()
+            for line in _wrap(f"That did not match. Type exactly: {FULL_WIPE_PHRASE}",
+                               indent="   "):
+                print(_ansi.red_bold(line))
 
     # -- phase: confirm ------------------------------------------------------
 
     def _client_detail_lines(self) -> list[str]:
         if not self.state.selected_clients:
-            return ["   Clients: none"]
+            return ["   Chosen clients: none"]
         options = {opt.key: opt for opt in self.backend.client_options()}
-        lines = ["   Clients:"]
+        lines = ["   Chosen clients:"]
         for i, key in enumerate(self.state.selected_clients, start=1):
             opt = options.get(key)
             label = CLIENT_LABELS.get(key, key)
@@ -416,25 +477,41 @@ class ConsoleWizard:
                 continue
             manual = "  [manual step]" if opt.manual else ""
             lines.append(f"     {i}) {label}{manual}")
-            lines.append(f"          path: {opt.config_path}")
+            lines.extend(_wrap(f"path: {opt.config_path}", indent="          "))
             if opt.detail:
-                lines.append(f"          {opt.detail}")
+                lines.extend(_wrap(opt.detail, indent="          "))
         return lines
+
+    _CONFIRM_VERBS = {
+        OP_INSTALL: "Install",
+        OP_REINSTALL: "Reinstall",
+        OP_UNINSTALL: "Uninstall",
+        OP_CONFIG_OLLAMA: "Apply",
+        OP_MANAGE_CLIENTS: "Apply",
+    }
 
     def _confirm(self, *, allow_dry_run: bool, default_proceed: bool = True) -> None:
         self._header("Review and confirm")
         self._explain(
-            "Nothing has changed yet. Everything above under 'Your choices so",
-            "far' is exactly what will happen if you proceed. Use dry run to",
-            "preview the steps without changing anything.",
+            "No changes have been made yet. Your current choices are shown above",
+            "and will be applied accordingly.",
         )
+        if self.fake:
+            for line in _wrap(
+                "** Preview Dummy is active -- choosing Yes will show a demo output. "
+                "No changes will be made at all.", indent=" ",
+            ):
+                print(_ansi.yellow(line))
+            print()
         print(f"   Managed root: {self.detected.managed_root}")
         print()
 
         if allow_dry_run:
             self.state.dry_run = self._ask_yesno(
                 "Preview only (dry run - show the plan, change nothing)?", default=False)
-        if not self._ask_yesno("Proceed?", default=default_proceed):
+        verb = self._CONFIRM_VERBS.get(self.state.operation, "Proceed")
+        prompt = "Proceed?" if verb == "Proceed" else f"{verb} as shown?"
+        if not self._ask_yesno(prompt, default=default_proceed):
             raise _Abort
 
     def _phase_confirm(self) -> None:
@@ -445,7 +522,6 @@ class ConsoleWizard:
         )
 
     # -- execution -------------------------------------------------------- #
-
     def _run(self) -> None:
         self._header("Working...")
         op = self.state.operation
@@ -462,13 +538,19 @@ class ConsoleWizard:
             outcome = self.backend.run_operation(self.state, emit)
 
         print()
-        print(f" {outcome.title}")
-        for line in outcome.detail_lines:
-            print(f"   {line}")
+        color = _ansi.green if outcome.ok else _ansi.red_bold
+        for line in _wrap(outcome.title, indent=" "):
+            print(color(line))
+        for detail in outcome.detail_lines:
+            for line in _wrap(detail, indent="   "):
+                print(color(line))
         if outcome.log_hint:
-            print(f"\n   Logs: {outcome.log_hint}")
+            print()
+            for line in _wrap(f"Logs: {outcome.log_hint}", indent="   "):
+                print(line)
         if outcome.next_command:
-            print(f"   Try next:  {outcome.next_command}")
+            for line in _wrap(f"Try next:  {outcome.next_command}", indent="   "):
+                print(line)
         self._save_prefs(outcome)
 
     def _save_prefs(self, outcome) -> None:
