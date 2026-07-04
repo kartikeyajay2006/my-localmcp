@@ -25,6 +25,8 @@ known PROJECT_STATUS limitation, stated for honesty).
 | 2 | `ollama status` | ~1 | ~400 | qwen3:8b | — | state=model_cold (installed, not loaded) |
 | 3 | `context --ollama-rank` (cold) | 21.5 | ~13,300 | qwen3:8b | cold load incl. | first call, model cold |
 | 4 | `context --ollama-rank` (warm) | ~14.5 | ~13,300 | qwen3:8b | total 14.5 / eval 14.1 / 1507 tok | reranker corrected worktree pollution |
+| 5 | `lookup` (symbol) | 0.30 | ~500 | — | — | precise, no worktree pollution; end_line loose |
+| 6 | `file` (around-line) | 0.41 | ~600 | — | — | correct excerpt window (52–71 for line 61) |
 
 (Detailed entries below; table filled incrementally.)
 
@@ -67,3 +69,18 @@ known PROJECT_STATUS limitation, stated for honesty).
   `neo_localmcp/tools.py` as #1, effectively correcting the deterministic
   worktree-copy pollution seen in Entry 1. The advisory prompt's "preserve
   deterministic top candidates unless clear reason" policy did useful work here.
+
+### Entry 5 — `lookup` (symbol)
+- **Invocation:** `neo-localmcp lookup "index_repo" --repo-root .`
+- **Wall:** 0.30 s. **Out:** ~500 tokens. **Ollama:** n/a (pure FTS + symbol table).
+- **Result:** 4 symbol hits + 2 file hits, each with file_path + start/end line.
+  Fastest, highest-signal command; did NOT suffer worktree pollution (returned the
+  canonical `neo_localmcp/repo_memory.py` symbol first).
+- **Quality note:** reported `end_line` is a loose upper bound (regex extraction) —
+  `index_repo` reported 258–338 but actually ends at 310. Known limitation, not new.
+
+### Entry 6 — `file` (around-line excerpt)
+- **Invocation:** `neo-localmcp file neo_localmcp/query.py --repo-root . --around-line 61 --context-lines 20`
+- **Wall:** 0.41 s. **Out:** ~600 tokens. **Ollama:** n/a.
+- **Result:** correct centered excerpt (lines 52–71 for a requested center of 61),
+  10 symbols, `fresh: true`. Behaves as designed.
