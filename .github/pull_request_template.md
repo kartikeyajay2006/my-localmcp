@@ -4,12 +4,12 @@
 
 ## Verification
 
-- [ ] `python -m pytest -q` passes locally (not just `compileall` — the full suite catches things compileall can't, like distribution/packaging checks)
-- [ ] `python -m compileall -q neo_localmcp setup.py` is clean
-- [ ] If `neo_localmcp/` changed: the versioned `.mcpb` bundle was rebuilt (`scripts/build-mcpb.sh` / `.ps1`) — `test_distribution.py` will fail CI otherwise
-- [ ] `PROJECT_STATUS.md` / `PROJECT_NOTES.md` updated if this changes verified behavior (see `CLAUDE.md`)
-- [ ] Non-trivial changes got a `/code-review` pass (this is a solo-maintainer project — there's no second human reviewer, so this is the substitute; not GitHub-enforced, a personal/agent discipline)
-- [ ] CI is green on this PR (both macOS and Windows) before merging — do not merge on a hunch that it'll pass
+**Code edits made** (`neo_localmcp/` or `tests/`)
+- [ ] `pytest -q -m "not slow"` passes locally
+- [ ] Rebuilt `.mcpb` if `neo_localmcp/` changed: `bash scripts/build-mcpb.sh` (or `.ps1` on native PowerShell) — writes `packages/claude-desktop/neo-localmcp-v<version>.mcpb`. If `npx` fails to find `mcpb`, see "Rebuilding the .mcpb bundle" in `.github/CONTRIBUTING.md`.
+
+**No code edits** (root/docs-only, `.github/`, non-code files)
+- [ ] No pytest needed
 
 ## Notes
 

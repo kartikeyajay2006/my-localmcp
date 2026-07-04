@@ -53,8 +53,30 @@ the parent label. A change can carry more than one area label if it
 genuinely spans areas (e.g. a change touching both the wizard's Ollama
 screen and `ollama_client.py` gets `area:wizard` + `area:ollama`).
 
-## Verification before opening/merging a PR
+## Verification before opening a PR
 
-See `.github/pull_request_template.md` for the actual checklist (full
-`pytest`, not just `compileall`; rebuild the `.mcpb` bundle if `neo_localmcp/`
-changed; confirm CI is green before merging).
+See `.github/pull_request_template.md` for the actual checklist. Short version:
+touched `neo_localmcp/` or `tests/` → run `pytest -q -m "not slow"` locally and
+rebuild the `.mcpb` bundle if `neo_localmcp/` changed; docs/meta-only changes
+need neither. CI (not this checklist) is what's actually required before
+merging — branch protection enforces it.
+
+## Rebuilding the `.mcpb` bundle
+
+Run `bash scripts/build-mcpb.sh` (macOS/Linux/Git Bash) or `scripts/build-mcpb.ps1`
+(native PowerShell). This stages `neo_localmcp/`, `pyproject.toml`, and `README.md`
+into a temp directory and packs it to
+`packages/claude-desktop/neo-localmcp-v<version>.mcpb` via `npx @anthropic-ai/mcpb pack`.
+
+**If `npx` fails to resolve the `mcpb` binary** (seen on this project's Windows
+host, Git Bash + npx combination): find the cached CLI directly and invoke its
+JS entrypoint with `node`, packing the same staged directory the script builds:
+
+```bash
+find "$LOCALAPPDATA/npm-cache/_npx" -iname "cli.js" -path "*mcpb*"
+# then, using whatever path that finds:
+node "<that-path>/dist/cli/cli.js" pack <staged-dir> <target-.mcpb-path>
+```
+
+This has been a real, repeated issue on at least one dev machine — worth trying
+before assuming the build is broken.
