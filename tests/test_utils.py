@@ -29,6 +29,28 @@ def test_exact_configured_dir_names_are_still_excluded(tmp_path, isolated_config
     assert complete is True
 
 
+def test_claude_worktree_dir_is_excluded(tmp_path, isolated_config):
+    """Regression: `.claude/worktrees/` holds full sibling repo copies for parallel
+    agent sessions -- without this exclusion, each duplicate tools.py/repo_memory.py
+    outranks the real working-tree file (issue #28, same class of bug as the
+    .venv* case above; reproduced live 2026-07-04, see docs/CODE_QUALITY_AUDIT.md
+    finding C.1)."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _seed(
+        repo,
+        ["real.py"],
+        [(".claude", "worktrees/agent-abc123/neo_localmcp/tools.py")],
+    )
+
+    found, eligible, complete = utils.scan_repo_files(repo)
+    rels = {utils.rel(p, repo) for p in found}
+
+    assert rels == {"real.py"}
+    assert eligible == 1
+    assert complete is True
+
+
 def test_differently_named_venv_dirs_are_excluded(tmp_path, isolated_config):
     """Regression: a leftover disposable venv with a non-exact name (e.g. a local
     Windows lifecycle test's '.venv-phase14', or this project's own installer
