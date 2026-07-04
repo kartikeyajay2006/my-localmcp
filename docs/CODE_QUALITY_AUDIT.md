@@ -32,6 +32,7 @@ producing this report. Line numbers reference the working tree at the branch bas
 | 4 | `cli.py` | Textbook thin argparse dispatcher; only cosmetic findings. 4 findings, all low. |
 | 5 | `server.py` | Clean FastMCP registry; repeated error-wrapper (DRY) + undocumented subprocess asymmetry. 4 findings (2 med). |
 | — | `config.py` | Solid tuning comments, but `.claude` missing from `exclude_dirs` (high, causes worktree pollution), constants/functions DRY split, JSON-in-.yaml drift. 4 findings (1 high, 2 med). |
+| 6 | `ollama_client.py` | Sound state-machine + fallback contract; pervasive result-dict DRY and a few mega-lines. 4 findings (2 med). |
 
 ---
 
@@ -399,3 +400,61 @@ subprocess-worker indirection (finding 5.2). Verified: the model did NOT identif
 the actual asymmetry or its WHY; it produced a generic "might depend on external
 state" hunch. Junior-dev-grade: directionally near a real finding (5.2) but too
 vague to be the basis for it. Recorded as a datapoint.
+
+---
+
+## 6. `neo_localmcp/ollama_client.py` (343 lines)
+
+**Verdict:** A well-designed local-service supervisor: atomic-directory lock,
+failure-cooldown circuit breaker, per-purpose bounded timeouts, and a strict
+"deterministic fallback, never raise into the caller" contract that it honours
+everywhere. The subtle pieces are well-commented (`unload_model` docstring 281-286,
+the `num_predict` WHY 318-320, the `_resolve_installed_model` tag note 74). The
+quality cost is the extremely repetitive result-dict construction and a few
+mega-lines that pack too much onto one line to read comfortably. Nothing high.
+
+### Findings
+
+**6.1 - Result-dict construction is pervasively duplicated across warm/ensure/unload/chat (DRY) - `ollama_client.py:227-247, 291-300, 315-343` - severity: med**
+Nearly every early-return builds `{"ok": ..., **current, "state": ..., "action":
+..., "error": ..., "elapsed_seconds": round(time.monotonic() - started, 3)}` by
+hand. `warm` has 5 such returns, `chat` has 4, `unload_model` 4 - each re-typing
+the same keys with slight variation. The `elapsed_seconds` computation
+(`round(time.monotonic() - started, 3)`) alone appears ~10 times. *Direction:* a
+small `_result(ok, state, action, *, error=None, started=None, **extra)` factory
+would collapse most of these and guarantee a consistent envelope (right now
+`timeout_seconds`/`timed_out` appear in some error returns and not others - a subtle
+inconsistency a shared factory would fix). This is the module's main readability debt.
+
+**6.2 - The `chat` success return (337) is a single ~350-char line doing 8 things - `ollama_client.py:337` - severity: med**
+Line 337 builds the entire success payload - `response`, `elapsed_seconds`,
+`near_timeout` (with an inline `elapsed >= max(1, timeout_seconds - 10)`
+computation), a nested `raw` dict comprehension over 6 keys, and `ollama_status` -
+all on one line. It is the least-readable line in the module; the `near_timeout`
+threshold and the `raw` key list both deserve to be visible, not buried mid-line.
+*Direction:* break into a few assignments (`near_timeout = elapsed >= ...`;
+`raw = {k: payload.get(k) for k in _TIMING_KEYS}`; then the dict). Pure readability.
+
+**6.3 - `_model_for` has a precedence subtlety that reads as a possible latent bug - `ollama_client.py:66-70` - severity: low**
+`return str(cfg.get("fast_model") if purpose in {"ranking","query"} else
+cfg.get("summary_model") or cfg.get("fast_model") or "qwen3:8b")` - the
+`... else X or Y or Z` binds as `else (X or Y or Z)`, so the fallback chain applies
+only to the summary branch, NOT the ranking branch. A missing `fast_model` on the
+ranking branch yields `str(None)` -> `"None"` (no `or "qwen3:8b"` guard). In
+practice `config.py`'s defaults always set `fast_model`, so it never fires - but a
+reader cannot tell that from this line, and it is genuinely confusing. *Direction:*
+split the ternary and give both branches the same `or "qwen3:8b"` guard, or add a
+WHY comment noting the config default is what makes the ranking branch safe.
+
+**6.4 - Positive: the fallback-contract comments and state-machine design are exemplary.**
+`unload_model` (281-286) explaining why it never raises, the circuit breaker
+(`circuit_open`, 255-256), and the `num_predict` bound (318-320) all explain real
+WHY. The module honours CLAUDE.md's "Ollama never blocks deterministic behavior"
+rule in code, not just in principle. No noise comments.
+
+**Ollama leads for ollama_client.py:** not run through the reranker (circular to ask
+Ollama to review its own client, and the module is small enough to fully read).
+Instead it was exercised *directly* and heavily via the perf log (Entries 2-4,
+8-10) - the observed cold/warm/cache behavior (load-dominated 30B cost, clean
+fallback, accurate bounded output) matches the code's design, corroborating that
+the state machine works as written.
