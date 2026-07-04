@@ -101,13 +101,18 @@ DEFAULT_CONFIG: dict[str, Any] = {
             ".git", ".hg", ".svn", ".vs", ".vscode", ".idea", "bin", "obj", "node_modules",
             ".venv*", "venv*", "dist", "build", "packages", ".nuget", "TestResults", "coverage",
             ".next", ".svelte-kit", ".turbo", "target", "out", "DerivedData", ".gradle",
-            ".neo-localmcp",
+            ".neo-localmcp", ".pytest_cache",
             # ".claude/worktrees/" holds full sibling copies of the repo for parallel
             # agent sessions -- without this, each duplicate tools.py/repo_memory.py
             # outranks the real working-tree file (issue #28, same class of bug as
             # the .venv* case above).
             ".claude",
         ],
+        # User surface for adding excludes. The list above is code-owned and always
+        # applied (see load_config); anything here is unioned on top. Put custom
+        # excludes here, not in exclude_dirs -- a persisted exclude_dirs is rebuilt
+        # from the code default on every load and will not preserve hand-edits (#41).
+        "extra_exclude_dirs": [],
         "include_extensions": TEXT_EXTENSIONS,
     },
     "memory": {
@@ -169,6 +174,17 @@ def load_config() -> dict[str, Any]:
     legacy_timeout = int(ollama_cfg.get("timeout_seconds", 0) or 0)
     if legacy_timeout:
         ollama_cfg.setdefault("summary_timeout_seconds", 200 if legacy_timeout == 180 else legacy_timeout)
+    # Safety exclude_dirs are code-owned: a persisted config can only ADD (via
+    # repo.extra_exclude_dirs), never shrink or override the built-in set. Without
+    # this, deep_merge lets a stale persisted repo.exclude_dirs list win wholesale,
+    # so a newly-added default exclude (e.g. ".claude", #28) never reaches an
+    # install whose config.yaml predates it -- reinstall preserves that config as
+    # durable data. Rebuild the effective list on every load so the guarantee holds
+    # regardless of config age (#41).
+    repo_cfg = cfg.setdefault("repo", {})
+    code_owned = list(_effective_default_config()["repo"]["exclude_dirs"])
+    extra = repo_cfg.get("extra_exclude_dirs") or []
+    repo_cfg["exclude_dirs"] = code_owned + [d for d in extra if d not in code_owned]
     cfg["identity"] = IDENTITY.as_dict()
     return cfg
 
