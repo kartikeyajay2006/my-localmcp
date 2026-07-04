@@ -83,17 +83,19 @@ neo-localmcp context "debug repository indexing: index_repo, refresh" --repo-roo
 
 ## GitHub workflow
 
-- **`master` is merge-only, enforced by branch protection**, not just a stated
+- **`main` is merge-only, enforced by branch protection**, not just a stated
   rule — every change, including one-line doc edits, requires a branch + PR +
   green CI (`setup-v2.yml`, macOS + Windows). This applies even to the repo
   admin (`enforce_admins: true`); there is no direct-push escape hatch short
-  of disabling the rule first.
+  of disabling the rule first. (Renamed from `master` on 2026-07-04; GitHub
+  redirects the old name automatically, but any *new* local clone should
+  track `main` from the start.)
 - **Merge strategy is "Create a merge commit" only** — squash and rebase are
   disabled at the repo level. Chosen deliberately: it's the only strategy
-  where a local branch's original commits remain true ancestors of `master`,
+  where a local branch's original commits remain true ancestors of `main`,
   so `git branch -d` (not `-D`) works normally after merging, and the full
   branch structure stays visible in `git log --graph`/GitHub's network view.
-  Use `git log --first-parent master` for a flattened, one-line-per-PR view
+  Use `git log --first-parent main` for a flattened, one-line-per-PR view
   when the full branch graph is too noisy.
 - **Issue/PR titles follow `type(area): description`**, and issues/PRs get
   matching `type:`/`area:` labels — see `.github/CONTRIBUTING.md` for the
@@ -107,8 +109,8 @@ neo-localmcp context "debug repository indexing: index_repo, refresh" --repo-roo
   `-n auto` to that step without re-verifying isolation first.
 - Before merging, confirm CI is actually green on the PR — don't merge on the
   assumption that it'll pass. A stale-bundle bug (`test_distribution.py`)
-  broke `master`'s CI for two merges in a row earlier in this project's
-  history specifically because that step was skipped.
+  broke the default branch's CI for two merges in a row earlier in this
+  project's history specifically because that step was skipped.
 
 ## Known gaps (see `PROJECT_STATUS.md` for the current authoritative list)
 
