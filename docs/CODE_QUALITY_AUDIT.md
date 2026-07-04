@@ -27,6 +27,8 @@ producing this report. Line numbers reference the working tree at the branch bas
 | # | Module | Verdict |
 |---|--------|---------|
 | 1 | `tools.py` | Comments exemplary; real problem is size — 1054 lines, `context_prepare` is a ~233-line 8-job function. 6 findings (1 high). |
+| 2 | `repo_memory.py` | Cleanest large module; well-factored, benchmark-quality docstrings. 5 minor findings (1 med), nothing high. |
+| — | `config.py` | Solid tuning comments, but `.claude` missing from `exclude_dirs` (high, causes worktree pollution), constants/functions DRY split, JSON-in-.yaml drift. 4 findings (1 high, 2 med). |
 
 ---
 
@@ -122,7 +124,7 @@ PROJECT_NOTES). None of these restate the code; each explains a decision a reade
 would otherwise have to reverse-engineer. No noise/redundant comments were found
 in this module — a clean result on the comment-quality axis.
 
-**Ollama leads for this module (fast-rank `qwen3:8b`, verified against source):**
+**Ollama leads for tools.py (fast-rank `qwen3:8b`, verified against source):**
 The fast reranker independently flagged that `context_prepare` "might lack single
 responsibility (combining context creation with ranking logic)" and that a block
 around lines 847–875 "may violate KISS by handling multiple responsibilities."
@@ -136,3 +138,119 @@ wrong on specifics — chase-worthy, not authoritative. (Also notable: with
 `--ollama-rank` on, the reranker named the canonical `neo_localmcp/tools.py` #1,
 effectively *correcting* the deterministic worktree-copy pollution from Q5 — a
 point in the tool's favor, logged in the perf log.)
+
+---
+
+## 2. `neo_localmcp/repo_memory.py` (774 lines)
+
+**Verdict:** The cleanest large module in the codebase and a good counter-example
+to tools.py. Despite being 774 lines it reads well: one function per concern,
+short bodies, SQL kept close to its caller, and genuinely excellent WHY-docstrings
+on the subtle parts (`record_task_query`, `record_retrieval_feedback`,
+`get_boost_map`, `store_section_summary`, `lookup`). Comment quality here is a
+model for the repo. Findings are minor structural/DRY items; nothing high.
+
+### Findings
+
+**2.1 — Every public function re-runs the same `root → connect → rid` prologue (DRY) — `repo_memory.py:258-261, 313-316, 360-366, 393-397, 452-456, 626-630, 639-643, 697-700, 717-720, 724-727, 737-741` — severity: low**
+Roughly a dozen functions open with the same 3–4 lines
+(`root = repo_root_or_cwd(...); conn = connect(); rid = upsert_repo(conn, root)`
+or the read-only `rid = repo_id(root)` variant). This is tolerable — it's honest
+and greppable — but a small `_repo_conn(repo_root, *, writable=False)` helper
+returning `(root, conn, rid)` would remove ~30 repeated lines and make the one
+meaningful distinction (which paths call `upsert_repo` vs. the cheaper `repo_id`)
+explicit rather than a subtlety a reader has to notice per-function. *Direction:*
+optional consolidation; the WHY note in `lookup` (363-366) about avoiding
+`upsert_repo` on the hot path is exactly the kind of decision a shared helper
+should encode by name.
+
+**2.2 — `import` placed mid-file after a top-level statement — `repo_memory.py:11-12` — severity: low**
+`INDEXER_VERSION = "1.1.0"` is assigned on line 11, then `from .utils import ...`
+on line 12 — a second import statement sitting *below* a module constant, after
+the line-9 `from .config import`. Cosmetic but it trips the eye and every linter's
+import-grouping rule (imports should precede module-level code). *Direction:*
+move the `.utils` import up with the other imports; keep `INDEXER_VERSION` in the
+constants block with `RETRIEVAL_BOOST_*`.
+
+**2.3 — `reset_repo` enumerates the same table list twice, by hand — `repo_memory.py:743, 749-757` — severity: med**
+The count-before loop (743) lists 8 tables and the delete block (749-757) lists 9
+`DELETE` statements (the extra being `repo_fts`, which is silently absent from the
+counts). Adding a table to the schema requires editing three places in this file
+(the `CREATE TABLE` in `init_db`, this count list, and this delete list) with
+nothing enforcing they agree — a real maintenance trap for a "wipe this repo"
+operation where a missed table means stale data survives a reset. *Direction:*
+drive both from one `_REPO_SCOPED_TABLES` tuple (with `repo_fts` and the `repos`
+special-case noted), so a new table is deleted-on-reset by construction.
+
+**2.4 — `connect()` calls `init_db()` on every single connection — `repo_memory.py:29-35, 38-148` — severity: low**
+Every `connect()` runs the full `executescript` (all `CREATE TABLE IF NOT EXISTS`)
+plus two `PRAGMA table_info` migration scans. It's idempotent and correct, and on
+SQLite it's cheap, but it means every `lookup`/`status`/`file_excerpts` call pays
+the schema-init + migration-probe cost. Given `lookup` is explicitly documented
+(363-366) as a latency-sensitive hot path, this is mildly at odds with that intent.
+*Direction:* not urgent; if profiling ever shows it, gate `init_db` behind a
+process-level "already initialised this db file" flag. Flagged for awareness, not
+as an action item — correctness is fine.
+
+**2.5 — Positive: the memory-subsystem docstrings are the comment-quality benchmark for the repo**
+`get_boost_map` (585-595), `record_retrieval_feedback` (542-550),
+`record_task_query` (514-522), and `store_section_summary` (663-668) each explain
+the non-obvious WHY (why capped, why recency-gated, why silence isn't penalised,
+why summaries never set line boundaries) without restating the SQL. This is
+exactly CLAUDE.md's standard. No noise comments found in this module.
+
+---
+
+## Cross-cutting: `neo_localmcp/config.py` (183 lines)
+
+Audited alongside repo_memory because it's the schema/tuning source of truth.
+
+**C.1 — `.claude/` (and `.claude/worktrees/`) is NOT in `exclude_dirs`; this is the root cause of the Q5 worktree-copy ranking pollution — `config.py:100-105` — severity: high**
+The default `exclude_dirs` list (100-105) covers `.git`, `.venv*`, `.neo-localmcp`,
+etc. but not `.claude`. In this repo — an AI-led project that uses
+`.claude/worktrees/agent-*` for parallel agent sessions — every sibling worktree is
+a full second copy of the repo, so the indexer ingests N duplicate `tools.py`,
+`repo_memory.py`, etc. Live impact was severe: for a `tools.py` query the real
+working-tree file ranked **#6 (score 152)** behind five worktree duplicates
+(scores 505–568) — see `docs/dogfooding-notes-issue-10.md` Q5. This is the exact
+class of bug PROJECT_NOTES 2026-07-03 (2) fixed for `.venv-phase14`, recurring
+through a different unexcluded directory. *Direction:* add `.claude` to the default
+`exclude_dirs`. (`fnmatch` on the dir name already supports it; because matching is
+name-only per the 94-99 comment, `.claude` excludes the top-level dir and its
+worktrees subtree.) This is a real retrieval-quality bug worth a filed issue.
+
+**C.2 — Module-level path constants duplicate the path functions (DRY) — `config.py:11-17` vs `23-53` — severity: med**
+`APP_DIR`/`CONFIG_DIR`/`SQLITE_DIR`/`DEFAULT_DB_PATH`/`CACHE_DIR`/
+`PROCESS_REGISTRY_DIR` (11-17) are computed once at import, and then `config_dir()`,
+`sqlite_dir()`, `default_db_path()`, `cache_dir()`, `process_registry_dir()`
+(23-53) recompute the same values as functions. Two of the functions
+(`config_path`, and the `_effective_default_config` db-path swap at 133-138) exist
+specifically to work around the fact that the *constants* are frozen at import time
+while `APP_DIR` can be overridden by `NEO_LOCALMCP_HOME` later (mainly in tests).
+The result is a confusing split where a reader can't tell whether to trust the
+constant or the function, and `CONFIG_PATH` (a constant) and `config_path()` (a
+function) can legitimately disagree. *Direction:* pick one. Either make the
+constants the single source and document "import-frozen; override HOME before
+import," or make everything a function and drop the constants. The current mix is
+the module's main readability cost.
+
+**C.3 — Doc-vs-code drift: "config.yaml" is actually written and read as JSON — `config.py:13, 155, 161, 175`; CLAUDE.md module-map line for `config.py` — severity: med**
+The file, the constant `CONFIG_PATH` (`.../config.yaml`), and CLAUDE.md all call
+it `config.yaml`, but `ensure_config` writes it with `json.dumps` (155) and
+`load_config` reads it with `json.loads` (161). The on-disk artifact is JSON with a
+`.yaml` extension. A future maintainer (or a user opening the file) is actively
+misled — YAML comments or non-JSON YAML syntax in that file would silently fail to
+parse. *Direction:* either genuinely support YAML (add a parser and keep the name)
+or rename to `config.json` and update the constant + CLAUDE.md + any installer
+references. At minimum, document the JSON-in-a-.yaml-file reality where the name is
+defined. This is a genuine docs-vs-code drift of the kind issue #10 asks about.
+
+**C.4 — Positive: the tuning comments (79-83, 90-99, 110-125) are excellent** — each
+explains why a default is what it is and cites the PROJECT_NOTES entry that set it.
+Model comment quality.
+
+**Ollama leads for repo_memory/config:** the fast-rank pass for a "repository
+indexing / retrieval-boost" query did not surface anything my own reads had not
+already covered; it re-ranked the memory functions sensibly and added no false
+leads worth recording. Datapoint: on this well-factored module the model was
+neither especially helpful nor harmful — it neither found nor invented a finding.

@@ -64,3 +64,22 @@ right or wrong is itself recorded as a datapoint about the tool's usefulness.
   tool (source is truth per the safety model) and use `context`/`lookup` primarily
   to exercise+benchmark the MCP and observe retrieval quality, rather than
   depending on its ranking while the worktree pollution is present.
+
+### Q7 — `lookup "index_repo"` (symbol lookup)
+- **Latency:** 0.30 s — the sweet spot for `lookup` (real Python symbol name routes
+  through the symbol index, not FTS). Returned 4 symbol hits + 2 file hits, each
+  with file_path + start/end line. This is genuinely the fastest, highest-signal
+  MCP command; it does NOT suffer the worktree pollution because it returns the
+  canonical `neo_localmcp/repo_memory.py` symbol directly (worktree copies share
+  the symbol name but `lookup` returned the real path first here).
+- **Retrieval-quality note (not a new bug):** the reported symbol *end_line* is
+  imprecise — `index_repo` came back as `258-338` but actually ends at line 310;
+  `repo_index` (a 2-line wrapper) came back as `393-473`. This is the known
+  regex-based symbol-extraction limitation (PROJECT_STATUS "Symbol extraction
+  remains regex-based"), not a new finding — noted only because it's visible in the
+  `lookup` output and a consumer of line hints should know the end_line is a loose
+  upper bound.
+- **with-MCP cost:** ~500 tokens. **without-MCP:** `grep -rn "def index_repo"`
+  across `neo_localmcp/` (~comparable to grep), but `lookup` also gave the line span
+  and other same-name symbols in one call. Slight win; bigger win when the file is
+  unknown.
