@@ -102,6 +102,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
             ".venv*", "venv*", "dist", "build", "packages", ".nuget", "TestResults", "coverage",
             ".next", ".svelte-kit", ".turbo", "target", "out", "DerivedData", ".gradle",
             ".neo-localmcp",
+            # ".claude/worktrees/" holds full sibling copies of the repo for parallel
+            # agent sessions -- without this, each duplicate tools.py/repo_memory.py
+            # outranks the real working-tree file (issue #28, same class of bug as
+            # the .venv* case above).
+            ".claude",
         ],
         "include_extensions": TEXT_EXTENSIONS,
     },
