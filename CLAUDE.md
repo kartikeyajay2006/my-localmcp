@@ -122,6 +122,21 @@ neo-localmcp context "debug repository indexing: index_repo, refresh" --repo-roo
 - Section-summary cache is keyed on source-file content hash only, not code version —
   a cache entry from a buggy older release isn't invalidated by fixing the bug, only
   by the source file changing or a manual cache clear.
+- **Swapping `fast_model`/`summary_model` (via `set-ollama`/config) does not
+  invalidate or regenerate existing summaries — this is intended, not a bug** (issue
+  #8, decided 2026-07-04). Summaries carry the producing model as metadata
+  (`files.summary_model`, `section_summaries.model`), but on a model swap the old
+  summaries keep being served as-is, still tagged with the previous model, until the
+  source file's content hash changes (which re-summarizes) or the cache is manually
+  cleared. Rationale: summaries are advisory enrichment, never authoritative (see
+  `docs/ARCHITECTURE.md` Safety model — the current source file/git diff are the truth),
+  and a description of an *unchanged* file stays accurate regardless of which model
+  wrote it. Ranking is never cached (always live) and `retrieval_boost` has no model
+  column, so neither is affected by a swap at all. Do **not** add
+  invalidate-on-model-swap machinery to `set-ollama` without a concrete correctness
+  problem to point at — the deliberate choice is status quo (option 1 of #8), matching
+  this repo's minimalism convention. If a swap's stale summaries ever need clearing, do
+  it explicitly (re-index the file or clear the cache), not implicitly on config write.
 - Retrieval-boost memory (`repo_memory.py`) is audited and upgrade-safe (1.0.9,
   phase 9g), but modest by design: it only nudges once the same task string
   recurs >= 3 times in one repo, so it helps repeated workflows, not first-time
