@@ -4,16 +4,21 @@ Touches no processes, venvs, network, or files. Every ``run_*`` method sleeps
 briefly between simulated steps so the live progress log looks real. Use it to
 walk the whole flow safely (``python setup_wizard.py --fake``).
 
-The simulated starting state is controlled by NEO_LOCALMCP_WIZARD_FAKE_STATE:
+Simulated state persists across runs in ``.wizard_preview/state.json`` at the
+repo root (gitignored), so a later ``--fake`` run sees what a previous
+simulated install/uninstall would have left behind. If that file doesn't
+exist yet, the starting state is seeded from NEO_LOCALMCP_WIZARD_FAKE_STATE:
 ``absent`` (default -- a fresh clone) or ``healthy`` (a returning user who has
 already installed and wants to reconfigure).
 """
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import time
+from pathlib import Path
 from typing import Any
 
 from .backend import (
@@ -48,6 +53,61 @@ _FAKE_MODEL_SIZES_RAW = {
 _FAKE_INSTALLED_MODELS = tuple(sorted(_FAKE_MODEL_SIZES_RAW))
 
 _STEP_DELAY = 0.35
+
+# Persisted simulation state, so a later `--fake` run (or mid-session `d`
+# toggle) sees what a previous simulated install/uninstall would have left
+# behind, instead of always restarting from the same NEO_LOCALMCP_WIZARD_FAKE_STATE
+# seed. Never touches any real managed root, venv, or client config.
+_STATE_DIR = Path(__file__).resolve().parents[2] / ".wizard_preview"
+_STATE_PATH = _STATE_DIR / "state.json"
+
+_BLANK_STATE: dict[str, Any] = {
+    "installed": False,
+    "installed_version": None,
+    "registered_clients": [],
+    "fast_model": "qwen3:8b",
+    "summary_model": "qwen3-coder:30b",
+    "base_url": "http://127.0.0.1:11434",
+    "prefs": {},
+}
+
+
+def _seed_state() -> dict[str, Any]:
+    start = os.environ.get("NEO_LOCALMCP_WIZARD_FAKE_STATE", "absent").strip().lower()
+    installed = start in {"healthy", "installed", "returning"}
+    state = dict(_BLANK_STATE)
+    if installed:
+        state["installed"] = True
+        state["installed_version"] = _SOURCE_VERSION
+        state["registered_clients"] = ["claude-code", "codex"]
+        state["prefs"] = {
+            "last_clients": list(state["registered_clients"]),
+            "fast_model": state["fast_model"],
+            "summary_model": state["summary_model"],
+        }
+    return state
+
+
+def _load_state() -> dict[str, Any]:
+    try:
+        with open(_STATE_PATH, encoding="utf-8") as fh:
+            loaded = json.load(fh)
+        if isinstance(loaded, dict) and "installed" in loaded:
+            merged = dict(_BLANK_STATE)
+            merged.update(loaded)
+            return merged
+    except (OSError, ValueError):
+        pass
+    seeded = _seed_state()
+    _save_state(seeded)
+    return seeded
+
+
+def _save_state(state: dict[str, Any]) -> None:
+    _STATE_DIR.mkdir(parents=True, exist_ok=True)
+    with open(_STATE_PATH, "w", encoding="utf-8") as fh:
+        json.dump(state, fh, indent=2, sort_keys=True)
+        fh.write("\n")
 
 
 # All fake paths are derived from the *live* OS (via sys.platform) so the
@@ -105,26 +165,32 @@ class FakeBackend:
     """A fully navigable, side-effect-free WizardBackend."""
 
     def __init__(self) -> None:
-        start = os.environ.get("NEO_LOCALMCP_WIZARD_FAKE_STATE", "absent").strip().lower()
-        self._installed = start in {"healthy", "installed", "returning"}
-        # Simulated persisted state.
-        self._registered = ["claude-code", "codex"] if self._installed else []
-        self._fast_model = "qwen3:8b"
-        self._summary_model = "qwen3-coder:30b"
-        self._base_url = "http://127.0.0.1:11434"
-        self._prefs: dict[str, Any] = (
-            {"last_clients": list(self._registered),
-             "fast_model": self._fast_model,
-             "summary_model": self._summary_model}
-            if self._installed else {}
-        )
+        state = _load_state()
+        self._installed = bool(state["installed"])
+        self._installed_version: str | None = state["installed_version"]
+        self._registered: list[str] = list(state["registered_clients"])
+        self._fast_model: str = state["fast_model"]
+        self._summary_model: str = state["summary_model"]
+        self._base_url: str = state["base_url"]
+        self._prefs: dict[str, Any] = dict(state["prefs"])
+
+    def _persist(self) -> None:
+        _save_state({
+            "installed": self._installed,
+            "installed_version": self._installed_version,
+            "registered_clients": list(self._registered),
+            "fast_model": self._fast_model,
+            "summary_model": self._summary_model,
+            "base_url": self._base_url,
+            "prefs": dict(self._prefs),
+        })
 
     # -- read-only probes ------------------------------------------------- #
 
     def detect(self) -> DetectedInfo:
         if self._installed:
-            state, label = "healthy", f"Installed and healthy (v{_SOURCE_VERSION})."
-            version: str | None = _SOURCE_VERSION
+            version = self._installed_version or _SOURCE_VERSION
+            state, label = "healthy", f"Installed and healthy (v{version})."
         else:
             state, label = "absent", "Not installed yet on this machine."
             version = None
@@ -192,6 +258,7 @@ class FakeBackend:
 
         if op == OP_INSTALL:
             self._installed = True
+            self._installed_version = _SOURCE_VERSION
             self._registered = list(state.selected_clients)
         if state.configure_ollama:
             self._fast_model = state.fast_model or self._fast_model
@@ -201,6 +268,7 @@ class FakeBackend:
 
         clients = ", ".join(self._registered) or "none"
         emit(StepEvent("summary", f"{op} succeeded (simulated)"))
+        self._persist()
         return OperationOutcome(
             ok=True, status="succeeded",
             title=f"{op.capitalize()} complete (simulated).",
@@ -220,11 +288,20 @@ class FakeBackend:
             emit(StepEvent("action", step))
             time.sleep(_STEP_DELAY)
         self._installed = False
+        self._installed_version = None
         self._registered = []
-        note = ("Full wipe (simulated): all data would be deleted."
-                if state.full_wipe else
-                "Runtime removed (simulated); durable data would be preserved.")
+        if state.full_wipe:
+            # Mirrors a real full wipe: nothing survives, including Ollama config.
+            self._fast_model = _BLANK_STATE["fast_model"]
+            self._summary_model = _BLANK_STATE["summary_model"]
+            self._base_url = _BLANK_STATE["base_url"]
+            self._prefs = {}
+            note = "Full wipe (simulated): all data would be deleted."
+        else:
+            # Runtime-only: durable data (Ollama config, prefs) survives.
+            note = "Runtime removed (simulated); durable data would be preserved."
         emit(StepEvent("summary", "uninstall succeeded (simulated)"))
+        self._persist()
         return OperationOutcome(
             ok=True, status="succeeded",
             title="Uninstall complete (simulated).",
@@ -239,6 +316,7 @@ class FakeBackend:
         emit(StepEvent("action", "Writing config.yaml (simulated)."))
         time.sleep(_STEP_DELAY)
         emit(StepEvent("summary", "Ollama models updated (simulated)"))
+        self._persist()
         return OperationOutcome(
             ok=True, status="succeeded",
             title="Ollama models updated (simulated).",
@@ -264,6 +342,7 @@ class FakeBackend:
             emit(StepEvent("info", "No client changes to apply."))
         self._registered = target
         emit(StepEvent("summary", "client changes applied (simulated)"))
+        self._persist()
         return OperationOutcome(
             ok=True, status="succeeded",
             title="Client connections updated (simulated).",
@@ -277,6 +356,7 @@ class FakeBackend:
 
     def save_prefs(self, prefs: dict[str, Any]) -> None:
         self._prefs = dict(prefs)
+        self._persist()
 
 
 # Ordered, human-readable action plans (mirror setup_cli._DRY_RUN_PLANS in spirit).

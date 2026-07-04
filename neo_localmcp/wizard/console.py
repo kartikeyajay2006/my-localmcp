@@ -22,6 +22,7 @@ import os
 import sys
 from typing import Callable
 
+from . import _ansi
 from .backend import (
     CLIENT_LABELS,
     FULL_WIPE_PHRASE,
@@ -53,6 +54,10 @@ class _Abort(Exception):
     """Raised when the user explicitly declines to proceed at a final confirm."""
 
 
+class _ToggleDummy(Exception):
+    """Raised by the main-menu prompt when the user types 'd'/'dummy'."""
+
+
 def _is_back(raw: str) -> bool:
     return raw.strip().lower() in {"b", "back"}
 
@@ -77,12 +82,12 @@ class ConsoleWizard:
     def _header(self, question: str = "") -> None:
         _clear()
         d = self.detected
-        print("=" * _WIDTH)
-        title = " neo-localmcp setup wizard"
+        print(_ansi.cyan_bold("=" * _WIDTH))
+        title = _ansi.cyan_bold(" neo-localmcp setup wizard")
         if self.fake:
-            title += "   (SIMULATION - nothing changes)"
+            title += "   " + _ansi.yellow("[Preview Dummy]")
         print(title)
-        print("=" * _WIDTH)
+        print(_ansi.cyan_bold("=" * _WIDTH))
         print(f" {d.os_label} | Python {d.python_version}")
         print(f" {d.state_label}")
         if d.registered_clients:
@@ -97,7 +102,7 @@ class ConsoleWizard:
                     print(line)
         print("-" * _WIDTH)
         if question:
-            print(f" {question}")
+            print(_ansi.cyan_bold(f" {question}"))
             print()
 
     @staticmethod
@@ -105,13 +110,13 @@ class ConsoleWizard:
         for index, (title, desc) in enumerate(rows, start=1):
             print(f"   {index}) {title}")
             if desc:
-                print(f"        {desc}")
+                print(_ansi.dim(f"        {desc}"))
 
     @staticmethod
     def _explain(*lines: str) -> None:
         """Print a short, indented 'what this step is about' blurb, then a gap."""
         for line in lines:
-            print(f" {line}")
+            print(_ansi.dim(f" {line}"))
         print()
 
     def _set_summary(self, label: str, value: str) -> None:
@@ -127,10 +132,17 @@ class ConsoleWizard:
     # Every primitive accepts "b"/"back" (raising _GoBack) in addition to its
     # normal input, and shows its default (if any) as "[Default: ...]".
 
-    def _ask_int(self, low: int, high: int, default: int | None = None) -> int:
+    def _ask_int(
+        self, low: int, high: int, default: int | None = None,
+        allow_dummy_toggle: bool = False,
+    ) -> int:
         hint = f" [Default: {default}]" if default is not None else ""
+        toggle_hint = " (or d for preview dummy mode)" if allow_dummy_toggle else ""
         while True:
-            raw = self._input(f"\n Enter a number {low}-{high}{hint} (or b to go back): ")
+            raw = self._input(
+                f"\n Enter a number {low}-{high}{hint} (or b to go back){toggle_hint}: ")
+            if allow_dummy_toggle and raw.strip().lower() in {"d", "dummy"}:
+                raise _ToggleDummy
             if _is_back(raw):
                 raise _GoBack
             if not raw and default is not None:
@@ -232,19 +244,33 @@ class ConsoleWizard:
         return rows
 
     def _main_menu(self) -> str:
+        while True:
+            self.detected = self.backend.detect()
+            self.summary = []
+            self._clients_chosen = False
+            self.state = WizardState()
+            rows = self._menu_rows()
+            self._header("What would you like to do?")
+            self._explain(
+                "neo-localmcp is a local MCP server that gives your AI tools fast,",
+                "deterministic repository context. This wizard sets it up and connects it.",
+            )
+            self._print_options([(title, desc) for _, title, desc in rows])
+            try:
+                choice = self._ask_int(1, len(rows), allow_dummy_toggle=not self.fake)
+            except _ToggleDummy:
+                self._enter_preview_dummy()
+                continue
+            return rows[choice - 1][0]
+
+    def _enter_preview_dummy(self) -> None:
+        """One-way switch to the FakeBackend for the rest of this process."""
+        from .fake_backend import FakeBackend
+
+        self.backend = FakeBackend()
+        self.fake = True
         self.detected = self.backend.detect()
-        self.summary = []
-        self._clients_chosen = False
-        self.state = WizardState()
-        rows = self._menu_rows()
-        self._header("What would you like to do?")
-        self._explain(
-            "neo-localmcp is a local MCP server that gives your AI tools fast,",
-            "deterministic repository context. This wizard sets it up and connects it.",
-        )
-        self._print_options([(title, desc) for _, title, desc in rows])
-        choice = self._ask_int(1, len(rows))
-        return rows[choice - 1][0]
+        self.prefs = self.backend.load_prefs()
 
     # -- phase: clients ----------------------------------------------------
 
@@ -270,12 +296,12 @@ class ConsoleWizard:
             "is configured on this OS.",
         )
         for index, opt in enumerate(options, start=1):
-            mark = "  (connected)" if opt.key in registered else ""
+            mark = _ansi.green("  (connected)") if opt.key in registered else ""
             manual = "  [manual step]" if opt.manual else ""
             print(f"   {index}) {opt.label}{mark}{manual}")
-            print(f"        path: {opt.config_path}")
+            print(_ansi.dim(f"        path: {opt.config_path}"))
             if opt.detail:
-                print(f"        {opt.detail}")
+                print(_ansi.dim(f"        {opt.detail}"))
             print()
         picks = self._ask_multi(len(options), default=default_indices)
         chosen = [options[i - 1].key for i in picks]
@@ -391,15 +417,14 @@ class ConsoleWizard:
         if not self.state.full_wipe:
             raise _Skip
         self._header("Confirm full wipe")
-        self._explain(
-            "A full wipe permanently deletes everything under:",
-            f"  {self.detected.managed_root}",
-        )
+        print(_ansi.red_bold(" A full wipe permanently deletes everything under:"))
+        print(_ansi.red_bold(f"   {self.detected.managed_root}"))
+        print()
         while True:
             typed = self._ask_text(f'Type "{FULL_WIPE_PHRASE}" to confirm')
             if typed == FULL_WIPE_PHRASE:
                 return
-            print(f'\n   That did not match. Type exactly: {FULL_WIPE_PHRASE}')
+            print(_ansi.red_bold(f'\n   That did not match. Type exactly: {FULL_WIPE_PHRASE}'))
 
     # -- phase: confirm ------------------------------------------------------
 
@@ -462,9 +487,10 @@ class ConsoleWizard:
             outcome = self.backend.run_operation(self.state, emit)
 
         print()
-        print(f" {outcome.title}")
+        color = _ansi.green if outcome.ok else _ansi.red_bold
+        print(color(f" {outcome.title}"))
         for line in outcome.detail_lines:
-            print(f"   {line}")
+            print(color(f"   {line}"))
         if outcome.log_hint:
             print(f"\n   Logs: {outcome.log_hint}")
         if outcome.next_command:
