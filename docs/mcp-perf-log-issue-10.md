@@ -116,3 +116,69 @@ known PROJECT_STATUS limitation, stated for honesty).
   truncation, no runaway. On this run the SLOW path behaved well.
 - **Determinism:** Ollama summary text is non-deterministic (generation); the cache
   makes a *repeat* deterministic only because it returns the stored copy.
+
+---
+
+## Summary of observed performance
+
+| Path | Cold | Warm | Cached | Determinism |
+|---|---|---|---|---|
+| `context` deterministic | 2.5 s | ~1.5 s (per determinism run) | n/a | stable (1 hash / 5 runs) |
+| `lookup` / `file` | 0.3–0.4 s | same | n/a | stable |
+| `context --ollama-rank` (qwen3:8b) | 21.5 s | 14.5 s | n/a | advisory non-deterministic; core stable |
+| `summarize --heading` (qwen3-coder:30b) | 28 s | 4 s | 0.57 s | text non-deterministic; cache makes repeat stable |
+
+**Headline numbers for issue #9:**
+- Deterministic retrieval is sub-3-seconds cold, ~1.5 s warm — cheap enough to run
+  on every task.
+- The FAST Ollama path (qwen3:8b) is **generation-bound** (~14 s eval for a
+  1500-token advisory); load is negligible once warm.
+- The SLOW Ollama path (qwen3-coder:30b) is **load-bound** (~14 s one-time VRAM load);
+  per-summary eval is only ~1.3 s, and the content-hash cache turns a repeat into
+  0.57 s.
+- Ollama's deterministic-fallback guarantee held throughout: no Ollama call ever
+  blocked or emptied a deterministic response.
+
+## Benchmarking recommendations (the payoff for issue #9)
+
+To make runs **repeatable and comparable**, a benchmark harness should standardize:
+
+1. **A fixed corpus + fixed queries.** Pin a specific commit of a target repo and a
+   frozen list of ~15–20 representative task strings across all intents
+   (debug/feature/refactor/test/explain/context) and both hybrid (`task: Sym1, Sym2`)
+   and pure-natural forms. Commit them to the repo (e.g. `benchmark/queries.jsonl`)
+   so every run uses the identical inputs. Include at least one query that exercises
+   each already-filed retrieval bug (#22 string-literal lookup, #23 identifier
+   weighting, #24 overloaded term) so regressions/fixes are measurable.
+2. **A clean-index precondition step.** Every benchmark run must start from a known
+   index state — `reset-repo` then `index` on the pinned commit — because stale rows,
+   branch changes, and (per this audit) sibling worktree copies materially change
+   ranking. **Explicitly control `exclude_dirs`** for the benchmark repo so
+   environment noise (venvs, `.claude/worktrees`) can't skew results run-to-run.
+3. **Separate the deterministic and Ollama metrics.** Never mix them in one number:
+   - *Deterministic:* wall latency, `estimated_tokens_returned`, `candidate_files`,
+     `repository_searches`, and a **ranking-quality** metric — e.g. reciprocal rank of
+     a hand-labeled gold file per query (MRR), or precision@5 of `read_first`. This is
+     the metric that actually answers "is retrieval good," which raw token counts do not.
+   - *Ollama:* record `load_duration`, `eval_duration`, `eval_count`, `elapsed`, and
+     `timed_out`/`near_timeout` separately for fast vs summary models, always noting
+     cold-vs-warm (they differ by 10–15 s). Warm the model once before timing the
+     fast path, and time the summary path both cold and cache-hit.
+4. **A token-reduction A/B, honestly bounded by task shape.** For the ">=30% fewer
+   total tokens" acceptance target, compare *for a narrow edit task* (where MCP wins):
+   (with-MCP context bundle tokens + the files actually opened afterward) vs
+   (grep + whole-file reads to reach the same answer). Do NOT benchmark this on
+   audit-shaped tasks — this audit found the total-token win structurally collapses
+   when the task requires reading whole files regardless (see dogfooding notes). Pick
+   task shapes deliberately and label them.
+5. **Determinism as a gate, not a metric.** Run `test-determinism --runs 5` on every
+   benchmarked query and fail the run if any query is non-deterministic — determinism
+   is a correctness invariant, so it belongs as a pass/fail gate around the perf
+   numbers, not as a score.
+6. **Real token telemetry eventually.** All numbers here are char÷4 estimates (a
+   known limitation). If the harness can capture client-reported usage, prefer it;
+   until then, standardize the char÷4 convention and its exact definition (raw output
+   chars) so estimates are at least comparable across runs.
+7. **Report cold and warm as distinct rows.** The single most misleading thing in
+   ad-hoc timing is conflating a cold model load with steady-state. Every Ollama row
+   in a benchmark table should be explicitly cold or warm.

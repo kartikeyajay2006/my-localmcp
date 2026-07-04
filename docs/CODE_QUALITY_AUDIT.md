@@ -35,6 +35,13 @@ producing this report. Line numbers reference the working tree at the branch bas
 | 6 | `ollama_client.py` | Sound state-machine + fallback contract; pervasive result-dict DRY and a few mega-lines. 4 findings (2 med). |
 | 7 | `lifecycle.py` | **Clean, nothing actionable** — best-documented module in the repo; a model to emulate. |
 | 8 | `client_setup.py` | Good I/O comments; `remove_codex` reads config 3x, `setup_claude_code` migration dense, scope-detect duplicated. 5 findings (2 med). |
+| 9 | `wizard/*` | Real Protocol seam, well-documented; private-symbol reaches across boundary + minor typing. 4 findings (1 med). |
+
+**Bottom line:** comment quality is a project strength (matches CLAUDE.md's WHY-only
+standard, near-zero noise); the debt is structural — oversized functions and
+systematic DRY in the rendering / result-dict layers. Highest-value fix is the
+one-line `.claude`-exclusion (C.1), a live retrieval-quality bug. See the
+"Summary and suggested priorities" section at the end for the ranked action list.
 
 ---
 
@@ -538,3 +545,136 @@ Good comment hygiene.
 **Ollama leads for lifecycle/client_setup:** not run through the reranker (installer/
 client-integration code is outside what the ranking prompt is designed to review, and
 both modules were fully read). No leads to record.
+
+---
+
+## 9. `neo_localmcp/wizard/*` (console 572, real_backend 406, fake_backend 316, backend 195, preflight 100)
+
+**Verdict:** The wizard is well-architected and the `WizardBackend` Protocol seam
+is real, not aspirational - `console.py` depends only on the Protocol, and
+`real_backend.py` genuinely delegates every side effect to `installer/`/`config`/
+`ollama_client`/`client_setup` with no reimplemented lifecycle policy (verified by
+reading it: `run_operation` calls `install`/`reinstall`/`uninstall` directly). The
+phase-machine is documented and the trickiest bug-derived decisions carry excellent
+WHY comments. Findings are minor: a couple of private-symbol reaches across the
+module boundary and a few untyped params.
+
+### Findings
+
+**9.1 - `real_backend` reaches into three private symbols across module boundaries - `real_backend.py:202` (`ollama_client._request_json`), `261` + `270` (`setup_cli._plan_key`, `setup_cli._DRY_RUN_PLANS`) - severity: med**
+The backend calls `ollama_client._request_json(...)` (leading underscore = private)
+for model sizes, and imports `setup_cli._plan_key` / `setup_cli._DRY_RUN_PLANS`
+(both private) for the dry-run plan. The `setup_cli` import even carries a candid
+inline comment "private plan tables live here; same repo" (259) - an honest
+acknowledgement that this is reaching past the intended API. It works and is
+low-risk within one repo, but it couples the wizard to internals that carry no
+stability contract; a rename of any of these three silently breaks the wizard with
+no type/lint signal. *Direction:* promote the three to public helpers
+(`ollama_client.request_json` or a small `model_sizes()` API; a public
+`setup_cli.dry_run_plan(key)`), or document them as intentional internal-but-stable.
+This is the one real module-boundary finding in the wizard.
+
+**9.2 - `_pick_model`'s `info` parameter is untyped - `console.py:316` - severity: low**
+`def _pick_model(self, label: str, hint: list[str], info, current: str) -> str` -
+`info` (an `OllamaInfo`) is the only unannotated parameter in the method. Every
+other signature in the file is typed. *Direction:* annotate `info: "OllamaInfo"`
+(import under `TYPE_CHECKING` to avoid a console->backend runtime import if
+undesired). Trivial consistency fix.
+
+**9.3 - `_clear()` shells out via `os.system` - `console.py:40-41` - severity: low**
+`os.system("cls" if os.name == "nt" else "clear")` spawns a shell per screen
+refresh. For an interactive wizard this is fine and portable, and the alternative
+(ANSI escape `\033[2J\033[H`) doesn't work on legacy Windows consoles the project
+explicitly supports - so this is arguably the *right* call. Flagged only because
+`os.system` is a pattern reviewers reflexively question; a one-line WHY comment
+("os.system for cls/clear because ANSI clear is unreliable on legacy Windows
+consoles") would pre-empt that. Not a real problem.
+
+**9.4 - Positive: the seam and the bug-derived WHY comments are exemplary.**
+`console.py`'s module docstring (1-17) and `_run_phases` comment (180-185) fully
+explain the phase machine; `_save_prefs`'s uninstall-skip comment (478-482)
+documents the exact real bug PROJECT_NOTES 2026-07-03 (13) fixed (recreating a
+just-wiped config dir); `real_backend.py`'s module docstring (1-9) states the
+no-added-policy contract that the code then honours. The `# noqa: BLE001` markers on
+the broad excepts are paired with a WHY on each ("a broken record file must not
+break the UI", "size display is a nice-to-have, never fatal") - broad-except done
+right. No noise comments.
+
+**Ollama leads for wizard:** not applicable (installer/UI code is outside the
+ranking prompt's remit; modules read directly).
+
+**Not deep-audited (budget):** `wizard/backend.py` (Protocol + dataclasses - by
+inspection a clean data-shape module), `wizard/fake_backend.py` (side-effect-free
+test double, mirrors the real backend's shape), and `wizard/preflight.py` (stdlib
+dependency bootstrap). Spot-reads showed nothing alarming; a future pass could
+confirm the fake/real backends haven't drifted in the data shapes they return.
+
+---
+
+## Cross-cutting: docs-vs-code drift (issue #10's explicit "do the docs still describe the code?" ask)
+
+Checked CLAUDE.md's module map and conventions against the actual code:
+
+- **`config.py` "config.yaml"** - drift confirmed (finding C.3): the file is JSON,
+  not YAML, despite the name and CLAUDE.md's module-map line. Med severity.
+- **CLAUDE.md module map is otherwise accurate.** Spot-verified: `server.py` is the
+  FastMCP entrypoint that registers with `lifecycle.py` (true, `server.main` 200-218);
+  `tools.py` lists `prepare_context`/`context_prepare`/`file_excerpts`/
+  `summarize_file`/`apply_patch` (all present); `repo_memory.py`'s named functions
+  `get_boost_map`/`record_task_query`/`record_retrieval_feedback` all exist as
+  described; `client_setup.py`'s `setup_*`/`remove_*` + `remove_client`/
+  `remove_clients` dispatchers all present; `lifecycle.py`'s `neo-localmcp stop`
+  graceful-stop is real. No stale module-map claims found.
+- **CLAUDE.md "administration is CLI-only, never exposed as an MCP tool"** - verified
+  true: `server.py`'s `@mcp.tool()` set exposes only context/lookup/status/doctor/
+  refresh/summarize/apply-patch/record-change/ollama-status-ensure; no index/reset/
+  stop/config tool is registered. The boundary claim holds.
+- **`doctor`'s self-reported `commands` list (finding 1.6)** is the one place inside
+  the code that can silently drift from `cli.py`'s real subcommand set - an
+  in-code doc-drift hazard, already filed as finding 1.6.
+- **The `context_prepare` one-release-alias** is consistently described as
+  compatibility-only in CLAUDE.md, PROJECT_STATUS, `server.py` (106), and the server
+  instructions - no drift, just a naming-clarity note (findings 1.5/5.3).
+
+Net: docs are in good shape; the one genuine drift is the JSON-in-a-`.yaml`-file
+naming (C.3), plus the self-listed `commands` array (1.6) as an in-code hazard.
+
+---
+
+## Summary and suggested priorities
+
+**Overall:** the "right bones" the owner hoped for are genuinely there. Comment
+quality across the codebase is *above* most human-written projects and squarely
+matches CLAUDE.md's own "WHY-only" standard - the subtle, bug-derived decisions are
+documented, and there is almost no comment noise. `lifecycle.py`, `repo_memory.py`,
+and the wizard seam are the strongest work. The recurring quality debt is
+**structural, not stylistic**: a few functions/modules carry too much at once, and
+there is systematic duplication in the response-rendering (tools.py) and
+result-dict-building (ollama_client.py, server.py error wrappers) layers.
+
+**The one thing worth fixing first** is not a readability item at all but the
+`.claude`-exclusion gap (C.1) - it actively degrades retrieval quality in this very
+repo, was reproduced live, and is a one-line config change.
+
+Ranked actionable set (high/med only - the individual GitHub issues cover these):
+
+| Priority | Finding | Why first |
+|---|---|---|
+| 1 | C.1 `.claude` not excluded (high) | Live retrieval-quality bug; one-line fix |
+| 2 | 1.1 `context_prepare` 8-job function (high) | Highest-leverage readability change |
+| 3 | 5.1 + server error-wrapper DRY (med) | 9 copies; a decorator removes them safely |
+| 4 | 6.1 ollama result-dict DRY (med) | ~10 copies; a factory fixes envelope drift too |
+| 5 | 1.2 three/four renderer copies (med) | Consolidate the projection helpers |
+| 6 | C.3 JSON-in-.yaml drift (med) | Real docs-vs-code drift a reader is misled by |
+| 7 | 8.1 remove_codex reads file 3x (med) | Redundant I/O + unreadable boolean |
+| 8 | 5.2 subprocess asymmetry undocumented (med) | Missing WHY invites a regression |
+| 9 | 1.6 doctor commands list drift (med) | In-code sync hazard with cli.py |
+| 10 | 3.1 filler/intent word-set DRY (med) | Invariant can silently drift |
+
+Low-severity findings (1.4, 2.1-2.4, 3.2-3.5, 4.1-4.3, 6.3, 8.3-8.4, 9.2-9.3) are
+polish - worth a sweep when touching the relevant file, not worth dedicated issues.
+
+**What was NOT found (equally important):** no god-objects beyond tools.py's size,
+no circular module dependencies, no comment noise worth flagging, no dead code
+spotted in the audited modules, and no docs-drift beyond the two noted. The
+correctness audit's "right bones" verdict holds up under a quality lens too.

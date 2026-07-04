@@ -83,3 +83,37 @@ right or wrong is itself recorded as a datapoint about the tool's usefulness.
   across `neo_localmcp/` (~comparable to grep), but `lookup` also gave the line span
   and other same-name symbols in one call. Slight win; bigger win when the file is
   unknown.
+
+---
+
+## Overall dogfooding assessment
+
+**What worked well:**
+- `lookup` and `file` are fast (0.3–0.4 s), precise, and pollution-free — the
+  highest-signal commands for a code navigator. Real Python symbol names route
+  through the symbol index and land exactly.
+- The FAST `--ollama-rank` path *corrected* the deterministic worktree pollution
+  by naming the canonical path #1 — a genuine value-add on this particular repo.
+- The SLOW `summarize` content-hash cache is excellent (0.57 s cache hit vs 28 s
+  cold) and its output was accurate and well-shaped.
+- Determinism held (5 runs, 1 hash).
+
+**Friction / retrieval-quality problems observed:**
+1. **Worktree-copy pollution (new, high):** `.claude/worktrees/agent-*` sibling
+   copies are indexed and dominated ranking — the real file ranked #6. Root cause
+   is `config.py:100-105` `exclude_dirs` missing `.claude`. Filing an issue.
+2. **Mojibake in `context` text output (issue #26, already filed):** em-dashes
+   render as `�` on this Windows console. Confirmed, not re-filed.
+3. **Identifier weighting / string-literal lookup (#22, #23, #24, already filed):**
+   observed originating in `query.py`'s `_is_symbol_like`. Not re-filed.
+
+**Task-shape honesty (the meta-finding, reconfirmed live):** for an AUDIT task,
+MCP's discovery-narrowing saves ~90% of *locating* tokens but near-0% of *total*
+tokens, because the audit reads whole files regardless. The >=30% total-token
+target is a narrow-edit metric, not an audit metric — a benchmark must pick task
+shapes deliberately (see perf log, recommendation #4).
+
+**Net:** neo-localmcp was genuinely useful as a navigator (lookup/file especially),
+and exercising every command surfaced one real new retrieval bug plus confirmed the
+Ollama fast/slow cost model precisely. The tool ate its own dogfood competently,
+with the worktree-exclusion gap being the one thing actively hurting it in this repo.
