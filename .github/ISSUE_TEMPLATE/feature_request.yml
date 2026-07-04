@@ -1,0 +1,38 @@
+name: Feature request
+description: A new capability, not a fix or a decision
+title: "feat(area): "
+labels: ["type:feat"]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: >
+        Pick the closest match, then add the matching area:* label yourself
+        after creating this issue (see .github/CONTRIBUTING.md for the full
+        taxonomy). Also replace "area" in the title above with this value.
+      options:
+        - wizard
+        - installer
+        - client-integration
+        - mcp-tools
+        - mcp-mgmt
+        - mcp-toolkit
+        - ollama
+        - retrieval
+        - benchmark
+        - not sure / spans multiple
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What's the capability
+      description: What should be possible after this exists that isn't today.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: What need this addresses, or what it unblocks.
