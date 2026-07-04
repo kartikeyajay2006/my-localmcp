@@ -16,6 +16,44 @@ exact, developer-approved unified diff via `apply-patch`/`apply_patch`, which
 always validates with `git apply --check` first and defaults to check-only.
 Everything else is retrieval, indexing, ranking, and summarization.
 
+## What this actually is (north star)
+
+The one-line pitch — "an MCP that saves tokens" — undersells it and invites
+the wrong comparison (against other caching tricks). The more accurate frame:
+
+**A deterministic repository-context layer for AI coding agents**, with:
+
+- **Selection, ranking, and verification as first-class steps**, not implicit
+  side effects of a search call — every returned excerpt carries a hash and
+  line range, so a caller can prove it's reading current source, not stale
+  cache.
+- **Bounded, optional local-model use.** Ollama re-ranks or summarizes on top
+  of the deterministic result; every Ollama-touching path is time-bounded and
+  has a deterministic fallback, so a slow/cold/missing model degrades
+  gracefully instead of blocking or emptying a response.
+- **Auditable retrieval behavior.** `test-determinism` re-runs the same query
+  N times and checks output hashes match; `record-change` closes the loop
+  between "shown" and "actually edited."
+- **Built-in model upgradability.** Ranking is never cached, so swapping
+  `fast_model`/`summary_model` has zero memory-correctness implications by
+  construction — see `PROJECT_STATUS.md` for the verification.
+- **Not a frontier-model replacement.** The goal is context routing that lets
+  a frontier model (and your local hardware, if capable) spend its budget on
+  reasoning instead of rediscovering the same files every session.
+
+Two things this is **not**, yet, on purpose:
+- **Automated token-reduction measurement.** Today a response reports its own
+  cost (`estimated_tokens_returned`); the 8-10x reduction figures in
+  `PROJECT_STATUS.md` came from one-off manual comparisons during real
+  sessions, not a repeatable benchmark tool. Optional built-in benchmarking is
+  a planned, not-yet-built capability.
+- **A schema-migration guarantee across breaking version changes.** Every
+  schema change so far has been additive (new nullable columns) and has
+  preserved memory in practice; there is no automated regression test yet
+  proving a *structurally* breaking future change would too. Treat "memory
+  loss is unacceptable" as an actively-held invariant, not a passively-proven
+  one, until that test exists.
+
 ## How it works
 
 1. **Index once, refresh incrementally.** The first request against a repo
