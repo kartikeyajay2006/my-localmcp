@@ -259,7 +259,7 @@ tool you used (or that none applied) back to the user.
 
 The same snippet, plus a full tool-by-tool reference (arguments, defaults,
 and when to call each one), lives in
-[`docs/AGENT_INTEGRATION.md`](docs/AGENT_INTEGRATION.md) — paste that file's
+[`MCP_AGENT_INTEGRATION.md`](MCP_AGENT_INTEGRATION.md) — paste that file's
 top snippet into the downstream repo's own `CLAUDE.md`/`AGENTS.md` so the
 instruction persists across sessions instead of being repeated by hand.
 

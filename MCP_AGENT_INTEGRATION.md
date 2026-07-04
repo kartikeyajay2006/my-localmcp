@@ -1,4 +1,4 @@
-# Agent integration
+# MCP Agent Integration
 
 This file is the sidecar reference for an AI agent working in a repository
 that neo-localmcp indexes. It has two parts:
