@@ -1,0 +1,36 @@
+name: PR title format
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  pull-requests: read
+  statuses: write
+
+jobs:
+  check:
+    name: Validate PR title
+    runs-on: ubuntu-latest
+    steps:
+      - uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # Matches .github/CONTRIBUTING.md's type(area): description convention.
+          # Scope (area) is optional, since `meta`-typed PRs carry no area.
+          types: |
+            meta
+            docs
+            chore
+            refactor
+            feat
+            fix
+            test
+            perf
+            security
+          requireScope: false
+          subjectPattern: ^(?![A-Z]).+$
+          subjectPatternError: >
+            The description after "type(area): " must not start with an
+            uppercase letter (matches this project's commit-message style).

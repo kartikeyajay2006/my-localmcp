@@ -1,0 +1,21 @@
+name: Meta / open decision
+description: Project-as-repo (README/status/licensing/GitHub config) or an open direction question not yet resolved into a change
+title: "meta: "
+labels: ["type:meta"]
+body:
+  - type: markdown
+    attributes:
+      value: >
+        No area field here on purpose — `meta` is about the project, not the
+        codebase, so it doesn't get an `area:*` label (see
+        `.github/CONTRIBUTING.md`).
+  - type: textarea
+    id: what
+    attributes:
+      label: What needs deciding or documenting
+    validations:
+      required: true
+  - type: textarea
+    id: options
+    attributes:
+      label: Options considered, if any
