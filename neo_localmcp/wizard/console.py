@@ -19,7 +19,9 @@ depended on it, in both directions.
 from __future__ import annotations
 
 import os
+import shutil
 import sys
+import textwrap
 from typing import Callable
 
 from . import _ansi
@@ -36,10 +38,25 @@ from .backend import (
 )
 
 _WIDTH = 80
+_MAX_TEXT_WIDTH = 100
 
 
 def _clear() -> None:
     os.system("cls" if os.name == "nt" else "clear")
+
+
+def _text_width() -> int:
+    """Wrap prose at 100 columns, or narrower if the terminal itself is narrower."""
+    cols = shutil.get_terminal_size(fallback=(_MAX_TEXT_WIDTH, 24)).columns
+    return max(20, min(_MAX_TEXT_WIDTH, cols))
+
+
+def _wrap(text: str, indent: str = " ", subsequent_indent: str | None = None) -> list[str]:
+    """Wrap ``text`` to the current text width, indenting every physical line."""
+    sub = indent if subsequent_indent is None else subsequent_indent
+    return textwrap.wrap(
+        text, width=_text_width(), initial_indent=indent, subsequent_indent=sub,
+    ) or [indent.rstrip()]
 
 
 class _GoBack(Exception):
@@ -120,13 +137,15 @@ class ConsoleWizard:
         for index, (title, desc) in enumerate(rows, start=1):
             print(f"   {index}) {title}") # Option
             if desc:
-                print(_ansi.dim(f"        {desc}")) #Subtext
+                for line in _wrap(desc, indent="        "):
+                    print(_ansi.dim(line)) #Subtext
 
     @staticmethod
     def _explain(*lines: str) -> None:
         """Print a short, indented 'what this step is about' blurb, then a gap."""
         for line in lines:
-            print(f" {line}")
+            for wrapped in _wrap(line, indent=" "):
+                print(wrapped)
         print()
 
     def _set_summary(self, label: str, value: str) -> None:
@@ -309,9 +328,11 @@ class ConsoleWizard:
             mark = _ansi.green("  (connected)") if opt.key in registered else ""
             manual = "  [manual step]" if opt.manual else ""
             print(f"   {index}) {opt.label}{mark}{manual}")
-            print(_ansi.dim(f"        path: {opt.config_path}"))
+            for line in _wrap(f"path: {opt.config_path}", indent="        "):
+                print(_ansi.dim(line))
             if opt.detail:
-                print(_ansi.dim(f"        {opt.detail}"))
+                for line in _wrap(opt.detail, indent="        "):
+                    print(_ansi.dim(line))
             print()
         picks = self._ask_multi(len(options), default=default_indices)
         chosen = [options[i - 1].key for i in picks]
@@ -328,10 +349,10 @@ class ConsoleWizard:
         info = self.backend.ollama_info()
         self._header("Ollama models  (optional)")
         self._explain(
-            "Ollama is optional. When present, it allows for:" \
-            " - Re-rank results via fast models" \
-            " - Summarize files " \
-            "Deterministic context will always work regardless, so it's safe to skip.\n",
+            "Ollama is optional. When present, it allows for:",
+            "  - Re-ranking results via fast models",
+            "  - Summarizing files",
+            "Deterministic context will always work regardless, so it's safe to skip.",
             f"Status: {info.detail}",
         )
         self.state.configure_ollama = self._ask_yesno(
@@ -428,14 +449,18 @@ class ConsoleWizard:
         if not self.state.full_wipe:
             raise _Skip
         self._header("Confirm full wipe")
-        print(_ansi.red_bold(" A full wipe permanently deletes everything under:"))
+        for line in _wrap("A full wipe permanently deletes everything under:", indent=" "):
+            print(_ansi.red_bold(line))
         print(_ansi.red_bold(f"   {self.detected.managed_root}"))
         print()
         while True:
             typed = self._ask_text(f'Type "{FULL_WIPE_PHRASE}" to confirm')
             if typed == FULL_WIPE_PHRASE:
                 return
-            print(_ansi.red_bold(f'\n   That did not match. Type exactly: {FULL_WIPE_PHRASE}'))
+            print()
+            for line in _wrap(f"That did not match. Type exactly: {FULL_WIPE_PHRASE}",
+                               indent="   "):
+                print(_ansi.red_bold(line))
 
     # -- phase: confirm ------------------------------------------------------
 
@@ -452,9 +477,9 @@ class ConsoleWizard:
                 continue
             manual = "  [manual step]" if opt.manual else ""
             lines.append(f"     {i}) {label}{manual}")
-            lines.append(f"          path: {opt.config_path}")
+            lines.extend(_wrap(f"path: {opt.config_path}", indent="          "))
             if opt.detail:
-                lines.append(f"          {opt.detail}")
+                lines.extend(_wrap(opt.detail, indent="          "))
         return lines
 
     _CONFIRM_VERBS = {
@@ -472,9 +497,11 @@ class ConsoleWizard:
             "and will be applied accordingly.",
         )
         if self.fake:
-            print(_ansi.yellow(
-                " ** Preview Dummy is active -- choosing Yes will show a demo output."
-                " No changes will be made at all."))
+            for line in _wrap(
+                "** Preview Dummy is active -- choosing Yes will show a demo output. "
+                "No changes will be made at all.", indent=" ",
+            ):
+                print(_ansi.yellow(line))
             print()
         print(f"   Managed root: {self.detected.managed_root}")
         print()
@@ -513,13 +540,18 @@ class ConsoleWizard:
 
         print()
         color = _ansi.green if outcome.ok else _ansi.red_bold
-        print(color(f" {outcome.title}"))
-        for line in outcome.detail_lines:
-            print(color(f"   {line}"))
+        for line in _wrap(outcome.title, indent=" "):
+            print(color(line))
+        for detail in outcome.detail_lines:
+            for line in _wrap(detail, indent="   "):
+                print(color(line))
         if outcome.log_hint:
-            print(f"\n   Logs: {outcome.log_hint}")
+            print()
+            for line in _wrap(f"Logs: {outcome.log_hint}", indent="   "):
+                print(line)
         if outcome.next_command:
-            print(f"   Try next:  {outcome.next_command}")
+            for line in _wrap(f"Try next:  {outcome.next_command}", indent="   "):
+                print(line)
         self._save_prefs(outcome)
 
     def _save_prefs(self, outcome) -> None:
