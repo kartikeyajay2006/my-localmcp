@@ -18,6 +18,7 @@ from typing import Any
 
 import neo_localmcp
 from .. import client_setup, config, ollama_client
+from ..mcpb_build import build_mcpb
 from ..installer import (
     ManagedPaths,
     Operation,
@@ -253,7 +254,35 @@ class RealBackend:
                 and state.configure_ollama and state.operation != OP_UNINSTALL):
             self._write_ollama_config(state, emit)
 
-        return self._outcome_from_result(state, result)
+        # Rebuild the versioned Claude Desktop .mcpb into the repo (dev-only, from a
+        # source checkout). Never an uninstall concern.
+        extra_details: tuple[str, ...] = ()
+        if (result.status is OperationStatus.SUCCEEDED
+                and state.operation != OP_UNINSTALL):
+            built = self._build_desktop_bundle(emit)
+            if built:
+                extra_details = (f"Claude Desktop bundle: {built}",)
+
+        return self._outcome_from_result(state, result, extra_details=extra_details)
+
+    def _build_desktop_bundle(self, emit: EmitFn) -> str | None:
+        """Pack the versioned .mcpb into packages/claude-desktop/ when run from a
+        source checkout; return its path or None.
+
+        Dev-only: returns None (doing nothing) when the mcpb/ staging inputs are
+        absent. A build failure degrades to a warning -- it must never fail an
+        otherwise-successful install.
+        """
+        try:
+            written = build_mcpb(self._source_root, self._source_version)
+        except Exception as exc:  # noqa: BLE001 - a build hiccup must not fail the install
+            emit(StepEvent("warning",
+                           f"Could not build the Claude Desktop .mcpb bundle: {exc}"))
+            return None
+        if written is None:
+            return None
+        emit(StepEvent("action", f"Built Claude Desktop bundle: {written}"))
+        return str(written)
 
     def _dry_run(self, state: WizardState, emit: EmitFn) -> OperationOutcome:
         from .. import setup_cli  # private plan tables live here; same repo
@@ -275,7 +304,9 @@ class RealBackend:
             detail_lines=(f"Planned operation: {key}",),
         )
 
-    def _outcome_from_result(self, state: WizardState, result: Any) -> OperationOutcome:
+    def _outcome_from_result(
+        self, state: WizardState, result: Any, *, extra_details: tuple[str, ...] = ()
+    ) -> OperationOutcome:
         ok = result.status is OperationStatus.SUCCEEDED
         status = result.status.value
         op = result.operation.value
@@ -292,6 +323,7 @@ class RealBackend:
             if state.configure_ollama and op != OP_UNINSTALL:
                 details.append(
                     f"Ollama: fast={state.fast_model}, summary={state.summary_model}")
+            details.extend(extra_details)
             return OperationOutcome(
                 ok=True, status=status, title=f"{op.capitalize()} succeeded.",
                 detail_lines=tuple(details), next_command="neo-localmcp doctor",
