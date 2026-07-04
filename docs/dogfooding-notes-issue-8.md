@@ -157,3 +157,24 @@ minimalism convention warns against. Documenting the intended behavior in CLAUDE
 Known gaps + PROJECT_STATUS + PROJECT_NOTES so a future contributor doesn't "fix" it
 without knowing it's deliberate.
 
+
+---
+
+## Issues filed from this session
+
+Checked `gh issue list --state all --limit 50` first — no existing issue covered either
+gap (#9 is a benchmark harness, not retrieval quality). Filed two:
+
+- **#22** `fix(retrieval): lookup returns nothing for SQL table names / string-literal
+  identifiers` — `lookup "section_summaries"` returned zero results because the table
+  name lives in a `CREATE TABLE` string literal, not an extracted symbol; grep found the
+  8 decisive lines instantly. Suggests an FTS/substring fallback when the symbol index is
+  empty.
+- **#23** `fix(retrieval): context mis-weights code identifiers (summary_model,
+  section_summaries) as weak terms` — the parser marked the two load-bearing identifiers
+  as *weak* and prose connectives (`whether`, `them`, `swap`) as *strong*, so ranking
+  missed `repo_memory.py`/`tools.py` where the answer lived. Suggests treating
+  identifier-shaped tokens as strong by construction.
+
+Both are `type:fix` + `area:mcp-toolkit` + `area:retrieval`. Only filed things I actually
+hit this session, not speculation.
