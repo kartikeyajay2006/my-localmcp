@@ -8,3 +8,4 @@ build/
 .cache/
 .pytest_cache/
 .DS_Store
+.vscode/settings.json
