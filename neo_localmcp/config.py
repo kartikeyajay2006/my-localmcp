@@ -10,6 +10,14 @@ from .identity import IDENTITY
 
 APP_DIR = Path(os.environ.get("NEO_LOCALMCP_HOME", Path.home() / ".neo-localmcp")).expanduser()
 CONFIG_DIR = APP_DIR / "config"
+# The on-disk content is JSON (ensure_config/load_config/save_config below use
+# json.dumps/json.loads), not YAML -- the ".yaml" extension is legacy naming kept for
+# backward compatibility with existing installs. Hand-editing this file must use JSON
+# syntax (no comments, no YAML-only constructs); it will silently fail to parse otherwise.
+# See #31 -- renaming to .json or adding a real YAML parser were both considered and
+# rejected: the former ripples through the installer/migration/durable-data path
+# references and every real-lifecycle test, the latter adds this project's first
+# third-party dependency for a documentation-drift issue.
 CONFIG_PATH = Path(os.environ.get("NEO_LOCALMCP_CONFIG", CONFIG_DIR / "config.yaml")).expanduser()
 SQLITE_DIR = APP_DIR / "sqlite"
 DEFAULT_DB_PATH = SQLITE_DIR / "repo-context.sqlite"

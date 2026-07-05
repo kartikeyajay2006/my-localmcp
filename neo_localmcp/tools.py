@@ -383,8 +383,8 @@ def doctor(repo_root: str = "auto") -> str:
             "neo-localmcp does not generate source code or make engineering decisions.",
             "Claude/Codex reason and create exact patches.",
             "Context lookup is deterministic by default; Ollama ranking is opt-in with --ollama-rank or MCP use_ollama=true.",
+            "Run `neo-localmcp --help` for the full, authoritative command inventory.",
         ],
-        "commands": ["init", "where", "doctor", "status", "clients", "config clients setup", "config clients remove", "config clients status", "serve", "servers", "stop", "index", "reindex", "reset-repo", "reset-all", "test-determinism", "refresh", "lookup", "file", "context", "summarize", "apply-patch", "record-change", "model status"],
         "config": {"ollama_base_url": cfg.get("ollama", {}).get("base_url"), "summary_model": cfg.get("ollama", {}).get("summary_model"), "db_path": cfg.get("memory", {}).get("db_path")},
     }
     return json_out({"ok": True, **checks})
