@@ -213,6 +213,44 @@ def test_reindexing_unchanged_markdown_file_is_a_cheap_noop(tmp_path, isolated_c
     assert second["unchanged"] == first["indexed_files"]
 
 
+def test_overloaded_filename_term_does_not_outrank_multi_strong_term_file(tmp_path, isolated_config):
+    """Regression for #24: `installer/migration.py` (filesystem-layout migration)
+    was outranking `repo_memory.py` (SQL-schema migration) for a query that
+    unambiguously targets the SQL-schema sense, because the weak term "migration"
+    happens to be substring of the *filename*, and every symbol in that file was
+    getting counted as a separate "hit" for the term purely from the filename
+    being duplicated into each symbol's indexed text -- not because the term
+    actually related to each symbol. A file matching several strong terms
+    (init_db, TABLE, ALTER, COLUMN) must win over a file that only matches an
+    overloaded weak term via its filename."""
+    repo = tmp_path / "repo"
+    (repo / "installer").mkdir(parents=True)
+    (repo / "installer" / "migration.py").write_text(
+        "class MigrationAction:\n    pass\n\n"
+        "class MigrationConflict:\n    pass\n\n"
+        "class MigrationPlan:\n    pass\n\n"
+        "class MigrationResult:\n    pass\n\n"
+        "def _add_action():\n    pass\n\n"
+        "def apply_migration():\n    pass\n\n"
+        "def plan_migration():\n    pass\n",
+        encoding="utf-8",
+    )
+    (repo / "repo_memory.py").write_text(
+        "def init_db(conn):\n"
+        "    conn.execute('CREATE TABLE files (id INTEGER PRIMARY KEY)')\n"
+        "    conn.execute('ALTER TABLE files ADD COLUMN summary_model TEXT')\n"
+        "    INDEXER_VERSION = 3\n"
+        "    return INDEXER_VERSION\n",
+        encoding="utf-8",
+    )
+    raw = tools.prepare_context(
+        "schema evolution and migration in repo memory: init_db, CREATE TABLE, ALTER TABLE ADD COLUMN, INDEXER_VERSION",
+        str(repo), token_budget=1500, max_files=3, output_format="json",
+    )
+    result = json.loads(raw)
+    assert result["read_first"][0]["path"] == "repo_memory.py"
+
+
 def test_excerpt_centers_on_highest_weight_hint_not_first_by_line(tmp_path, isolated_config):
     """Regression: a file matched at multiple unrelated line numbers must center
     its excerpt on the hint tied to the actually-relevant (highest-weight, e.g.
