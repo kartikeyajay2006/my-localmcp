@@ -13,27 +13,19 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  verify:
-    name: ${{ matrix.os }} / Python 3.12
+  fast:
+    name: ${{ matrix.os }} / fast
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: macos-latest
-            lifecycle: tests/installer/test_macos_lifecycle.py
-          - os: windows-latest
-            lifecycle: tests/installer/test_windows_lifecycle.py
-
+        os: [macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
       - name: Detect non-docs changes
-        # Runs INSIDE the job (not a workflow-level paths-ignore) so the required
-        # check contexts still report success on docs-only PRs -- a skipped
-        # workflow never reports them and would wedge branch protection (#14).
-        # predicate-quantifier 'every' + all-negation patterns means: a changed
-        # file counts as "code" only if it matches NONE of the doc/meta globs, and
-        # the `code` output is true when at least one such file changed.
+        # See Phase 0: in-job filter keeps required checks reporting on docs-only
+        # PRs. Duplicated in the slow job because each job runs on a fresh runner;
+        # de-duping two jobs via a composite action is more machinery than warranted.
         uses: dorny/paths-filter@v3
         id: changes
         with:
@@ -55,12 +47,63 @@ jobs:
         if: github.event_name == 'push' || steps.changes.outputs.code == 'true'
         # -n auto parallelizes across the runner's CPU cores (~5x faster on
         # Windows). Only the fast suite is parallelized; the native-lifecycle
-        # tests below build real venvs and manipulate real process trees, so
-        # they stay serial to avoid cross-worker collisions.
+        # tests in the slow job build real venvs and manipulate real process
+        # trees, so they stay serial to avoid cross-worker collisions.
         run: python -m pytest -q -m "not slow" -n auto
-      - name: Native lifecycle
-        if: github.event_name == 'push' || steps.changes.outputs.code == 'true'
-        run: python -m pytest -q -m slow ${{ matrix.lifecycle }}
       - name: Compile
         if: github.event_name == 'push' || steps.changes.outputs.code == 'true'
         run: python -m compileall -q neo_localmcp setup.py
+
+  slow:
+    name: ${{ matrix.os }} / lifecycle
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            lifecycle: tests/installer/test_macos_lifecycle.py
+          - os: windows-latest
+            lifecycle: tests/installer/test_windows_lifecycle.py
+    steps:
+      - uses: actions/checkout@v4
+      - name: Detect non-docs changes
+        uses: dorny/paths-filter@v3
+        id: changes
+        with:
+          predicate-quantifier: 'every'
+          filters: |
+            code:
+              - '!**/*.md'
+              - '!LICENSE'
+              - '!.gitignore'
+              - '!.github/ISSUE_TEMPLATE/**'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install test dependencies
+        if: github.event_name == 'push' || steps.changes.outputs.code == 'true'
+        run: python -m pip install -e ".[test]"
+      - name: Native lifecycle
+        if: github.event_name == 'push' || steps.changes.outputs.code == 'true'
+        run: python -m pytest -q -m slow ${{ matrix.lifecycle }}
+
+  ci-gate:
+    # Single required status check. Aggregates the matrix jobs so branch
+    # protection never has to change when the job layout changes. `if: always()`
+    # makes it run even when a dependency fails (a failed `needs` would otherwise
+    # skip it, and a skipped required check does not satisfy protection).
+    name: ci-gate
+    needs: [fast, slow]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require fast and slow to have succeeded
+        run: |
+          echo "fast=${{ needs.fast.result }} slow=${{ needs.slow.result }}"
+          if [ "${{ needs.fast.result }}" != "success" ] || [ "${{ needs.slow.result }}" != "success" ]; then
+            echo "::error::A required CI job did not succeed (fast=${{ needs.fast.result }}, slow=${{ needs.slow.result }})."
+            exit 1
+          fi
+          echo "All required CI jobs succeeded."
