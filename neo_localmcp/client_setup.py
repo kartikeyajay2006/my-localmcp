@@ -132,6 +132,21 @@ def _strip_marked_block(old: str, start: str = "# BEGIN neo-localmcp", end: str 
     return ""
 
 
+def _detect_registered_scope(combined: str) -> str | None:
+    """Which scope `claude mcp get` reported the server registered under, if any.
+
+    Shared by setup_claude_code's migration path and remove_claude_code's removal
+    path -- both need to detect the same way (#33, finding 8.3).
+    """
+    if "scope: local" in combined:
+        return "local"
+    if "scope: user" in combined:
+        return "user"
+    if "scope: project" in combined:
+        return "project"
+    return None
+
+
 def _write_codex_config(
     path: Path,
     apply: bool,
@@ -144,6 +159,50 @@ def _write_codex_config(
         old, newline = _read_config_for_edit(path)
         _atomic_write_text(path, _replace_marked_block(old, block), newline)
     return {"config_path": str(path), "exists_after": path.exists(), "block": block}
+
+
+def _migrate_claude_code_registration(claude: str, launcher: str) -> list[str]:
+    """Register neo-localmcp under Claude Code's user scope, migrating away from any
+    other scope it might already be registered under.
+
+    Bounded retry (3): each iteration removes one stale-scope registration and
+    re-checks, so a registration under an unexpected scope still converges instead
+    of needing a second manual run. Extracted from setup_claude_code, which used to
+    inline this as one dense `for _ in range(3)` block with nested breaks (#33,
+    finding 8.2).
+    """
+    actions: list[str] = []
+    # User scope is best for repeatable Claude Code sessions. If the CLI is older and does not support
+    # --scope, fall back to the classic command.
+    cmd = [claude, "mcp", "add", "--scope", "user", IDENTITY.mcp_server_name, "--", launcher]
+    configured = False
+    existing = None
+    for _ in range(3):
+        existing = subprocess.run([claude, "mcp", "get", IDENTITY.mcp_server_name], stdin=subprocess.DEVNULL, capture_output=True, text=True, errors="replace", **hidden_subprocess_kwargs())
+        combined = f"{existing.stdout}\n{existing.stderr}".lower()
+        if existing.returncode != 0:
+            break
+        if launcher.lower() in combined and "scope: user" in combined:
+            actions.append("Claude Code user-scope registration already uses the stable launcher")
+            configured = True
+            break
+        existing_scope = _detect_registered_scope(combined)
+        if not existing_scope:
+            break
+        removed = subprocess.run([claude, "mcp", "remove", IDENTITY.mcp_server_name, "--scope", existing_scope], stdin=subprocess.DEVNULL, capture_output=True, text=True, errors="replace", **hidden_subprocess_kwargs())
+        actions.append(f"removed existing {existing_scope}-scope registration for migration: exit {removed.returncode}")
+        if removed.returncode != 0:
+            break
+    result = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True, errors="replace", **hidden_subprocess_kwargs()) if not configured else existing
+    if not configured and result.returncode != 0:
+        fallback = [claude, "mcp", "add", IDENTITY.mcp_server_name, "--", launcher]
+        result = subprocess.run(fallback, stdin=subprocess.DEVNULL, capture_output=True, text=True, errors="replace", **hidden_subprocess_kwargs())
+        actions.append(f"ran claude mcp add fallback: exit {result.returncode}")
+    elif not configured:
+        actions.append(f"ran claude mcp add --scope user: exit {result.returncode}")
+    if result.stderr.strip():
+        actions.append(result.stderr.strip()[:500])
+    return actions
 
 
 def setup_claude_code(
@@ -162,35 +221,7 @@ def setup_claude_code(
         actions.append(f"installed slash commands to {target}")
         claude = shutil.which("claude")
         if claude:
-            # User scope is best for repeatable Claude Code sessions. If the CLI is older and does not support
-            # --scope, fall back to the classic command.
-            cmd = [claude, "mcp", "add", "--scope", "user", IDENTITY.mcp_server_name, "--", launcher]
-            configured = False
-            for _ in range(3):
-                existing = subprocess.run([claude, "mcp", "get", IDENTITY.mcp_server_name], stdin=subprocess.DEVNULL, capture_output=True, text=True, errors="replace", **hidden_subprocess_kwargs())
-                combined = f"{existing.stdout}\n{existing.stderr}".lower()
-                if existing.returncode != 0:
-                    break
-                if launcher.lower() in combined and "scope: user" in combined:
-                    actions.append("Claude Code user-scope registration already uses the stable launcher")
-                    configured = True
-                    break
-                existing_scope = "local" if "scope: local" in combined else ("user" if "scope: user" in combined else ("project" if "scope: project" in combined else None))
-                if not existing_scope:
-                    break
-                removed = subprocess.run([claude, "mcp", "remove", IDENTITY.mcp_server_name, "--scope", existing_scope], stdin=subprocess.DEVNULL, capture_output=True, text=True, errors="replace", **hidden_subprocess_kwargs())
-                actions.append(f"removed existing {existing_scope}-scope registration for migration: exit {removed.returncode}")
-                if removed.returncode != 0:
-                    break
-            result = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True, errors="replace", **hidden_subprocess_kwargs()) if not configured else existing
-            if not configured and result.returncode != 0:
-                fallback = [claude, "mcp", "add", IDENTITY.mcp_server_name, "--", launcher]
-                result = subprocess.run(fallback, stdin=subprocess.DEVNULL, capture_output=True, text=True, errors="replace", **hidden_subprocess_kwargs())
-                actions.append(f"ran claude mcp add fallback: exit {result.returncode}")
-            elif not configured:
-                actions.append(f"ran claude mcp add --scope user: exit {result.returncode}")
-            if result.stderr.strip():
-                actions.append(result.stderr.strip()[:500])
+            actions.extend(_migrate_claude_code_registration(claude, launcher))
         else:
             actions.append("claude CLI not found; slash commands were still installed")
     return {
@@ -295,7 +326,7 @@ def remove_claude_code(apply: bool = True) -> dict[str, Any]:
             combined = f"{existing.stdout}\n{existing.stderr}".lower()
             scope = None
             if existing.returncode == 0:
-                scope = "local" if "scope: local" in combined else ("user" if "scope: user" in combined else ("project" if "scope: project" in combined else None))
+                scope = _detect_registered_scope(combined)
             if scope:
                 removed = subprocess.run(
                     [claude, "mcp", "remove", IDENTITY.mcp_server_name, "--scope", scope],
@@ -338,21 +369,31 @@ def remove_codex(apply: bool = True) -> dict[str, Any]:
     path = _codex_cli_config_path()
     existed = path.exists()
     block_present = existed and "# BEGIN neo-localmcp" in path.read_text(encoding="utf-8")
+    # block_present_after and ok are derived from `new` (already in memory from the
+    # write below), not a fresh disk read -- the post-write content is exactly what
+    # was just written, so re-reading the file twice more to ask the same question
+    # was redundant disk I/O, not a distinct check (#33).
+    empty_after = False
     if apply and block_present:
         old, newline = _read_config_for_edit(path)
         new = _strip_marked_block(old)
         _atomic_write_text(path, new, newline)
+        block_present_after = "# BEGIN neo-localmcp" in new
         empty_after = new.strip() == ""
+        ok = not block_present_after
     else:
-        empty_after = False
+        # Nothing was attempted (dry run, or there was no block to remove), so the
+        # file is unchanged and there is nothing to fail.
+        block_present_after = block_present
+        ok = True
     return {
         "client": "codex",
-        "ok": not (apply and block_present and (path.exists() and "# BEGIN neo-localmcp" in path.read_text(encoding="utf-8"))),
+        "ok": ok,
         "applied": apply,
         "config_path": str(path),
         "config_existed": existed,
         "block_present": block_present,
-        "block_present_after": path.exists() and "# BEGIN neo-localmcp" in path.read_text(encoding="utf-8") if path.exists() else False,
+        "block_present_after": block_present_after,
         "config_empty_after": empty_after,
     }
 
