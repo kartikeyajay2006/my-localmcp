@@ -1,5 +1,9 @@
 # Project Notes
 
+## 2026-07-05
+
+- **Real MCP stdio CI test isolated from xdist (issue #50).** `tests/test_distribution.py::test_repo_tools_respond_over_real_stdio` keeps its real server subprocess, three tool calls, and 5-second per-call timeout, but now carries a registered `serial` marker. The fast CI job runs the remaining non-slow suite under `-n auto`, then runs the serial subset without xdist. This addresses the observed Windows `anyio.BrokenResourceError` startup-starvation flake without hiding it behind a longer timeout or moving it onto the lifecycle critical path. A structural regression test locks together the marker registration, test decorator, and both workflow selections. Locally verified with 10/10 isolated stdio runs, both complete fast-suite partitions, and compileall.
+
 ## 2026-07-04 (6)
 
 - **CI Phase 2 (offline wheelhouse) — measured win on the Windows critical path.** The `slow`/lifecycle job now prebuilds a wheelhouse (`pip download pip setuptools wheel mcp[cli] psutil`, ~4s with warm `cache: pip`) and runs the lifecycle tests with `PIP_NO_INDEX=1` + `PIP_FIND_LINKS=${{ runner.temp }}/wheelhouse`, so their ~6 in-test `venv`+`pip install-from-source` cycles resolve offline. Zero production change — `runtime.py`'s `subprocess.run` sets no `env=` and the lifecycle `_setup` helper spreads `**os.environ`, so the installer subprocesses inherit the vars. **Measured (PR #49 vs baseline run 28724512399): Windows `Native lifecycle` step 4m47s → 3m41s (~23% faster); Windows lifecycle job 5m29s → 4m29s (~1 min off the commit→merge critical path).** macOS lifecycle unchanged (~53s — macOS pip was never the bottleneck). Locally validated first: 41 wheels, no sdists, offline source-install + pip-self-upgrade succeed.

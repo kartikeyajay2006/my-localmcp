@@ -33,6 +33,7 @@ neo-localmcp-server = "neo_localmcp.server:main"
 [tool.pytest.ini_options]
 markers = [
   "slow: real runtime/lifecycle integration tests",
+  "serial: subprocess integration tests that must not run under xdist",
 ]
 
 [tool.setuptools.packages.find]
