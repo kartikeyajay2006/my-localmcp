@@ -27,6 +27,19 @@ def test_colon_focus_filters_filler_and_keeps_short_milestone():
     assert "architecture" not in result["strong_terms"]
 
 
+def test_snake_case_identifier_is_a_strong_term_not_weak():
+    """Regression for #23: a snake_case identifier like `summary_model` or
+    `section_summaries` is a real code/schema identifier -- a far stronger
+    retrieval signal than plain prose -- and must be classified as strong
+    regardless of where in the query it appears, not demoted to weak just
+    because it lacks CamelCase/dots/slashes."""
+    result = normalize_query("summary_model tagging on section_summaries and files")
+    assert "summary_model" in result["strong_terms"]
+    assert "section_summaries" in result["strong_terms"]
+    assert "summary_model" not in result["weak_terms"]
+    assert "section_summaries" not in result["weak_terms"]
+
+
 def test_explicit_document_path_outranks_keyword_noise(tmp_path, isolated_config):
     repo = tmp_path / "repo"
     (repo / "docs").mkdir(parents=True)
