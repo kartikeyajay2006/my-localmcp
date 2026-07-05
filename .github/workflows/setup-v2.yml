@@ -2,7 +2,15 @@ name: setup-v2 macOS and Windows
 
 on:
   push:
+    branches: [main]
   pull_request:
+
+concurrency:
+  # One in-flight run per ref. A same-repo PR branch now runs the matrix once
+  # (pull_request) instead of twice (push + pull_request); pushing a new commit
+  # to a PR cancels the prior run. main still gets a post-merge run via push.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   verify:
