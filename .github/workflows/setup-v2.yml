@@ -48,8 +48,12 @@ jobs:
         # -n auto parallelizes across the runner's CPU cores (~5x faster on
         # Windows). Only the fast suite is parallelized; the native-lifecycle
         # tests in the slow job build real venvs and manipulate real process
-        # trees, so they stay serial to avoid cross-worker collisions.
-        run: python -m pytest -q -m "not slow" -n auto
+        # trees, so they stay serial to avoid cross-worker collisions. The real
+        # stdio subprocess test also runs serially: it has flaked when a loaded
+        # Windows runner starved its server process behind the xdist worker pool.
+        run: |
+          python -m pytest -q -m "not slow and not serial" -n auto
+          python -m pytest -q -m "serial and not slow"
       - name: Compile
         if: github.event_name == 'push' || steps.changes.outputs.code == 'true'
         run: python -m compileall -q neo_localmcp setup.py

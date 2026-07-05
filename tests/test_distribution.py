@@ -11,6 +11,7 @@ from pathlib import Path
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+import pytest
 
 from neo_localmcp import client_setup
 from neo_localmcp import context_worker
@@ -60,6 +61,7 @@ async def _tool_names() -> set[str]:
     return {tool.name for tool in await mcp.list_tools()}
 
 
+@pytest.mark.serial
 def test_repo_tools_respond_over_real_stdio(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
