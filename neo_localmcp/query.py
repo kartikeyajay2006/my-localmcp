@@ -48,6 +48,10 @@ def _is_symbol_like(token: str) -> bool:
         re.search(r"[A-Z][a-z0-9]+[A-Z_]", token)
         or re.search(r"[A-Za-z_][A-Za-z0-9_]*Async\b", token)
         or re.fullmatch(r"[A-Za-z]\d+(?:\.\d+)*", token)
+        # snake_case (e.g. summary_model, section_summaries): an underscore joining
+        # two word chars is almost never natural English, so treat it as a code/schema
+        # identifier -- a high-precision retrieval signal -- regardless of case (#23).
+        or re.search(r"[A-Za-z0-9]_[A-Za-z0-9]", token)
         or "." in token
         or "/" in token
         or "\\" in token

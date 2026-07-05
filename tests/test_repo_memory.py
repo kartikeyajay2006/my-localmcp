@@ -94,3 +94,27 @@ def test_file_excerpts_clamps_stale_line_hint_to_eof(tmp_path, isolated_config):
     assert excerpt["start_line"] == 2
     assert excerpt["end_line"] == 2
     assert excerpt["text"] == "2: two"
+
+
+def test_lookup_finds_sql_table_name_that_is_not_a_def_or_class(tmp_path, isolated_config):
+    """Regression for #22: a SQL table name (or any string-literal identifier)
+    embedded in a CREATE TABLE statement is never a `def`/`class` symbol, so
+    extract_symbols never sees it. lookup must still find it via full file
+    content, the same way a plain grep would, instead of only ever matching
+    the narrow class/function symbol patterns."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "storage.py").write_text(
+        "def init_db(conn):\n"
+        "    conn.execute(\n"
+        "        \"\"\"\n"
+        "        CREATE TABLE IF NOT EXISTS section_summaries (\n"
+        "            id INTEGER PRIMARY KEY\n"
+        "        )\n"
+        "        \"\"\"\n"
+        "    )\n",
+        encoding="utf-8",
+    )
+    repo_memory.index_repo(repo)
+    result = repo_memory.lookup("section_summaries", repo)
+    assert result["hits"], "expected a full-text hit for a table name that never appears as a def/class symbol"
