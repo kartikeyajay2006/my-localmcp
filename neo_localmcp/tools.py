@@ -526,10 +526,10 @@ def _line_hint_from_reason(reason: str) -> str | None:
     return None
 
 
-def _add_candidate(candidates: dict[str, dict[str, Any]], path: str, reason: str, score: int, intent: str, *, line_hint: str | None = None, allow_reason_line_hint: bool = True) -> None:
+def _add_candidate(candidates: dict[str, dict[str, Any]], path: str, reason: str, score: int, intent: str, *, line_hint: str | None = None, allow_reason_line_hint: bool = True, strong_term: str | None = None) -> None:
     category = classify_path(path)
     if path not in candidates:
-        candidates[path] = {"path": path, "category": category, "score": category_boost(category, intent), "reasons": [], "line_hints": [], "line_hint_weights": {}}
+        candidates[path] = {"path": path, "category": category, "score": category_boost(category, intent), "reasons": [], "line_hints": [], "line_hint_weights": {}, "strong_terms_matched": set()}
     item = candidates[path]
     # Score each unique evidence reason once. This prevents duplicate FTS/search rows or repeated refreshes
     # from changing deterministic scores across identical runs.
@@ -537,6 +537,8 @@ def _add_candidate(candidates: dict[str, dict[str, Any]], path: str, reason: str
     if is_new_reason:
         item["reasons"].append(reason)
         item["score"] += score
+    if strong_term:
+        item["strong_terms_matched"].add(strong_term)
     hint = line_hint if line_hint is not None else (_line_hint_from_reason(reason) if allow_reason_line_hint else None)
     if hint:
         if hint not in item["line_hints"]:
@@ -660,8 +662,10 @@ def context_prepare(task: str, repo_root: str = "auto", max_files: int | None = 
     symbol_hits: list[dict[str, Any]] = []
     followed_references: list[dict[str, Any]] = []
     intent = interpreted.get("intent", "context")
+    strong_terms_set = set(interpreted.get("strong_terms") or [])
 
     for term in terms[:20]:
+        term_if_strong = term if term in strong_terms_set else None
         lookup_data = repo_memory.lookup(term, root, limit=limit * 3)
         for hit in lookup_data.get("hits", []):
             target = str(hit.get("target", ""))
@@ -672,7 +676,7 @@ def context_prepare(task: str, repo_root: str = "auto", max_files: int | None = 
                     # A query token embedded in a filename is much stronger evidence
                     # than repeated prose/reference matches elsewhere in the repo.
                     score += _term_score(term, interpreted, 80, 15)
-                _add_candidate(candidates, path, f"index hit for '{term}': {target}", score, intent)
+                _add_candidate(candidates, path, f"index hit for '{term}': {target}", score, intent, strong_term=term_if_strong)
         for sym in lookup_data.get("symbols", []):
             symbol_hits.append(sym)
             path = sym.get("file_path")
@@ -680,9 +684,9 @@ def context_prepare(task: str, repo_root: str = "auto", max_files: int | None = 
                 continue
             if sym.get("kind") == "heading":
                 score, label = _heading_match_score(term, sym, interpreted)
-                _add_candidate(candidates, path, f"heading '{sym.get('name')}' line {sym.get('start_line')}{label}", score, intent)
+                _add_candidate(candidates, path, f"heading '{sym.get('name')}' line {sym.get('start_line')}{label}", score, intent, strong_term=term_if_strong)
             else:
-                _add_candidate(candidates, path, f"symbol '{sym.get('name')}' line {sym.get('start_line')}", _term_score(term, interpreted, 16, 10), intent)
+                _add_candidate(candidates, path, f"symbol '{sym.get('name')}' line {sym.get('start_line')}", _term_score(term, interpreted, 16, 10), intent, strong_term=term_if_strong)
     batch_terms = terms[:20]
     if batch_terms:
         batch_pattern = "(?:" + "|".join(re.escape(term) for term in batch_terms) + ")"
@@ -697,7 +701,7 @@ def context_prepare(task: str, repo_root: str = "auto", max_files: int | None = 
             matched = [term for term in batch_terms if term.lower() in haystack]
             term = matched[0] if matched else batch_terms[0]
             weight = _term_score(term, interpreted, 8, 4)
-            _add_candidate(candidates, path, f"search term '{term}'", weight, intent, line_hint=f"around line {row.get('line')}")
+            _add_candidate(candidates, path, f"search term '{term}'", weight, intent, line_hint=f"around line {row.get('line')}", strong_term=term if term in strong_terms_set else None)
             if classify_path(path) in {"docs", "status", "instructions"}:
                 for ref in extract_file_references(row.get("text", "")):
                     for resolved in _resolve_reference(ref, indexed_files):
@@ -714,7 +718,18 @@ def context_prepare(task: str, repo_root: str = "auto", max_files: int | None = 
     for term in terms:
         for resolved in _resolve_reference(term, indexed_files):
             explicit_paths.add(resolved)
-            _add_candidate(candidates, resolved, f"direct file reference '{term}'", 120, intent, allow_reason_line_hint=False)
+            _add_candidate(candidates, resolved, f"direct file reference '{term}'", 120, intent, allow_reason_line_hint=False, strong_term=term if term in strong_terms_set else None)
+
+    # Distinct-strong-term-coverage bonus (#24): a file that co-occurs with several
+    # *different* strong terms is much stronger evidence of relevance than a file
+    # that racks up many repeated hits on a single overloaded term (e.g. "migration"
+    # matching every symbol in a filesystem-layout-migration module by coincidence of
+    # vocabulary). Applied once per candidate, after all term-matching passes above,
+    # so it reflects breadth of query coverage rather than depth of one term's hits.
+    for item in candidates.values():
+        matched = item.pop("strong_terms_matched", None) or set()
+        if len(matched) > 1:
+            item["score"] += 20 * len(matched)
 
     for resolved in sorted(explicit_paths):
         _add_candidate(candidates, resolved, "explicit path in task", 120, intent, allow_reason_line_hint=False)
