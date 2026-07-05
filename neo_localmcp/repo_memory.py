@@ -8,7 +8,7 @@ from typing import Any
 
 from .config import db_path, load_config
 
-INDEXER_VERSION = "1.1.0"
+INDEXER_VERSION = "1.2.0"
 from .utils import extract_symbols, git_info, language_for_path, read_text_file, rel, repo_id, repo_root_or_cwd, safe_path, scan_repo_files, sha256_file, simple_terms
 
 # Retrieval-memory tuning (1.0.6, P4). Kept intentionally conservative: structural
@@ -36,6 +36,17 @@ def connect() -> sqlite3.Connection:
 
 
 def init_db(conn: sqlite3.Connection) -> None:
+    # Migration (#24): repo_fts used to index repo_id/kind/target as searchable text
+    # alongside body. Since target embeds the file path (e.g. "installer/migration.py:
+    # MigrationAction"), an unqualified MATCH query for an overloaded word that happens
+    # to be a filename substring (e.g. "migration") matched every symbol row in that
+    # file via target, not because body actually related to each symbol -- inflating
+    # scores in proportion to a file's symbol count. Rebuilding with repo_id/kind/target
+    # UNINDEXED restricts MATCH to body only; they remain usable in plain WHERE filters.
+    # Existing repos repopulate repo_fts automatically via the INDEXER_VERSION bump below.
+    row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='repo_fts'").fetchone()
+    if row and row[0] and "UNINDEXED" not in row[0]:
+        conn.execute("DROP TABLE repo_fts")
     conn.executescript(
         """
         PRAGMA journal_mode=WAL;
@@ -127,7 +138,7 @@ def init_db(conn: sqlite3.Connection) -> None:
             created_at TEXT NOT NULL,
             UNIQUE(repo_id, file_path, heading_name)
         );
-        CREATE VIRTUAL TABLE IF NOT EXISTS repo_fts USING fts5(repo_id, kind, target, body);
+        CREATE VIRTUAL TABLE IF NOT EXISTS repo_fts USING fts5(repo_id UNINDEXED, kind UNINDEXED, target UNINDEXED, body);
         """
     )
     existing_columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(files)").fetchall()}
@@ -242,9 +253,19 @@ def index_file(conn: sqlite3.Connection, root: Path, path: Path, rid: str | None
             """,
             (rid, relative, sym["kind"], sym["name"], sym.get("signature"), sym.get("start_line"), sym.get("end_line"), ts),
         )
-    conn.execute("INSERT INTO repo_fts(repo_id, kind, target, body) VALUES(?, 'file', ?, ?)", (rid, relative, f"{relative} {lang}"))
+    # Body includes the actual file content (already bounded by the read above), not
+    # just path+language, so a term that only ever appears as a string literal / SQL
+    # identifier / config key -- never as a def/class symbol name -- is still findable
+    # the same way a plain grep would find it (#22).
+    conn.execute("INSERT INTO repo_fts(repo_id, kind, target, body) VALUES(?, 'file', ?, ?)", (rid, relative, f"{relative} {lang}\n{text}"))
     for sym in symbols[:120]:
-        conn.execute("INSERT INTO repo_fts(repo_id, kind, target, body) VALUES(?, 'symbol', ?, ?)", (rid, f"{relative}:{sym['name']}", f"{sym['kind']} {sym['name']} {sym.get('signature','')} {relative}"))
+        # Body deliberately excludes `relative`: appending the file path here made an
+        # overloaded filename token (e.g. "migration" in installer/migration.py) match
+        # every symbol in the file as a separate "hit", one per symbol, regardless of
+        # whether the term had anything to do with that symbol -- inflating the file's
+        # score in proportion to its symbol count instead of real relevance (#24).
+        # Path-token matching already happens once per file via the 'file' kind row above.
+        conn.execute("INSERT INTO repo_fts(repo_id, kind, target, body) VALUES(?, 'symbol', ?, ?)", (rid, f"{relative}:{sym['name']}", f"{sym['kind']} {sym['name']} {sym.get('signature','')}"))
     conn.commit()
     return {"path": relative, "changed": True, "indexed": True, "symbols": len(symbols)}
 
