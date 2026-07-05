@@ -4,21 +4,6 @@ import re
 from pathlib import Path
 from typing import Any
 
-FILLER_WORDS = {
-    "a", "an", "and", "are", "as", "at", "be", "but", "by", "can", "could", "do", "does", "doing",
-    "explain", "find", "files", "file", "flow", "for", "from", "give", "help", "how", "identify",
-    "in", "into", "is", "it", "likely", "list", "locate", "me", "need", "of", "on", "or", "please",
-    "read", "show", "tell", "that", "the", "these", "this", "to", "use", "what", "when", "where", "which",
-    "why", "with", "we", "were", "we're", "you", "your", "repo", "repository", "project", "codebase",
-    # Intent words should set intent, not become grep terms.
-    "debug", "bug", "fix", "crash", "crashes", "error", "exception", "fail", "failing", "broken", "regression",
-    "diagnose", "issue", "problem", "trace", "add", "build", "create", "implement", "feature", "support", "new",
-    "extend", "refactor", "cleanup", "simplify", "rename", "split", "move", "rework", "test", "tests",
-    "coverage", "assert", "spec", "unit", "integration", "overview", "understand", "summarize", "describe", "architecture", "map",
-    # Planning nouns describe the requested answer shape, not repository entities.
-    "goal", "goals", "decision", "decisions", "implementation", "phase", "phases", "constraint", "constraints", "breakdown", "entry-point",
-}
-
 INTENT_KEYWORDS: list[tuple[str, set[str]]] = [
     ("debug", {"debug", "bug", "fix", "crash", "crashes", "error", "exception", "fail", "failing", "broken", "regression", "diagnose", "issue", "problem", "trace"}),
     ("feature", {"add", "build", "create", "implement", "feature", "support", "new", "extend"}),
@@ -26,6 +11,23 @@ INTENT_KEYWORDS: list[tuple[str, set[str]]] = [
     ("test", {"test", "tests", "coverage", "assert", "spec", "unit", "integration"}),
     ("explain", {"explain", "overview", "understand", "summarize", "describe", "architecture", "flow", "map"}),
 ]
+
+# Words with no intent-classifying role, just prose noise to strip from search terms.
+_PURE_FILLER_WORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "but", "by", "can", "could", "do", "does", "doing",
+    "find", "files", "file", "for", "from", "give", "help", "how", "identify",
+    "in", "into", "is", "it", "likely", "list", "locate", "me", "need", "of", "on", "or", "please",
+    "read", "show", "tell", "that", "the", "these", "this", "to", "use", "what", "when", "where", "which",
+    "why", "with", "we", "were", "we're", "you", "your", "repo", "repository", "project", "codebase",
+}
+# Planning nouns describe the requested answer shape, not repository entities.
+_PLANNING_NOUN_FILLER_WORDS = {
+    "goal", "goals", "decision", "decisions", "implementation", "phase", "phases", "constraint", "constraints", "breakdown", "entry-point",
+}
+# Every intent keyword must also be filler: intent words should set intent, not become
+# grep terms. Derived (not hand-synced) so a new intent keyword can't silently become a
+# weak-weighted search term just because someone forgot to also add it above (#35).
+FILLER_WORDS = _PURE_FILLER_WORDS | _PLANNING_NOUN_FILLER_WORDS | {word for _, words in INTENT_KEYWORDS for word in words}
 
 SOURCE_EXTS = {".cs", ".xaml", ".py", ".ts", ".tsx", ".js", ".jsx", ".vue", ".svelte", ".go", ".rs", ".java", ".kt", ".kts", ".swift", ".rb", ".php", ".sql", ".html", ".css", ".scss"}
 DOC_EXTS = {".md", ".rst", ".txt", ".adoc"}
