@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 
 from neo_localmcp import tools
-from neo_localmcp.query import normalize_query
+from neo_localmcp.query import INTENT_KEYWORDS, FILLER_WORDS, normalize_query
 from neo_localmcp.utils import extract_markdown_headings
 
 
@@ -38,6 +38,14 @@ def test_snake_case_identifier_is_a_strong_term_not_weak():
     assert "section_summaries" in result["strong_terms"]
     assert "summary_model" not in result["weak_terms"]
     assert "section_summaries" not in result["weak_terms"]
+
+
+def test_every_intent_keyword_is_also_filler():
+    """Regression for #35: FILLER_WORDS is derived from INTENT_KEYWORDS so the two
+    can't drift apart -- an intent word (e.g. a new one added to INTENT_KEYWORDS
+    later) must always also be filler, never a grep search term in its own right."""
+    for _, words in INTENT_KEYWORDS:
+        assert words <= FILLER_WORDS
 
 
 def test_explicit_document_path_outranks_keyword_noise(tmp_path, isolated_config):
