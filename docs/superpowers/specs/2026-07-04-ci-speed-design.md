@@ -138,20 +138,31 @@ Phase 4 if it dominates).
 
 ### Phase 3 — Session-scoped prebuilt-index fixture for the fast suite
 
-Remove the ~20s of repeated real indexing in `test_retrieval_memory.py` /
-`test_context.py`.
+**Outcome (2026-07-05): premise invalidated by closer reading; not implemented.**
+The original mechanism assumed one large shared corpus being rebuilt
+repeatedly. Reading the actual test bodies (`_seed_repo` helpers in
+`test_retrieval_memory.py` and siblings) shows each test builds its **own
+small, test-specific repo** with content unique to that test — there is no
+common corpus to share. A session-scoped shared-DB-copy fixture would either
+be a no-op or, worse, leak one test's seeded content into another that expects
+different data — a correctness risk for an unproven win. Retrieval-file
+aggregate cost (30.83s across `test_retrieval_memory.py` + `test_context.py` +
+`test_repo_memory.py` + `test_markdown_headings.py` + `test_schema_migration.py`,
+measured 2026-07-05) is real but is dominated by per-test fixture/DB-creation
+overhead and intentional in-test repetition loops, not a shareable rebuild.
+Deliberately not pursued; a correct fix (e.g. caching only the empty SQLite
+*schema* template, still indexing real per-test content) is a separate,
+narrower idea not designed here.
 
-**Mechanism:** build the indexed corpus **once** in a session-scoped fixture
-(one repo + one SQLite index). Each test copies the prebuilt SQLite index file
-into its isolated `APP_DIR` (cheap file copy) instead of rebuilding it. This
-preserves the existing per-test isolation — retrieval-memory boost state is
-per-DB and stays separate because each test still gets its own copied DB — while
-amortizing the index build.
-
-**Risk:** medium. Requires care that (a) tests mutating the DB do so on their own
-copy, (b) retrieval-memory accumulation tests still start from the intended
-state, (c) determinism assertions still hold. Validate by running the affected
-files repeatedly and diffing outputs against the current suite before/after.
+**Separately discovered, unrelated to the above (spun off, not fixed here):**
+`tests/installer/test_verification.py`'s `_base_kwargs()` never injects
+`ollama_status_fn`, so ~14 tests call the **real** `ollama_client.status()` —
+a live network probe against whatever `~/.neo-localmcp/config.yaml` exists on
+the running machine. Confirmed live: a single such test takes 3.08s in
+isolation (config.py's `connect_timeout_seconds=3` against an unreachable
+default host); ~11-14 of these account for roughly a third of the fast suite's
+serial runtime. This is a test-isolation bug, not a Phase 3 concern — tracked
+as its own fix, out of scope here per this repo's one-fix-per-PR convention.
 
 **Reliability note (observed on PR #42, 2026-07-04):**
 `tests/test_distribution.py::test_repo_tools_respond_over_real_stdio` spawns a
@@ -176,6 +187,21 @@ outcome. CLAUDE.md documents these as deliberately real-build, serial, and
 coverage-critical; do not weaken them without a measured payoff.
 
 **Risk:** coverage-sensitive. Highest-scrutiny phase; gated on measurement.
+
+**Outcome (2026-07-05): measured, deliberately skipped.** Re-measured on `main`
+post Phase 2 + the stdio-isolation fix (#51): Windows `Native lifecycle` still
+the dominant cost at 4m29s (run 28753119082), confirming the slow suite
+remains the critical path. However, each of `test_full_windows_lifecycle_via_setup`'s
+~6 install/reinstall cycles was already confirmed (during Phase 2 planning) to
+assert a **distinct** invariant not covered elsewhere: live-process kill on
+reinstall, unrelated-process survival, cancellation refusal, broken-venv
+recovery, interrupted-metadata recovery, and clean-vs-preserved-data handling.
+Cutting any would trade real coverage for marginal time savings, which
+CLAUDE.md explicitly warns against absent a concrete correctness problem to
+point at. Phase 2 already captured the safe, environment-level win (the actual
+cost these cycles used to pay for network pip resolution); the residual cost
+is now genuine per-cycle test work, not waste. Skipping per the spec's own
+"valid outcome" allowance.
 
 ## Non-goals / deferred
 
@@ -217,9 +243,9 @@ Both PRs follow repo convention: `type(area): description` titles, matching
 
 | Milestone | Fast suite (CI) | Slow suite (CI) | Total per-OS wall-clock | Notes |
 |---|---|---|---|---|
-| Baseline | TBD (measure on CI) | TBD | TBD | local: fast 39.0s serial / 11.6s `-n auto` |
-| After Phase 0 | — | — | — | docs/meta PRs only |
-| After Phase 1 | | | | |
-| After Phase 2 | | | | |
-| After Phase 3 | | | | |
-| After Phase 4 | | | | |
+| Baseline | — | Windows lifecycle job 5m29s, `Native lifecycle` step 4m47s (run 28724512399) | fast+slow sequential per OS | local: fast 39.0s serial / 11.6s `-n auto` |
+| After Phase 0 | — | — | — | docs/meta PRs green in ~12s; verified skip-path + run-path live |
+| After Phase 1 | Windows `fast` job ~2m39-3m2s | Windows `lifecycle` job ~4m29-5m42s | `max(fast,slow)` per OS, jobs run in parallel | `ci-gate` proven green-on-pass and red-on-injected-failure (PR #45) |
+| After Phase 2 | unchanged | Windows `Native lifecycle` step 4m47s → 3m41s (~23%); job 5m29s → ~4m29s | ~1 min off Windows critical path | zero source change; offline wheelhouse, PR #49 |
+| After Phase 3 | fast suite serial ~86s (test_verification.py's live-Ollama-call bug now the largest single item, ~33s — spun off separately); retrieval files 30.83s | stdio flake fixed (issue #50/PR #51): `test_repo_tools_respond_over_real_stdio` isolated from xdist via a `serial` marker, no longer races the worker pool | — | index-fixture premise invalidated (see Phase 3 outcome); not implemented |
+| After Phase 4 | — | Windows `Native lifecycle` confirmed still 4m29s dominant (run 28753119082); deliberately not trimmed | — | measured, coverage-sensitive trim skipped per spec's own allowance |
