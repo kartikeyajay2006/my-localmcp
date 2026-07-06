@@ -258,3 +258,67 @@ def test_verify_registrations_detects_stale_codex_launcher(client_home, tmp_path
 
     checks_ok = {c.client: c for c in clients.verify_registrations(paths, expected_server_command=old_launcher)}
     assert checks_ok["codex"].ok is True
+
+
+# --------------------------------------------------------------------------- #
+# apply_client_selection
+# --------------------------------------------------------------------------- #
+
+
+def test_apply_client_selection_connects_and_disconnects(client_home, tmp_path, monkeypatch):
+    from neo_localmcp.installer import clients
+
+    paths = ManagedPaths.from_environment()
+    clients.record_selection(paths, ["claude-code"])
+
+    calls = []
+    monkeypatch.setattr(
+        clients.client_setup, "setup_client",
+        lambda client, apply=True, **kw: calls.append(("setup", client)) or {"client": client, "ok": True},
+    )
+    monkeypatch.setattr(
+        clients.client_setup, "remove_client",
+        lambda client, apply=True, **kw: calls.append(("remove", client)) or {"client": client, "ok": True},
+    )
+
+    events = []
+    outcome = clients.apply_client_selection(
+        paths, ["codex"], server_command="neo-localmcp-server",
+        on_event=lambda level, message: events.append((level, message)),
+    )
+
+    assert outcome.ok
+    assert outcome.added == ("codex",)
+    assert outcome.removed == ("claude-code",)
+    assert ("setup", "codex") in calls
+    assert ("remove", "claude-code") in calls
+    assert any(level == "action" for level, _ in events)
+
+
+def test_apply_client_selection_records_failures_without_raising(client_home, tmp_path, monkeypatch):
+    from neo_localmcp.installer import clients
+
+    paths = ManagedPaths.from_environment()
+
+    def _boom(client, apply=True, **kw):
+        raise RuntimeError("simulated failure")
+
+    monkeypatch.setattr(clients.client_setup, "setup_client", _boom)
+
+    outcome = clients.apply_client_selection(paths, ["claude-code"], server_command="neo-localmcp-server")
+
+    assert not outcome.ok
+    assert "claude-code" in outcome.failures[0]
+
+
+def test_apply_client_selection_with_no_changes_still_records_target(client_home, tmp_path, monkeypatch):
+    from neo_localmcp.installer import clients
+
+    paths = ManagedPaths.from_environment()
+    clients.record_selection(paths, ["claude-code"])
+
+    outcome = clients.apply_client_selection(paths, ["claude-code"], server_command="neo-localmcp-server")
+
+    assert outcome.ok
+    assert outcome.added == ()
+    assert outcome.removed == ()

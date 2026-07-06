@@ -50,6 +50,8 @@ from .ollama import (
     unload_neo_models,
 )
 from .clients import (
+    apply_client_selection,
+    ClientChangeOutcome,
     ClientRegistrationRecord,
     RegistrationCheck,
     delete_registrations,
@@ -102,6 +104,7 @@ from .runtime import (
 __all__ = [
     "PYTHON_FLOOR",
     "CandidateRuntime",
+    "ClientChangeOutcome",
     "ClientRegistrationRecord",
     "CommandResult",
     "DetectedState",
@@ -157,6 +160,7 @@ __all__ = [
     "ShutdownResult",
     "UnsafeManagedRoot",
     "begin_operation",
+    "apply_client_selection",
     "apply_migration",
     "complete_operation",
     "confirm_full_wipe",
