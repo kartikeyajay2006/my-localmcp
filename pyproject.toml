@@ -34,6 +34,8 @@ neo-localmcp-server = "neo_localmcp.server:main"
 markers = [
   "slow: real runtime/lifecycle integration tests",
   "serial: subprocess integration tests that must not run under xdist",
+  "retrieval: repo_memory.py/query.py/ranking/schema-migration/context tests (area:retrieval)",
+  "ollama: ollama_client.py tests (area:ollama)",
 ]
 
 [tool.setuptools.packages.find]
