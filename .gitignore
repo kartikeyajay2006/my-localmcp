@@ -11,3 +11,4 @@ build/
 .vscode/settings.json
 .wizard_preview/
 .coverage
+.superpowers/
