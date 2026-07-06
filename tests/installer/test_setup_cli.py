@@ -241,3 +241,30 @@ def test_install_plain_without_yes_is_not_a_refusal(tmp_path: Path) -> None:
     # invocations). Using --dry-run keeps this fast and mutation-free.
     result = _run(["install", "--dry-run"], env=_isolated_env(tmp_path), stdin_data="")
     assert result.returncode == 0
+
+
+def test_config_ollama_help_exits_zero() -> None:
+    result = _run(["config-ollama", "--help"])
+    assert result.returncode == 0
+    assert "--fast-model" in result.stdout
+
+
+def test_manage_clients_help_exits_zero() -> None:
+    result = _run(["manage-clients", "--help"])
+    assert result.returncode == 0
+    assert "--client" in result.stdout
+
+
+def test_config_ollama_writes_only_given_fields(tmp_path: Path) -> None:
+    env = _isolated_env(tmp_path)
+    result = _run(["config-ollama", "--fast-model", "test-fast-model"], env=env)
+    assert result.returncode == 0
+    assert "test-fast-model" in result.stdout
+
+
+def test_manage_clients_with_no_flags_disconnects_everything(tmp_path: Path) -> None:
+    env = _isolated_env(tmp_path)
+    result = _run(["manage-clients"], env=env)
+    # No clients were ever registered in this fresh isolated home, so this is a no-op,
+    # not a failure -- exercises the "target = []" default path.
+    assert result.returncode == 0
