@@ -14,12 +14,30 @@ concurrency:
 
 jobs:
   fast:
-    name: ${{ matrix.os }} / fast
+    # Named per-area so the Actions UI shows, at a glance, which group of tests
+    # is running/failing under which OS (#13) -- e.g. "windows-latest /
+    # retrieval" -- instead of one undifferentiated "fast" blob. Areas reuse the
+    # taxonomy from .github/CONTRIBUTING.md; "other" is everything not marked
+    # retrieval/ollama and not under tests/installer/ (mcp-tools, mcp-mgmt,
+    # client-integration, wizard, general utils). test_ci_configuration.py's
+    # test_every_test_is_covered_by_exactly_one_ci_bucket regression test
+    # guards against a test silently falling into none of these buckets.
+    name: ${{ matrix.os }} / ${{ matrix.area }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [macos-latest, windows-latest]
+        area: [installer, retrieval, ollama, other]
+        include:
+          - area: installer
+            pytest_args: '-m "not slow" tests/installer'
+          - area: retrieval
+            pytest_args: '-m "retrieval and not slow"'
+          - area: ollama
+            pytest_args: '-m "ollama and not slow"'
+          - area: other
+            pytest_args: '-m "not retrieval and not ollama and not slow and not serial" --ignore=tests/installer'
     steps:
       - uses: actions/checkout@v4
       - name: Detect non-docs changes
@@ -48,14 +66,17 @@ jobs:
         # -n auto parallelizes across the runner's CPU cores (~5x faster on
         # Windows). Only the fast suite is parallelized; the native-lifecycle
         # tests in the slow job build real venvs and manipulate real process
-        # trees, so they stay serial to avoid cross-worker collisions. The real
-        # stdio subprocess test also runs serially: it has flaked when a loaded
-        # Windows runner starved its server process behind the xdist worker pool.
-        run: |
-          python -m pytest -q -m "not slow and not serial" -n auto
-          python -m pytest -q -m "serial and not slow"
+        # trees, so they stay serial to avoid cross-worker collisions.
+        run: python -m pytest -q ${{ matrix.pytest_args }} -n auto
+      - name: Serial tests
+        # The real stdio subprocess test runs serially in the "other" bucket
+        # only (it lives in test_distribution.py, unmarked retrieval/ollama):
+        # it has flaked when a loaded Windows runner starved its server process
+        # behind the xdist worker pool.
+        if: (github.event_name == 'push' || steps.changes.outputs.code == 'true') && matrix.area == 'other'
+        run: python -m pytest -q -m "serial and not slow" --ignore=tests/installer
       - name: Compile
-        if: github.event_name == 'push' || steps.changes.outputs.code == 'true'
+        if: (github.event_name == 'push' || steps.changes.outputs.code == 'true') && matrix.area == 'other'
         run: python -m compileall -q neo_localmcp setup.py
 
   slow:

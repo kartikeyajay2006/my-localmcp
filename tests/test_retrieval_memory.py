@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from neo_localmcp import repo_memory, tools
+
+pytestmark = pytest.mark.retrieval
 
 
 def _seed_repo(repo):

@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import pytest
+
 from neo_localmcp.utils import extract_markdown_headings, extract_symbols
+
+pytestmark = pytest.mark.retrieval
 
 
 def test_extracts_atx_headings_with_levels_and_ranges():

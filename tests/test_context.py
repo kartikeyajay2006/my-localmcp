@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from neo_localmcp import tools
 from neo_localmcp.query import INTENT_KEYWORDS, FILLER_WORDS, normalize_query
 from neo_localmcp.utils import extract_markdown_headings
+
+pytestmark = pytest.mark.retrieval
 
 
 def test_prepare_context_is_bounded_and_complete(tmp_path, isolated_config):
