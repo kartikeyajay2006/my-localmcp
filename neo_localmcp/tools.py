@@ -83,6 +83,32 @@ def _compact_line_hints(hints: list[str], max_hints: int = LINE_HINT_MAX_PER_FIL
     return cleaned[:max_hints]
 
 
+def _project_read_first_item(item: dict[str, Any], *, reason_limit: int | None = None, hint_limit: int | None = None) -> dict[str, Any]:
+    """Common path/category/score/line_hints/reasons projection of a
+    read_first/candidate_files item (#30, 1.2), shared by the MCP-compact
+    renderer and the determinism-hash projection. They differ only in
+    whether hints/reasons are compacted or capped: pass a limit to compact,
+    or leave it None to keep every raw entry (the determinism hash needs the
+    full, uncompacted shape to stay stable field-for-field across runs).
+    """
+    reasons = item.get("reasons") or []
+    hints = item.get("line_hints") or []
+    return {
+        "path": item.get("path"),
+        "category": item.get("category"),
+        "score": item.get("score"),
+        "line_hints": _compact_line_hints(hints, hint_limit) if hint_limit is not None else hints,
+        "reasons": reasons[:reason_limit] if reason_limit is not None else reasons,
+    }
+
+
+def _git_summary(git: dict[str, Any]) -> str:
+    """Shared "branch=... commit=... dirty=..." fragment (#30, 1.2) -- the CLI
+    text and MCP-tiny renderers built this line independently and identically,
+    differing only in the leading label's casing."""
+    return f"branch={git.get('branch')} commit={str(git.get('commit') or '')[:12]} dirty={git.get('dirty_files')}"
+
+
 def _render_context_text(data: dict[str, Any]) -> str:
     lines: list[str] = []
     interp = data.get("interpreted_query", {})
@@ -99,7 +125,7 @@ def _render_context_text(data: dict[str, Any]) -> str:
         lines.append("Ignored filler: " + ", ".join(interp.get("ignored_terms", [])))
     git = repo.get("git") or {}
     if git:
-        lines.append(f"Git: branch={git.get('branch')} commit={str(git.get('commit') or '')[:12]} dirty={git.get('dirty_files')}")
+        lines.append(f"Git: {_git_summary(git)}")
     if repo.get("indexer_rebuild_recommended"):
         lines.append("Index note: indexer version changed; run `neo-localmcp reindex` for a clean rebuild.")
     lines.append("")
@@ -151,13 +177,7 @@ def _mcp_compact_context(data: dict[str, Any]) -> dict[str, Any]:
     git = repo.get("git") or {}
 
     def compact_item(item: dict[str, Any], reason_limit: int = 3, hint_limit: int = 5) -> dict[str, Any]:
-        return {
-            "path": item.get("path"),
-            "category": item.get("category"),
-            "score": item.get("score"),
-            "line_hints": _compact_line_hints(item.get("line_hints") or [], hint_limit),
-            "reasons": (item.get("reasons") or [])[:reason_limit],
-        }
+        return _project_read_first_item(item, reason_limit=reason_limit, hint_limit=hint_limit)
 
     read_paths = {item.get("path") for item in data.get("read_first", [])}
     other_candidates = [item for item in data.get("candidate_files", []) if item.get("path") not in read_paths]
@@ -251,7 +271,7 @@ def _mcp_tiny_context_text(data: dict[str, Any]) -> str:
     if data.get("retrieval_id"):
         lines.append(f"retrieval_id: {data.get('retrieval_id')} (pass to file_excerpts to record whether you used the suggested section)")
     if git:
-        lines.append(f"git: branch={git.get('branch')} commit={str(git.get('commit') or '')[:12]} dirty={git.get('dirty_files')}")
+        lines.append(f"git: {_git_summary(git)}")
     lines.append(f"intent: {interp.get('intent')} policy: {interp.get('ranking_policy')}")
     strong = interp.get("strong_terms") or []
     weak = interp.get("weak_terms") or []
@@ -410,21 +430,13 @@ def _stable_context_projection(data: dict[str, Any]) -> dict[str, Any]:
     """Keep the fields that must be identical for deterministic context tests."""
     repo = data.get("repo_status") or {}
     git = repo.get("git") or {}
-    def project_item(item: dict[str, Any]) -> dict[str, Any]:
-        return {
-            "path": item.get("path"),
-            "category": item.get("category"),
-            "score": item.get("score"),
-            "reasons": item.get("reasons") or [],
-            "line_hints": item.get("line_hints") or [],
-        }
     return {
         "task": data.get("task"),
         "repo_id": repo.get("repo_id"),
         "git_commit": git.get("commit"),
         "interpreted_query": data.get("interpreted_query"),
-        "read_first": [project_item(x) for x in data.get("read_first", [])],
-        "candidate_files": [project_item(x) for x in data.get("candidate_files", [])],
+        "read_first": [_project_read_first_item(x) for x in data.get("read_first", [])],
+        "candidate_files": [_project_read_first_item(x) for x in data.get("candidate_files", [])],
         "agent_guidance": data.get("agent_guidance") or [],
     }
 
