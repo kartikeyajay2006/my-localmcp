@@ -86,3 +86,41 @@ def test_fake_backend_install_then_uninstall_round_trips_state(tmp_path, monkeyp
     uninstall_outcome = backend2.run_operation(WizardState(operation=OP_UNINSTALL), lambda e: None)
     assert uninstall_outcome.ok is True
     assert backend2.detect().state == "absent"
+
+
+def test_real_backend_apply_client_changes_uses_shared_helper(isolated_app_home, monkeypatch):
+    from neo_localmcp.installer import clients as clients_mod
+    from neo_localmcp.wizard.backend import WizardState
+    from neo_localmcp.wizard.real_backend import RealBackend
+
+    calls = []
+    monkeypatch.setattr(
+        clients_mod.client_setup, "setup_client",
+        lambda client, apply=True, **kw: calls.append(client) or {"client": client, "ok": True},
+    )
+
+    backend = RealBackend()
+    state = WizardState(operation="manage-clients", selected_clients=["claude-code"])
+    events = []
+    outcome = backend.apply_client_changes(state, lambda event: events.append(event))
+
+    assert outcome.ok
+    assert calls == ["claude-code"]
+    assert any(e.level == "action" for e in events)
+
+
+def test_real_backend_apply_ollama_config_uses_shared_helper(isolated_app_home):
+    from neo_localmcp import config
+    from neo_localmcp.wizard.backend import WizardState
+    from neo_localmcp.wizard.real_backend import RealBackend
+
+    backend = RealBackend()
+    state = WizardState(
+        operation="config-ollama", fast_model="new-fast", summary_model="new-summary",
+        ollama_base_url="http://127.0.0.1:11434",
+    )
+    outcome = backend.apply_ollama_config(state, lambda event: None)
+
+    assert outcome.ok
+    assert config.load_config()["ollama"]["fast_model"] == "new-fast"
+    assert config.load_config()["ollama"]["summary_model"] == "new-summary"
