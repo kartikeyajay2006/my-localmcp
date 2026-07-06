@@ -26,6 +26,7 @@ from ..installer import (
     OperationStatus,
     Reporter,
     confirm_full_wipe,
+    configure_models,
     detect_state,
     install,
     reinstall,
@@ -326,15 +327,11 @@ class RealBackend:
     # -- config-only paths ------------------------------------------------ #
 
     def _write_ollama_config(self, state: WizardState, emit: EmitFn) -> None:
-        cfg = config.load_config()
-        ollama_cfg = cfg.setdefault("ollama", {})
-        if state.ollama_base_url:
-            ollama_cfg["base_url"] = state.ollama_base_url
-        if state.fast_model:
-            ollama_cfg["fast_model"] = state.fast_model
-        if state.summary_model:
-            ollama_cfg["summary_model"] = state.summary_model
-        config.save_config(cfg)
+        ollama_cfg = configure_models(
+            base_url=state.ollama_base_url or None,
+            fast_model=state.fast_model or None,
+            summary_model=state.summary_model or None,
+        )
         emit(StepEvent("action",
                        f"Saved Ollama config: fast={ollama_cfg.get('fast_model')}, "
                        f"summary={ollama_cfg.get('summary_model')}"))
@@ -361,44 +358,19 @@ class RealBackend:
         )
 
     def apply_client_changes(self, state: WizardState, emit: EmitFn) -> OperationOutcome:
-        current = set(self._registered_clients())
-        target = list(state.selected_clients)
-        add = [c for c in target if c not in current]
-        remove = [c for c in current if c not in target]
-        failures: list[str] = []
-        manual: list[str] = []
-        for c in add:
-            emit(StepEvent("action", f"Connecting {CLIENT_LABELS.get(c, c)} ..."))
-            try:
-                res = client_setup.setup_client(
-                    c, apply=True, server_command=self._paths.server_executable)
-                if isinstance(res, dict) and res.get("manual_install_required"):
-                    note = str(res.get("instructions") or "Manual install required.")
-                    emit(StepEvent("warning", f"  {note}"))
-                    manual.append(f"{CLIENT_LABELS.get(c, c)}: {note}")
-            except Exception as exc:  # noqa: BLE001
-                failures.append(f"{c}: {exc}")
-                emit(StepEvent("error", f"  failed: {exc}"))
-        for c in remove:
-            emit(StepEvent("action", f"Disconnecting {CLIENT_LABELS.get(c, c)} ..."))
-            try:
-                client_setup.remove_client(c, apply=True)
-            except Exception as exc:  # noqa: BLE001
-                failures.append(f"{c}: {exc}")
-                emit(StepEvent("error", f"  failed: {exc}"))
-        if not add and not remove:
-            emit(StepEvent("info", "No client changes to apply."))
-        try:
-            clients_mod.record_selection(self._paths, target)
-        except Exception as exc:  # noqa: BLE001
-            emit(StepEvent("warning", f"Could not update registration record: {exc}"))
-        if failures:
+        outcome = clients_mod.apply_client_selection(
+            self._paths,
+            state.selected_clients,
+            server_command=self._paths.server_executable,
+            on_event=lambda level, message: emit(StepEvent(level, message)),
+        )
+        if not outcome.ok:
             return OperationOutcome(
                 ok=False, status="failed", title="Some client changes failed.",
-                detail_lines=tuple(failures + manual),
+                detail_lines=tuple(outcome.failures) + outcome.manual,
             )
-        details = [f"Connected: {', '.join(target) or 'none'}"]
-        details.extend(manual)
+        details = [f"Connected: {', '.join(outcome.connected) or 'none'}"]
+        details.extend(outcome.manual)
         return OperationOutcome(
             ok=True, status="succeeded", title="Client connections updated.",
             detail_lines=tuple(details),
