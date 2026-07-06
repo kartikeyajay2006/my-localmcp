@@ -2,7 +2,7 @@
 
 CLI-only, administrative tool -- never exposed as an MCP tool, matching the
 existing convention that administration is CLI-only (see cli.py). See
-docs/1.2.0_PLAN.md for the full design and the decisions behind it.
+docs/1.1.1_PLAN.md for the full design and the decisions behind it.
 
 Groups are registered in ``GROUPS`` below; ``full`` is always the union of
 every *registered* group computed at call time, never a separately

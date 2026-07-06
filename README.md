@@ -48,12 +48,19 @@ the wrong comparison (against other caching tricks). The more accurate frame:
   a frontier model (and your local hardware, if capable) spend its budget on
   reasoning instead of rediscovering the same files every session.
 
-Two things this is **not**, yet, on purpose:
-- **Automated token-reduction measurement.** Today a response reports its own
-  cost (`estimated_tokens_returned`); the 8-10x reduction figures in
-  `PROJECT_STATUS.md` came from one-off manual comparisons during real
-  sessions, not a repeatable benchmark tool. Optional built-in benchmarking is
-  a planned, not-yet-built capability.
+Two things about token-reduction measurement, one done and one not, on purpose:
+- **Automated, local, provider-agnostic benchmarking exists**: `neo-localmcp
+  benchmark <group...>` (`sys`/`mem`/`ollama`/`full`) runs repeatable checks
+  against the current repo and reports estimated (char÷4) token figures
+  against the README's stated acceptance targets. It never calls any external
+  LLM API — no Anthropic/Claude credentials needed, only optionally the same
+  local Ollama this project already supports.
+- **Real, live agent-vs-agent token comparison is not yet built** (tracked in
+  issue #65). When it ships, it will be a separate opt-in command
+  (`benchmark-live-agent`) that spends real API budget running a live agent
+  twice per task via the Claude Agent SDK — **that piece specifically will
+  require Anthropic/Claude API access**, unlike the rest of this project and
+  the rest of the benchmark tool, which need none.
 - **A schema-migration guarantee across breaking version changes.** Every
   schema change so far has been additive (new nullable columns) and has
   preserved memory in practice; there is no automated regression test yet
@@ -113,6 +120,7 @@ cached by source hash so it's only regenerated when the file changes.
 | `stop [--pid \| --all] [--match-executable] [--timeout] [--no-force]` | Ask running server(s) to exit gracefully; force only as a last resort. |
 | `set-ollama --base-url --fast-model --summary-model --num-ctx` | Set Ollama endpoint/model defaults. |
 | `model status` | Show configured Ollama models and which are actually reachable. |
+| `benchmark <group...> [--repo-root] [--out] [--queries]` | Repeatable local token-reduction benchmark (`sys`/`mem`/`ollama`/`full`). Never modifies existing repository memory, never calls an external LLM API. |
 
 ### CLI — repository indexing and queries (`--repo-root` on all of these)
 
@@ -167,7 +175,7 @@ runtime itself — lifecycle work lives in the checkout's `setup.py`.
 
 ## Install
 
-Requirements: Python 3.12 or newer. Version 1.0.10 supports macOS and Windows;
+Requirements: Python 3.12 or newer. Version 1.1.1 supports macOS and Windows;
 Linux support is deferred.
 
 ### Guided installer (recommended)
