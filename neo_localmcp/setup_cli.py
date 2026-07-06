@@ -146,6 +146,18 @@ def _plan_key(operation: str, *, clean: bool = False, delete_memory: bool = Fals
     return operation
 
 
+def dry_run_plan(operation: str, *, clean: bool = False, delete_memory: bool = False) -> tuple[str, tuple[str, ...]]:
+    """The resolved plan key and its ordered preview steps for a `--dry-run`.
+
+    Public entry point over `_plan_key`/`_DRY_RUN_PLANS` (#36) -- the wizard
+    used to reach into both directly, with no stability contract. Both this
+    module's own `_render_dry_run` and the wizard's dry-run path call this
+    instead of touching the private tables themselves.
+    """
+    key = _plan_key(operation, clean=clean, delete_memory=delete_memory)
+    return key, _DRY_RUN_PLANS[key]
+
+
 # --------------------------------------------------------------------------- #
 # Argument parsing
 # --------------------------------------------------------------------------- #
@@ -273,12 +285,11 @@ def _render_dry_run(paths: ManagedPaths, args: argparse.Namespace, reporter: Rep
     for key, value in sorted(state.details.items()):
         reporter.info(f"  state.{key}: {value}")
 
-    key = _plan_key(
+    key, plan = dry_run_plan(
         args.operation,
         clean=getattr(args, "clean", False),
         delete_memory=getattr(args, "delete_memory", False),
     )
-    plan = _DRY_RUN_PLANS[key]
     reporter.info(f"Ordered action plan for '{key}':")
     for index, step in enumerate(plan, start=1):
         reporter.info(f"  {index}. {step}")
