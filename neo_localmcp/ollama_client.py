@@ -125,6 +125,29 @@ def _request_json(
         return int(exc.code), payload
 
 
+def model_sizes(timeout: float = 5) -> dict[str, int]:
+    """Best-effort per-model size in bytes from `/api/tags`.
+
+    Public, narrow-purpose wrapper over `_request_json` (#36) -- the wizard
+    used to call `_request_json` directly for this, reaching past this
+    module's intended API with no stability contract. Never raises: an empty
+    result just means sizes aren't shown, not that the caller should fail.
+    """
+    try:
+        code, tags = _request_json("/api/tags", timeout=timeout)
+        if code != 200:
+            return {}
+        sizes: dict[str, int] = {}
+        for item in tags.get("models", []):
+            name = str(item.get("name") or item.get("model") or "")
+            size = item.get("size")
+            if name and isinstance(size, (int, float)):
+                sizes[name] = int(size)
+        return sizes
+    except Exception:  # noqa: BLE001 - size display is a nice-to-have, never fatal
+        return {}
+
+
 def status(model: str | None = None, purpose: str = "ranking") -> dict[str, Any]:
     cfg = _cfg()
     base = ollama_base_url()
