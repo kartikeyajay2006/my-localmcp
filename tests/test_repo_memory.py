@@ -122,3 +122,52 @@ def test_lookup_finds_sql_table_name_that_is_not_a_def_or_class(tmp_path, isolat
     repo_memory.index_repo(repo)
     result = repo_memory.lookup("section_summaries", repo)
     assert result["hits"], "expected a full-text hit for a table name that never appears as a def/class symbol"
+
+
+def test_sample_symbols_is_deterministic_and_kind_restricted(tmp_path, isolated_config):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "a.py").write_text(
+        "class Widget:\n    pass\n\n"
+        "def build_widget():\n    pass\n",
+        encoding="utf-8",
+    )
+    (repo / "b.md").write_text("# A heading\n\nprose\n", encoding="utf-8")
+    repo_memory.index_repo(repo)
+
+    first = repo_memory.sample_symbols(repo, limit=10)
+    second = repo_memory.sample_symbols(repo, limit=10)
+    assert first == second  # deterministic across repeated calls, not randomized
+
+    kinds_seen = {s["kind"] for s in first}
+    assert kinds_seen <= {"function", "class", "method", "type"}
+    assert "heading" not in kinds_seen
+    names = {s["name"] for s in first}
+    assert {"Widget", "build_widget"} <= names
+
+
+def test_sample_symbols_respects_limit(tmp_path, isolated_config):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "a.py").write_text("\n".join(f"def fn_{i}():\n    pass\n" for i in range(10)), encoding="utf-8")
+    repo_memory.index_repo(repo)
+    assert len(repo_memory.sample_symbols(repo, limit=3)) == 3
+
+
+def test_sample_symbols_spreads_across_files_not_just_the_first_alphabetically(tmp_path, isolated_config):
+    """Regression for #9: a file that sorts first alphabetically (or is just
+    large) must not dominate the entire sample -- caught for real during
+    benchmark smoke-testing, where a legacy-directory file that happened to
+    sort first supplied all 10 synthetic queries and nothing else was ever
+    sampled."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "_aaa_big_file.py").write_text("\n".join(f"def big_fn_{i}():\n    pass\n" for i in range(20)), encoding="utf-8")
+    (repo / "z_small_file.py").write_text("def small_fn():\n    pass\n", encoding="utf-8")
+    repo_memory.index_repo(repo)
+    sample = repo_memory.sample_symbols(repo, limit=5)
+    files_seen = {s["file_path"] for s in sample}
+    assert files_seen == {"_aaa_big_file.py", "z_small_file.py"}, "the small/alphabetically-later file must still be represented"
+
+    # Deterministic across repeated calls, still.
+    assert repo_memory.sample_symbols(repo, limit=5) == sample
