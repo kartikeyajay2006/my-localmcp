@@ -11,6 +11,7 @@ from typing import Any
 from . import __version__
 from . import repo_memory
 from .config import CONFIG_PATH, ensure_config, load_config, save_config
+from .installer import configure_models as installer_configure_models
 from .identity import IDENTITY
 from .ollama_client import chat, ensure as ensure_ollama, ping, start_service, status as ollama_state, stop_service, unload as unload_ollama, warm as warm_ollama
 from .query import category_boost, classify_path, extract_file_references, normalize_query, term_key as compute_term_key
@@ -1134,17 +1135,10 @@ def record_change(summary: str, paths: list[str], repo_root: str = "auto") -> st
 
 
 def set_ollama(base_url: str | None = None, summary_model: str | None = None, fast_model: str | None = None, num_ctx: int | None = None) -> str:
-    cfg = load_config()
-    if base_url:
-        cfg.setdefault("ollama", {})["base_url"] = base_url.rstrip("/")
-    if summary_model:
-        cfg.setdefault("ollama", {})["summary_model"] = summary_model
-    if fast_model:
-        cfg.setdefault("ollama", {})["fast_model"] = fast_model
-    if num_ctx:
-        cfg.setdefault("ollama", {})["num_ctx"] = int(num_ctx)
-    save_config(cfg)
-    return json_out({"ok": True, "ollama": cfg.get("ollama", {}), "status": ollama_state()})
+    ollama_cfg = installer_configure_models(
+        base_url=base_url, fast_model=fast_model, summary_model=summary_model, num_ctx=num_ctx,
+    )
+    return json_out({"ok": True, "ollama": ollama_cfg, "status": ollama_state()})
 
 
 def ollama_status(model: str | None = None, purpose: str = "ranking") -> str:
