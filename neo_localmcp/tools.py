@@ -107,7 +107,7 @@ def _render_context_text(data: dict[str, Any]) -> str:
     for idx, item in enumerate(data.get("read_first", []), start=1):
         ranges = _compact_line_hints(item.get("line_hints") or [])
         range_text = "; ".join(ranges) if ranges else "line hints unavailable"
-        lines.append(f"  {idx}. {item.get('path')} [{item.get('category')}, score {item.get('score')}] — {range_text}")
+        lines.append(f"  {idx}. {item.get('path')} [{item.get('category')}, score {item.get('score')}] - {range_text}")
         for reason in (item.get("reasons") or [])[:3]:
             lines.append(f"     - {reason}")
     if data.get("candidate_files"):
@@ -117,7 +117,7 @@ def _render_context_text(data: dict[str, Any]) -> str:
             lines.append("")
             lines.append("Other candidates:")
             for item in others[:10]:
-                lines.append(f"  - {item.get('path')} [{item.get('category')}, score {item.get('score')}] — {', '.join(_compact_line_hints(item.get('line_hints') or [], 2)) or 'no line hints'}")
+                lines.append(f"  - {item.get('path')} [{item.get('category')}, score {item.get('score')}] - {', '.join(_compact_line_hints(item.get('line_hints') or [], 2)) or 'no line hints'}")
     guidance = data.get("agent_guidance") or []
     if guidance:
         lines.append("")
@@ -292,7 +292,7 @@ def _mcp_tiny_context_text(data: dict[str, Any]) -> str:
         lines.append("")
         lines.append("CURRENT SOURCE EXCERPTS")
         for excerpt in excerpts:
-            section = f" §{excerpt.get('matched_name')}" if excerpt.get("matched_name") else ""
+            section = f" section '{excerpt.get('matched_name')}'" if excerpt.get("matched_name") else ""
             lines.append(f"--- {excerpt.get('path')}:{excerpt.get('start_line')}-{excerpt.get('end_line')}{section} sha256={str(excerpt.get('sha256') or '')[:12]} ---")
             lines.append(str(excerpt.get("text") or ""))
     metrics = data.get("retrieval_metrics") or {}
