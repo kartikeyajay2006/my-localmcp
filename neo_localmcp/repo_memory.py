@@ -304,11 +304,13 @@ def index_repo(repo_root: str | Path | None = None, max_files: int | None = None
         for relative in removed_paths:
             _delete_indexed_path(conn, rid, relative)
         conn.commit()
+    indexed_at = now_iso()
     if errors == 0:
         set_repo_meta(conn, rid, "indexer_version", INDEXER_VERSION)
         set_repo_meta(conn, rid, "eligible_files", str(eligible_files))
         set_repo_meta(conn, rid, "index_complete", "true" if index_complete else "false")
         set_repo_meta(conn, rid, "indexed_branch", str(git_info(root).get("branch") or ""))
+        set_repo_meta(conn, rid, "last_indexed_at", indexed_at)
     return {
         "ok": errors == 0,
         "repo_root": str(root),
@@ -323,6 +325,7 @@ def index_repo(repo_root: str | Path | None = None, max_files: int | None = None
         "removed_paths": removed_paths[:100],
         "errors": errors,
         "changed_paths": changed_paths[:100],
+        "indexed_at": indexed_at if errors == 0 else None,
         "db_path": str(db_path()),
         "indexer_version": INDEXER_VERSION,
         "previous_indexer_version": previous_indexer_version,
@@ -408,7 +411,11 @@ def lookup(query: str, repo_root: str | Path | None = None, limit: int = 20) -> 
                 rows.append(dict(row))
     like = f"%{query}%"
     symbols = [dict(row) for row in conn.execute("SELECT file_path, kind, name, signature, start_line, end_line FROM symbols WHERE repo_id=? AND (name LIKE ? OR signature LIKE ?) ORDER BY file_path, start_line, name LIMIT ?", (rid, like, like, limit)).fetchall()]
-    return {"repo_root": str(root), "repo_id": rid, "query": query, "hits": rows, "symbols": symbols}
+    # A single stored-metadata read (#64) -- not a per-file rehash -- so a caller
+    # can judge staleness risk itself without the hot read-only path above
+    # paying any git/filesystem probing cost.
+    last_indexed_at = get_repo_meta(conn, rid, "last_indexed_at")
+    return {"repo_root": str(root), "repo_id": rid, "query": query, "hits": rows, "symbols": symbols, "last_indexed_at": last_indexed_at}
 
 
 def file_context(path: str, repo_root: str | Path | None = None, around_line: int | None = None, context_lines: int = 40, symbol_limit: int = 25) -> dict[str, Any]:
