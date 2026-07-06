@@ -23,7 +23,11 @@ from __future__ import annotations
 
 import sqlite3
 
+import pytest
+
 from neo_localmcp import repo_memory
+
+pytestmark = pytest.mark.retrieval
 
 
 # The columns/tables current `init_db` adds on top of the pre-migration shape.

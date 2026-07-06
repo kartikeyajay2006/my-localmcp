@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import pytest
+
 from neo_localmcp import repo_memory
+
+pytestmark = pytest.mark.retrieval
 
 
 def test_complete_index_prunes_deleted_files(tmp_path, isolated_config):
