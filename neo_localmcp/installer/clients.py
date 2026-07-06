@@ -20,7 +20,7 @@ import re
 import subprocess
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Sequence
 
 from .. import client_setup
 from ..identity import IDENTITY
@@ -318,6 +318,86 @@ def restore_recorded_registrations(
     if apply and updated:
         write_registrations(paths, tuple(updated))
     return tuple(results)
+
+
+@dataclass(frozen=True)
+class ClientChangeOutcome:
+    """Result of reconciling live client registrations to a target set."""
+
+    ok: bool
+    connected: tuple[str, ...]
+    added: tuple[str, ...]
+    removed: tuple[str, ...]
+    manual: tuple[str, ...]
+    failures: tuple[str, ...]
+
+
+def apply_client_selection(
+    paths: ManagedPaths,
+    target: Sequence[str],
+    *,
+    server_command: str | Path,
+    on_event: Callable[[str, str], None] | None = None,
+) -> ClientChangeOutcome:
+    """Reconcile live client registrations to match ``target``.
+
+    Diffs ``target`` against the currently recorded clients, connects newly
+    selected surfaces via :func:`neo_localmcp.client_setup.setup_client`,
+    disconnects deselected ones via
+    :func:`neo_localmcp.client_setup.remove_client`, and persists the new
+    target via :func:`record_selection`. Used by both the wizard's "Manage
+    connected clients" operation and ``setup.py manage-clients`` so both
+    surfaces reconcile client registrations identically.
+    """
+
+    def emit(level: str, message: str) -> None:
+        if on_event is not None:
+            on_event(level, message)
+
+    known = {CLAUDE_CODE, CODEX, CLAUDE_DESKTOP}
+    current = {r.client for r in read_registrations(paths) if r.client in known}
+    target_list = list(dict.fromkeys(target))  # de-dupe, preserve order
+    add = [c for c in target_list if c not in current]
+    remove = [c for c in current if c not in target_list]
+    failures: list[str] = []
+    manual: list[str] = []
+
+    for client in add:
+        emit("action", f"Connecting {client} ...")
+        try:
+            result = client_setup.setup_client(client, apply=True, server_command=server_command)
+            if isinstance(result, dict) and result.get("manual_install_required"):
+                note = str(result.get("instructions") or "Manual install required.")
+                emit("warning", f"  {note}")
+                manual.append(f"{client}: {note}")
+        except Exception as exc:  # noqa: BLE001 - surfaced as a failure, never raised
+            failures.append(f"{client}: {exc}")
+            emit("error", f"  failed: {exc}")
+
+    for client in remove:
+        emit("action", f"Disconnecting {client} ...")
+        try:
+            client_setup.remove_client(client, apply=True)
+        except Exception as exc:  # noqa: BLE001
+            failures.append(f"{client}: {exc}")
+            emit("error", f"  failed: {exc}")
+
+    if not add and not remove:
+        emit("info", "No client changes to apply.")
+
+    try:
+        record_selection(paths, target_list)
+    except Exception as exc:  # noqa: BLE001 - registration record is best-effort
+        emit("warning", f"Could not update registration record: {exc}")
+
+    return ClientChangeOutcome(
+        ok=not failures,
+        connected=tuple(target_list),
+        added=tuple(add),
+        removed=tuple(remove),
+        manual=tuple(manual),
+        failures=tuple(failures),
+    )
 
 
 def verify_registrations(
