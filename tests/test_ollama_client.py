@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import pytest
+
 from neo_localmcp import ollama_client
+
+pytestmark = pytest.mark.ollama
 
 
 def test_status_distinguishes_cold_model(monkeypatch, isolated_config):
