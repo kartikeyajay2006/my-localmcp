@@ -148,7 +148,7 @@ def cmd_test_determinism(args: argparse.Namespace) -> int:
 
 def cmd_benchmark(args: argparse.Namespace) -> int:
     try:
-        report = run_benchmark(args.group, repo_root=args.repo_root, out_dir=args.out)
+        report = run_benchmark(args.group, repo_root=args.repo_root, out_dir=args.out, queries_path=args.queries)
     except ValueError as exc:
         print(json.dumps({"ok": False, "error": str(exc)}, indent=2))
         return 2
@@ -289,6 +289,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("group", nargs="+", help="One or more groups to run (e.g. 'sys'), or 'full' for every registered group.")
     p.add_argument("--repo-root", default="auto")
     p.add_argument("--out", default=None, help="Directory the timestamped report is written under (default: current directory).")
+    p.add_argument("--queries", default=None, help="Path to a natural-language query JSONL file for the 'mem' group (default: the repo's own self-benchmark set).")
     p.set_defaults(func=cmd_benchmark)
 
     p = sub.add_parser("lookup", help="Search repository context memory for files/symbols.")

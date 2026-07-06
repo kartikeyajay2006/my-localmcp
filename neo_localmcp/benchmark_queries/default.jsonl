@@ -1,0 +1,6 @@
+{"task": "debug repository indexing: index_repo, refresh", "gold_file": "neo_localmcp/repo_memory.py"}
+{"task": "lookup returns nothing for a SQL table name or string-literal identifier that never appears as a def or class symbol", "gold_file": "neo_localmcp/repo_memory.py"}
+{"task": "context mis-weights a snake_case code identifier like summary_model as a weak term instead of strong", "gold_file": "neo_localmcp/query.py"}
+{"task": "schema evolution and migration in repo memory: init_db, CREATE TABLE, ALTER TABLE ADD COLUMN, INDEXER_VERSION", "gold_file": "neo_localmcp/repo_memory.py"}
+{"task": "Windows console renders em-dash and bullets as mojibake in cli.py's human-readable context output", "gold_file": "neo_localmcp/tools.py"}
+{"task": "how does the wizard's fake backend simulate install and uninstall without touching real files", "gold_file": null}

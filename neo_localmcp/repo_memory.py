@@ -742,6 +742,41 @@ def list_indexed_files(repo_root: str | Path | None = None) -> list[str]:
     return [str(row["path"]) for row in conn.execute("SELECT path FROM files WHERE repo_id=? ORDER BY path", (rid,)).fetchall()]
 
 
+def sample_symbols(repo_root: str | Path | None = None, *, kinds: tuple[str, ...] = ("function", "class", "method", "type"), limit: int = 20) -> list[dict[str, Any]]:
+    """Real indexed symbols, restricted to kinds that make sense as the
+    subject of a query (functions/classes/methods/types -- not headings or
+    other markup symbols).
+
+    Spreads the sample round-robin across distinct files rather than taking
+    the first `limit` rows by (file, line) order -- otherwise a repo with one
+    large or alphabetically-early file (e.g. a "_Legacy*"-prefixed directory)
+    would dominate the entire sample instead of representing the repo as a
+    whole. Still fully deterministic -- same repeated benchmark run (#9)
+    samples the same symbols every time, just not clustered in one file.
+    """
+    root = repo_root_or_cwd(repo_root)
+    conn = connect()
+    rid = repo_id(root)
+    placeholders = ",".join("?" for _ in kinds)
+    rows = [dict(row) for row in conn.execute(
+        f"SELECT file_path, kind, name, start_line FROM symbols WHERE repo_id=? AND kind IN ({placeholders}) ORDER BY file_path, start_line, name",
+        (rid, *kinds),
+    ).fetchall()]
+    by_file: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        by_file.setdefault(row["file_path"], []).append(row)
+    sampled: list[dict[str, Any]] = []
+    while len(sampled) < limit and by_file:
+        for file_path in list(by_file.keys()):
+            if len(sampled) >= limit:
+                break
+            bucket = by_file[file_path]
+            sampled.append(bucket.pop(0))
+            if not bucket:
+                del by_file[file_path]
+    return sampled
+
+
 def symbols_for_files(paths: list[str], repo_root: str | Path | None = None, max_per_file: int = 12) -> dict[str, list[dict[str, Any]]]:
     root = repo_root_or_cwd(repo_root)
     conn = connect()

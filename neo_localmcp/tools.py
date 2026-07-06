@@ -446,7 +446,10 @@ def _stable_hash(data: dict[str, Any]) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def test_determinism(task: str, repo_root: str = "auto", runs: int = 5, max_files: int = 6, limit: int = 6, reset_repo_first: bool = False, reindex_first: bool = False) -> str:
+def test_determinism(task: str, repo_root: str = "auto", runs: int = 5, max_files: int = 6, limit: int = 6, reset_repo_first: bool = False, reindex_first: bool = False, *, record: bool = True) -> str:
+    """`record` is internal-only, same as context_prepare's -- only the
+    benchmark tool (#9) passes record=False, so its determinism-gate calls
+    (5+ context_prepare calls per query) don't get recorded as real usage."""
     if runs < 2:
         runs = 2
     root = repo_root_or_cwd(repo_root)
@@ -458,7 +461,7 @@ def test_determinism(task: str, repo_root: str = "auto", runs: int = 5, max_file
     outputs: list[dict[str, Any]] = []
     hashes: list[str] = []
     for i in range(runs):
-        raw = context_prepare(task, root, max_files=None, limit=min(max_files, limit), use_ollama=False, output_format="json")
+        raw = context_prepare(task, root, max_files=None, limit=min(max_files, limit), use_ollama=False, output_format="json", record=record)
         data = json.loads(raw)
         projection = _stable_context_projection(data)
         digest = _stable_hash(data)
@@ -872,8 +875,16 @@ Candidate files, scores, reasons, and line hints:
     return chat(prompt, model=model, purpose="ranking")
 
 
-def context_prepare(task: str, repo_root: str = "auto", max_files: int | None = None, limit: int = 6, use_ollama: bool = False, model: str | None = None, output_format: str = "json", token_budget: int = 3000) -> str:
-    """Core retrieval implementation; prepare_context is the MCP/CLI adapter over this."""
+def context_prepare(task: str, repo_root: str = "auto", max_files: int | None = None, limit: int = 6, use_ollama: bool = False, model: str | None = None, output_format: str = "json", token_budget: int = 3000, *, record: bool = True) -> str:
+    """Core retrieval implementation; prepare_context is the MCP/CLI adapter over this.
+
+    `record` is internal-only -- not exposed via the MCP tool or the CLI's
+    `context` subcommand, both of which always record real usage. Only the
+    benchmark tool (#9) calls this with `record=False`, since a benchmark
+    query must never be recorded into task_queries/retrieval_boost as if it
+    were real usage -- that's not a config option, it's always off for
+    benchmark-invoked calls.
+    """
     root = repo_root_or_cwd(repo_root)
     status_data = repo_memory.status(root)
     refreshed = False
@@ -970,13 +981,14 @@ def context_prepare(task: str, repo_root: str = "auto", max_files: int | None = 
     ranking_full_status = (ollama_result or {}).get("ollama_status")
     ranking_result_for_nesting = {**ollama_result, "ollama_status": _slim_status_for_nesting(ranking_full_status)} if ollama_result else ollama_result
     result = {**deterministic, "ollama_requested": bool(use_ollama), "ollama_ranking": ranking_result_for_nesting, "ollama_timing": _format_model_timing(ollama_result), "ollama_status": ranking_full_status}
-    repo_memory.record_task_query(task, root, retrieval_id=retrieval_id, term_key=term_key, sections=sections_for_memory, tool_version=__version__)
+    if record:
+        repo_memory.record_task_query(task, root, retrieval_id=retrieval_id, term_key=term_key, sections=sections_for_memory, tool_version=__version__)
     return _format(result, output_format)
 
 
-def prepare_context(task: str, repo_root: str = "auto", token_budget: int = 3000, max_files: int = 6, use_ollama: bool = False, model: str | None = None, output_format: str = "mcp_text") -> str:
+def prepare_context(task: str, repo_root: str = "auto", token_budget: int = 3000, max_files: int = 6, use_ollama: bool = False, model: str | None = None, output_format: str = "mcp_text", *, record: bool = True) -> str:
     """MCP/CLI-facing adapter -- see context_prepare for the core implementation."""
-    return context_prepare(task, repo_root, max_files=None, limit=max_files, use_ollama=use_ollama, model=model, output_format=output_format, token_budget=token_budget)
+    return context_prepare(task, repo_root, max_files=None, limit=max_files, use_ollama=use_ollama, model=model, output_format=output_format, token_budget=token_budget, record=record)
 
 
 def _cap_keyword_terms(raw: str, max_terms: int = 8) -> str:
