@@ -6,6 +6,7 @@ import sys
 from typing import Any
 
 from . import tools
+from .benchmark import run_benchmark
 from .client_setup import client_status, remove_clients, setup_clients
 from .config import CONFIG_PATH, ensure_config
 from .identity import IDENTITY
@@ -145,6 +146,16 @@ def cmd_test_determinism(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_benchmark(args: argparse.Namespace) -> int:
+    try:
+        report = run_benchmark(args.group, repo_root=args.repo_root, out_dir=args.out, queries_path=args.queries)
+    except ValueError as exc:
+        print(json.dumps({"ok": False, "error": str(exc)}, indent=2))
+        return 2
+    print(json.dumps(report, indent=2, ensure_ascii=False))
+    return 0 if report["ok"] else 1
+
+
 def cmd_lookup(args: argparse.Namespace) -> int:
     print_json_text(tools.repo_lookup(args.query, args.repo_root, args.limit))
     return 0
@@ -273,6 +284,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--reset-repo", action="store_true", help="Reset current repo context, then reindex before testing.")
     p.add_argument("--reindex-first", action="store_true", help="Force reindex before testing without resetting repo records first.")
     p.set_defaults(func=cmd_test_determinism)
+
+    p = sub.add_parser("benchmark", help="Run a repeatable neo-localmcp benchmark against the current (or given) repo. Never modifies existing repository memory.")
+    p.add_argument("group", nargs="+", help="One or more groups to run (e.g. 'sys'), or 'full' for every registered group.")
+    p.add_argument("--repo-root", default="auto")
+    p.add_argument("--out", default=None, help="Directory the timestamped report is written under (default: current directory).")
+    p.add_argument("--queries", default=None, help="Path to a natural-language query JSONL file for the 'mem' group (default: the repo's own self-benchmark set).")
+    p.set_defaults(func=cmd_benchmark)
 
     p = sub.add_parser("lookup", help="Search repository context memory for files/symbols.")
     p.add_argument("query"); p.add_argument("--repo-root", default="auto"); p.add_argument("--limit", type=int, default=20)
