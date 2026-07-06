@@ -4,11 +4,40 @@ import json
 
 import pytest
 
-from neo_localmcp import tools
+from neo_localmcp import repo_memory, tools
 from neo_localmcp.query import INTENT_KEYWORDS, FILLER_WORDS, normalize_query
 from neo_localmcp.utils import extract_markdown_headings
 
 pytestmark = pytest.mark.retrieval
+
+
+def test_record_false_never_writes_a_task_query(tmp_path, isolated_config):
+    """Regression for #9: the benchmark tool must never have its queries
+    recorded as real usage. record=False is internal-only (not exposed via
+    the MCP tool or the CLI's context subcommand, both of which always
+    record), but must actually suppress the write when used."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "service.py").write_text("def load_model():\n    return 'ready'\n", encoding="utf-8")
+    before = repo_memory.status(str(repo))["counts"]["task_queries"]
+    tools.prepare_context("debug model loading: load_model", str(repo), output_format="json", record=False)
+    after = repo_memory.status(str(repo))["counts"]["task_queries"]
+    assert after == before == 0
+
+    # Confirm the toggle actually does something -- the default (real usage) does record.
+    tools.prepare_context("debug model loading: load_model", str(repo), output_format="json")
+    assert repo_memory.status(str(repo))["counts"]["task_queries"] == before + 1
+
+
+def test_determinism_record_false_never_writes_task_queries(tmp_path, isolated_config):
+    """test_determinism runs context_prepare several times per call (5 by
+    default) -- record=False must suppress every one of those, not just the
+    first, so the benchmark's determinism gate never records real usage."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "service.py").write_text("def load_model():\n    return 'ready'\n", encoding="utf-8")
+    tools.test_determinism("debug model loading: load_model", str(repo), runs=5, record=False)
+    assert repo_memory.status(str(repo))["counts"]["task_queries"] == 0
 
 
 def test_prepare_context_is_bounded_and_complete(tmp_path, isolated_config):
