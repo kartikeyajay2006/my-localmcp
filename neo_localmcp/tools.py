@@ -650,32 +650,16 @@ def _best_heading_section(path: str, symbol_hits: list[dict[str, Any]], interpre
     return best
 
 
-def context_prepare(task: str, repo_root: str = "auto", max_files: int | None = None, limit: int = 6, use_ollama: bool = False, model: str | None = None, output_format: str = "json", token_budget: int = 3000) -> str:
-    """Core retrieval implementation; prepare_context is the MCP/CLI adapter over this."""
-    root = repo_root_or_cwd(repo_root)
-    status_data = repo_memory.status(root)
-    refreshed = False
-    if status_data["counts"].get("files", 0) == 0 or not status_data.get("index_complete", False):
-        repo_memory.index_repo(root, max_files=max_files, force=False)
-        refreshed = True
-    elif status_data.get("stale_files", 0) or status_data.get("missing_files", 0) or status_data.get("branch_changed") or status_data.get("indexer_rebuild_recommended"):
-        repo_memory.refresh(root, max_files=max_files, force=status_data.get("indexer_rebuild_recommended", False))
-        refreshed = True
-    if refreshed:
-        status_data = repo_memory.status(root)
-
-    interpreted = normalize_query(task)
-    terms: list[str] = interpreted.get("search_terms") or []
-    if not terms:
-        terms = [task]
-    indexed_files = repo_memory.list_indexed_files(root)
+def _score_index_and_symbol_hits(terms: list[str], interpreted: dict[str, Any], root: Path, limit: int, intent: str) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]]:
+    """Job (c1) of context_prepare (#29): score repo_memory.lookup's index/symbol
+    hits per term into a fresh candidates dict, collecting every symbol hit seen
+    along the way. First job in the pipeline, so it originates candidates/
+    symbol_hits rather than receiving them -- later jobs take and mutate/return
+    the same dict this returns.
+    """
     candidates: dict[str, dict[str, Any]] = {}
-    search_results: dict[str, list[dict[str, Any]]] = {}
     symbol_hits: list[dict[str, Any]] = []
-    followed_references: list[dict[str, Any]] = []
-    intent = interpreted.get("intent", "context")
     strong_terms_set = set(interpreted.get("strong_terms") or [])
-
     for term in terms[:20]:
         term_if_strong = term if term in strong_terms_set else None
         lookup_data = repo_memory.lookup(term, root, limit=limit * 3)
@@ -699,7 +683,18 @@ def context_prepare(task: str, repo_root: str = "auto", max_files: int | None = 
                 _add_candidate(candidates, path, f"heading '{sym.get('name')}' line {sym.get('start_line')}{label}", score, intent, strong_term=term_if_strong)
             else:
                 _add_candidate(candidates, path, f"symbol '{sym.get('name')}' line {sym.get('start_line')}", _term_score(term, interpreted, 16, 10), intent, strong_term=term_if_strong)
-    batch_terms = terms[:20]
+    return candidates, symbol_hits
+
+
+def _score_batched_search(batch_terms: list[str], interpreted: dict[str, Any], root: Path, limit: int, intent: str, indexed_files: list[str], candidates: dict[str, dict[str, Any]], strong_terms_set: set[str]) -> tuple[dict[str, dict[str, Any]], dict[str, list[dict[str, Any]]], list[dict[str, Any]]]:
+    """Job (c2) of context_prepare (#29): one batched rg_search across every
+    term, scoring each hit into `candidates` (mutated in place; the same dict
+    is returned so the pipeline reads as take-and-return, not a silent
+    closure mutation), and following any doc/status file's source references
+    into extra candidates. Returns (candidates, search_results, followed_references).
+    """
+    search_results: dict[str, list[dict[str, Any]]] = {}
+    followed_references: list[dict[str, Any]] = []
     if batch_terms:
         batch_pattern = "(?:" + "|".join(re.escape(term) for term in batch_terms) + ")"
         rows = rg_search(batch_pattern, root, max_results=max(60, limit * 12))
@@ -722,7 +717,17 @@ def context_prepare(task: str, repo_root: str = "auto", max_files: int | None = 
                         record = {"from": path, "line": row.get("line"), "reference": ref, "resolved": resolved}
                         if record not in followed_references:
                             followed_references.append(record)
+    return candidates, search_results, followed_references
 
+
+def _resolve_explicit_paths(task: str, terms: list[str], indexed_files: list[str], candidates: dict[str, dict[str, Any]], intent: str, strong_terms_set: set[str]) -> set[str]:
+    """Job (c3) of context_prepare (#29): resolve any file path/reference named
+    directly in the raw task text or in a search term to a real indexed file,
+    adding each as a strong "direct file reference" candidate (mutates
+    `candidates` in place). Returns the resolved explicit_paths set -- used
+    both by the later "explicit path in task" bonus and by read_first
+    selection's "explicit paths are authoritative" rule.
+    """
     explicit_paths: set[str] = set()
     for reference in extract_file_references(task):
         explicit_paths.update(_resolve_reference(reference, indexed_files))
@@ -731,26 +736,18 @@ def context_prepare(task: str, repo_root: str = "auto", max_files: int | None = 
         for resolved in _resolve_reference(term, indexed_files):
             explicit_paths.add(resolved)
             _add_candidate(candidates, resolved, f"direct file reference '{term}'", 120, intent, allow_reason_line_hint=False, strong_term=term if term in strong_terms_set else None)
+    return explicit_paths
 
-    # Distinct-strong-term-coverage bonus (#24): a file that co-occurs with several
-    # *different* strong terms is much stronger evidence of relevance than a file
-    # that racks up many repeated hits on a single overloaded term (e.g. "migration"
-    # matching every symbol in a filesystem-layout-migration module by coincidence of
-    # vocabulary). Applied once per candidate, after all term-matching passes above,
-    # so it reflects breadth of query coverage rather than depth of one term's hits.
-    for item in candidates.values():
-        matched = item.pop("strong_terms_matched", None) or set()
-        if len(matched) > 1:
-            item["score"] += 20 * len(matched)
 
-    for resolved in sorted(explicit_paths):
-        _add_candidate(candidates, resolved, "explicit path in task", 120, intent, allow_reason_line_hint=False)
-
-    # Retrieval-memory boost (1.0.6, P4/P5): a small, capped, recency-gated nudge
-    # from prior sessions' implicit feedback (see repo_memory.get_boost_map). This
-    # runs after all structural scoring above and is bounded well below any
-    # structural signal (heading milestone match alone is +60), so memory can only
-    # break near-ties, never override a real structural match.
+def _apply_retrieval_boost(candidates: dict[str, dict[str, Any]], root: Path, interpreted: dict[str, Any], symbol_hits: list[dict[str, Any]]) -> str | None:
+    """Job (d) of context_prepare (#29): a small, capped, recency-gated nudge
+    from prior sessions' implicit feedback (repo_memory.get_boost_map). Runs
+    after all structural scoring and is bounded well below any structural
+    signal (a heading milestone match alone is +60), so memory can only break
+    near-ties, never override a real structural match. Mutates candidate
+    scores/reasons in place; returns the term_key (also needed later to
+    record this call's own task query).
+    """
     term_key = compute_term_key(interpreted)
     if term_key and candidates:
         boost_map = repo_memory.get_boost_map(root, term_key, list(candidates.keys()))
@@ -762,7 +759,16 @@ def context_prepare(task: str, repo_root: str = "auto", max_files: int | None = 
                 if boost:
                     item["score"] += boost
                     item["reasons"].append(f"memory boost (+{boost}) from prior retrievals")
+    return term_key
 
+
+def _select_read_first(candidates: dict[str, dict[str, Any]], explicit_paths: set[str], intent: str, limit: int, max_files: int | None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Job (e) of context_prepare (#29): finalize each candidate's
+    reasons/line_hints, sort into `ranked`, then fill `read_first` up to
+    read_limit -- explicit user paths first (authoritative even for
+    feature/debug tasks), then source-first policy for dev-shaped intents,
+    then whatever's left in ranked order. Returns (ranked, read_first).
+    """
     for item in candidates.values():
         item["reasons"] = sorted(item.get("reasons", []))
         item["line_hints"] = _compact_line_hints(item.get("line_hints", []))
@@ -785,16 +791,17 @@ def context_prepare(task: str, repo_root: str = "auto", max_files: int | None = 
                 read_first.append(item)
             if len(read_first) >= read_limit:
                 break
+    return ranked, read_first
 
-    symbol_map = repo_memory.symbols_for_files([item["path"] for item in read_first], root, max_per_file=8)
-    for item in read_first:
-        syms = symbol_map.get(item["path"], [])
-        for sym in syms:
-            hint = f"{sym.get('name')} around line {sym.get('start_line')}"
-            if hint not in item["line_hints"]:
-                item["line_hints"].append(hint)
-        item["line_hints"] = _compact_line_hints(item.get("line_hints", []))
 
+def _build_excerpt_ranges(read_first: list[dict[str, Any]], symbol_hits: list[dict[str, Any]], interpreted: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]], list[dict[str, Any]]]:
+    """Job (f) of context_prepare (#29): pick the excerpt range for each
+    read_first item via a three-tier fallback -- matched heading section (a
+    long doc opens at the relevant section, not its first line), then the
+    exact symbol/strong-term match, then the highest-weighted line hint (tie
+    breaking to the earliest line for determinism). Returns (ranges,
+    section_by_path, sections_for_memory).
+    """
     ranges: list[dict[str, Any]] = []
     section_by_path: dict[str, dict[str, Any]] = {}
     sections_for_memory: list[dict[str, Any]] = []
@@ -832,6 +839,93 @@ def context_prepare(task: str, repo_root: str = "auto", max_files: int | None = 
             "match_kind": "fallback", "matched_name": None, "score": item.get("score"),
             "hint_lines": other_hint_lines,
         })
+    return ranges, section_by_path, sections_for_memory
+
+
+def _run_ollama_ranking(task: str, interpreted: dict[str, Any], ranked: list[dict[str, Any]], limit: int, model: str | None) -> dict[str, Any] | None:
+    """Job (h) of context_prepare (#29): build the second-pass ranking-review
+    prompt and call the fast Ollama model. Advisory only -- the deterministic
+    READ FIRST built by earlier jobs is never replaced by this, only
+    reviewed. Caller only invokes this when Ollama ranking was requested and
+    there is something to rank (`use_ollama and ranked`); this function
+    itself always runs the call. Returns the raw chat() result.
+    """
+    prompt = f"""
+You are a second-pass ranking reviewer for neo-localmcp. You improve the deterministic repo context; you do not replace it. Do not write source code.
+
+Task: {task}
+Interpreted query:
+{json.dumps(interpreted, indent=2)}
+
+Non-negotiable policy:
+- Source files and tests outrank docs/status for debug, feature, and refactor tasks.
+- Current source files are truth. Docs/status are orientation only.
+- Never tell the agent to skip a source file that directly contains a requested symbol, method, property, API, or error.
+- If a docs/status file only points at source files, put the source files in the read order and docs in "Do not read yet".
+- Preserve the deterministic top candidates unless there is a clear reason to change order.
+- Return concise sections exactly named: Recommended read order, Key line ranges, Do not read yet, Risk.
+- Keep the whole answer under 900 words. Do not quote large code snippets.
+
+Candidate files, scores, reasons, and line hints:
+{json.dumps(ranked[:limit], indent=2)[:12000]}
+""".strip()
+    return chat(prompt, model=model, purpose="ranking")
+
+
+def context_prepare(task: str, repo_root: str = "auto", max_files: int | None = None, limit: int = 6, use_ollama: bool = False, model: str | None = None, output_format: str = "json", token_budget: int = 3000) -> str:
+    """Core retrieval implementation; prepare_context is the MCP/CLI adapter over this."""
+    root = repo_root_or_cwd(repo_root)
+    status_data = repo_memory.status(root)
+    refreshed = False
+    if status_data["counts"].get("files", 0) == 0 or not status_data.get("index_complete", False):
+        repo_memory.index_repo(root, max_files=max_files, force=False)
+        refreshed = True
+    elif status_data.get("stale_files", 0) or status_data.get("missing_files", 0) or status_data.get("branch_changed") or status_data.get("indexer_rebuild_recommended"):
+        repo_memory.refresh(root, max_files=max_files, force=status_data.get("indexer_rebuild_recommended", False))
+        refreshed = True
+    if refreshed:
+        status_data = repo_memory.status(root)
+
+    interpreted = normalize_query(task)
+    terms: list[str] = interpreted.get("search_terms") or []
+    if not terms:
+        terms = [task]
+    indexed_files = repo_memory.list_indexed_files(root)
+    intent = interpreted.get("intent", "context")
+    strong_terms_set = set(interpreted.get("strong_terms") or [])
+
+    candidates, symbol_hits = _score_index_and_symbol_hits(terms, interpreted, root, limit, intent)
+    batch_terms = terms[:20]
+    candidates, search_results, followed_references = _score_batched_search(batch_terms, interpreted, root, limit, intent, indexed_files, candidates, strong_terms_set)
+    explicit_paths = _resolve_explicit_paths(task, terms, indexed_files, candidates, intent, strong_terms_set)
+
+    # Distinct-strong-term-coverage bonus (#24): a file that co-occurs with several
+    # *different* strong terms is much stronger evidence of relevance than a file
+    # that racks up many repeated hits on a single overloaded term (e.g. "migration"
+    # matching every symbol in a filesystem-layout-migration module by coincidence of
+    # vocabulary). Applied once per candidate, after all term-matching passes above,
+    # so it reflects breadth of query coverage rather than depth of one term's hits.
+    for item in candidates.values():
+        matched = item.pop("strong_terms_matched", None) or set()
+        if len(matched) > 1:
+            item["score"] += 20 * len(matched)
+
+    for resolved in sorted(explicit_paths):
+        _add_candidate(candidates, resolved, "explicit path in task", 120, intent, allow_reason_line_hint=False)
+
+    term_key = _apply_retrieval_boost(candidates, root, interpreted, symbol_hits)
+    ranked, read_first = _select_read_first(candidates, explicit_paths, intent, limit, max_files)
+
+    symbol_map = repo_memory.symbols_for_files([item["path"] for item in read_first], root, max_per_file=8)
+    for item in read_first:
+        syms = symbol_map.get(item["path"], [])
+        for sym in syms:
+            hint = f"{sym.get('name')} around line {sym.get('start_line')}"
+            if hint not in item["line_hints"]:
+                item["line_hints"].append(hint)
+        item["line_hints"] = _compact_line_hints(item.get("line_hints", []))
+
+    ranges, section_by_path, sections_for_memory = _build_excerpt_ranges(read_first, symbol_hits, interpreted)
     for item in candidates.values():
         item.pop("line_hint_weights", None)
     excerpt_data = repo_memory.file_excerpts(ranges, root, max_chars=max(1000, min(int(token_budget), 8000) * 4))
@@ -871,26 +965,7 @@ def context_prepare(task: str, repo_root: str = "auto", max_files: int | None = 
 
     ollama_result: dict[str, Any] | None = None
     if use_ollama and ranked:
-        prompt = f"""
-You are a second-pass ranking reviewer for neo-localmcp. You improve the deterministic repo context; you do not replace it. Do not write source code.
-
-Task: {task}
-Interpreted query:
-{json.dumps(interpreted, indent=2)}
-
-Non-negotiable policy:
-- Source files and tests outrank docs/status for debug, feature, and refactor tasks.
-- Current source files are truth. Docs/status are orientation only.
-- Never tell the agent to skip a source file that directly contains a requested symbol, method, property, API, or error.
-- If a docs/status file only points at source files, put the source files in the read order and docs in "Do not read yet".
-- Preserve the deterministic top candidates unless there is a clear reason to change order.
-- Return concise sections exactly named: Recommended read order, Key line ranges, Do not read yet, Risk.
-- Keep the whole answer under 900 words. Do not quote large code snippets.
-
-Candidate files, scores, reasons, and line hints:
-{json.dumps(ranked[:limit], indent=2)[:12000]}
-""".strip()
-        ollama_result = chat(prompt, model=model, purpose="ranking")
+        ollama_result = _run_ollama_ranking(task, interpreted, ranked, limit, model)
 
     ranking_full_status = (ollama_result or {}).get("ollama_status")
     ranking_result_for_nesting = {**ollama_result, "ollama_status": _slim_status_for_nesting(ranking_full_status)} if ollama_result else ollama_result
