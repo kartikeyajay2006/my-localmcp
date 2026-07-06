@@ -1,5 +1,9 @@
 # Project Notes
 
+## 2026-07-06 (2)
+
+- **`setup.py` and `setup_wizard.py` now feature-parity (docs-only follow-up).** Tracing the full setup lifecycle call chain during feature completion revealed the Ollama-config and client-reconciliation logic are now shared across three callers (wizard/CLI/`set-ollama` runtime command), one implementation each. Added `config-ollama` and `manage-clients` examples to README.md's setup.py usage block, a status line to PROJECT_STATUS.md, and this entry -- no code changes, just documentation of the achieved parity for the record.
+
 ## 2026-07-06
 
 - **Closed #26, #36, #30, #13, #29 -- the rest of the #10 audit's risk-ordered backlog -- via 4 PRs (#58, #59, #60, #61, #62; #13 and #29 landed as their own PRs, #26/#36/#30 also each their own).** Worked in ascending risk order (established 2026-07-05): Windows CLI mojibake fix -> wizard private-symbol promotion -> mcp-tools result-envelope dedup -> CI split by area + wizard test backfill -> the `context_prepare` decomposition (highest severity in the whole audit, done last and most carefully).

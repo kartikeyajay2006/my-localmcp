@@ -214,6 +214,8 @@ python3 setup.py install --clean --yes             # full wipe + fresh install
 python3 setup.py reinstall                         # replace runtime; preserve durable data
 python3 setup.py uninstall                         # remove runtime; preserve durable data
 python3 setup.py uninstall --delete-memory --yes   # full wipe, no reinstall
+python3 setup.py config-ollama --fast-model qwen2.5:3b --summary-model qwen2.5-coder:7b
+python3 setup.py manage-clients --client claude-code --client codex   # disconnects any client not listed
 python3 setup.py install --dry-run                 # preview only
 ```
 
