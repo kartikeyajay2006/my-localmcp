@@ -11,3 +11,5 @@ build/
 .vscode/settings.json
 .wizard_preview/
 .coverage
+neo-localmcp_benchmarks/
+.claude/
