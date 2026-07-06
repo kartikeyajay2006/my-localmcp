@@ -20,6 +20,20 @@ def test_prepare_context_is_bounded_and_complete(tmp_path, isolated_config):
     assert result["context_excerpts"]
 
 
+def test_cli_text_output_is_ascii_only(tmp_path, isolated_config):
+    """Regression for #26: cli.py's human-readable "text" output used raw
+    Unicode punctuation (em-dash) that silently renders as the U+FFFD
+    replacement character on a legacy-codepage Windows console. Follows the
+    wizard's precedent (PROJECT_NOTES.md 2026-07-03 (8)) of ASCII-only CLI
+    output rather than relying on stdout encoding reconfiguration."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "service.py").write_text("def load_model():\n    return 'ready'\n" + "# filler\n" * 200, encoding="utf-8")
+    (repo / "other.py").write_text("def other():\n    return 1\n" + "# filler\n" * 50, encoding="utf-8")
+    raw = tools.prepare_context("debug model loading: load_model", str(repo), token_budget=600, max_files=2, output_format="text")
+    raw.encode("ascii")
+
+
 def test_colon_focus_filters_filler_and_keeps_short_milestone():
     result = normalize_query("f4 token menu: goals, architecture decisions, implementation phases, and entry-point files")
     assert "f4" in result["strong_terms"]
@@ -109,6 +123,20 @@ def test_heading_section_found_without_filename_anchor(tmp_path, isolated_config
     )
     result = json.loads(raw)
     assert result["read_first"][0]["path"] == "docs/m9_widget_plan.md"
+
+
+def test_mcp_tiny_output_is_ascii_only_with_matched_heading(tmp_path, isolated_config):
+    """Regression for #26: the section-sign glyph marking a matched heading
+    name in the mcp_tiny/agent_text renderer is the same class of non-ASCII
+    bug, just on the MCP-facing text surface instead of the CLI's."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _build_long_plan_repo(repo)
+    raw = tools.prepare_context(
+        "m9.6 list mode view rendering checklist outliner tri-state rollup",
+        str(repo), token_budget=1500, max_files=3, output_format="mcp_tiny",
+    )
+    raw.encode("ascii")
 
 
 def test_excerpt_opens_at_matched_section_not_line_one(tmp_path, isolated_config):
