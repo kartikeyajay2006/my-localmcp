@@ -42,7 +42,14 @@ def test_sys_group_runs_and_reports_pass(tmp_path, isolated_config):
     assert {c["name"] for c in report["checks"]} == {"doctor", "status", "where", "model_status"}
 
 
-def test_full_expands_to_every_registered_group(tmp_path, isolated_config):
+def test_full_expands_to_every_registered_group(tmp_path, isolated_config, monkeypatch):
+    # Mock Ollama so this stays a hermetic, fast unit test -- a real
+    # unreachable-Ollama network attempt on a CI runner with no Ollama
+    # installed is exactly the "unit" test silently making a real network
+    # call" problem this repo has already found and flagged elsewhere
+    # (tests/installer/test_verification.py, PROJECT_NOTES 2026-07-05).
+    monkeypatch.setattr(benchmark.tools, "ollama_status", lambda: json.dumps({"state": "ready", "model": "fake-model", "installed": True}))
+    monkeypatch.setattr(benchmark.tools, "ollama_ensure", lambda: json.dumps({"ok": True, "state": "ready"}))
     repo = _seed_repo(tmp_path / "repo")
     report = benchmark.run_benchmark(["full"], repo_root=str(repo), out_dir=str(tmp_path / "out"))
     assert report["groups_requested"] == ["full"]
