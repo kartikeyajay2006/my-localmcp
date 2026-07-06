@@ -363,6 +363,7 @@ class RealBackend:
             state.selected_clients,
             server_command=self._paths.server_executable,
             on_event=lambda level, message: emit(StepEvent(level, message)),
+            label_fn=lambda client: CLIENT_LABELS.get(client, client),
         )
         if not outcome.ok:
             return OperationOutcome(

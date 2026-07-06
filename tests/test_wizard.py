@@ -107,6 +107,7 @@ def test_real_backend_apply_client_changes_uses_shared_helper(isolated_app_home,
     assert outcome.ok
     assert calls == ["claude-code"]
     assert any(e.level == "action" for e in events)
+    assert any(e.message == "Connecting Claude Code ..." for e in events)
 
 
 def test_real_backend_apply_ollama_config_uses_shared_helper(isolated_app_home):

@@ -295,6 +295,56 @@ def test_apply_client_selection_connects_and_disconnects(client_home, tmp_path, 
     assert any(level == "action" for level, _ in events)
 
 
+def test_apply_client_selection_uses_label_fn_for_connect_and_disconnect_messages(
+    client_home, tmp_path, monkeypatch
+):
+    from neo_localmcp.installer import clients
+
+    paths = ManagedPaths.from_environment()
+    clients.record_selection(paths, ["claude-code"])
+    monkeypatch.setattr(
+        clients.client_setup, "setup_client",
+        lambda client, apply=True, **kw: {"client": client, "ok": True},
+    )
+    monkeypatch.setattr(
+        clients.client_setup, "remove_client",
+        lambda client, apply=True, **kw: {"client": client, "ok": True},
+    )
+    labels = {"claude-code": "Claude Code", "codex": "Codex (CLI / IDE)"}
+
+    events = []
+    clients.apply_client_selection(
+        paths, ["codex"], server_command="neo-localmcp-server",
+        on_event=lambda level, message: events.append((level, message)),
+        label_fn=lambda client: labels.get(client, client),
+    )
+
+    messages = [message for _, message in events]
+    assert any("Connecting Codex (CLI / IDE) ..." == m for m in messages)
+    assert any("Disconnecting Claude Code ..." == m for m in messages)
+
+
+def test_apply_client_selection_without_label_fn_uses_raw_client_keys(
+    client_home, tmp_path, monkeypatch
+):
+    from neo_localmcp.installer import clients
+
+    paths = ManagedPaths.from_environment()
+    monkeypatch.setattr(
+        clients.client_setup, "setup_client",
+        lambda client, apply=True, **kw: {"client": client, "ok": True},
+    )
+
+    events = []
+    clients.apply_client_selection(
+        paths, ["codex"], server_command="neo-localmcp-server",
+        on_event=lambda level, message: events.append((level, message)),
+    )
+
+    messages = [message for _, message in events]
+    assert any("Connecting codex ..." == m for m in messages)
+
+
 def test_apply_client_selection_records_failures_without_raising(client_home, tmp_path, monkeypatch):
     from neo_localmcp.installer import clients
 
