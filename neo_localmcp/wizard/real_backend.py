@@ -178,7 +178,7 @@ class RealBackend:
         state = str(probe.get("state", "unreachable"))
         reachable = state not in {"unreachable", "timed_out", "disabled", "failed"}
         installed = sorted({str(m) for m in probe.get("installed_models", []) if m})
-        sizes = self._model_sizes(base_url) if reachable and installed else {}
+        sizes = self._model_sizes() if reachable and installed else {}
         if reachable and installed:
             detail = f"`ollama list`: {len(installed)} model(s) installed at {base_url}."
         elif reachable:
@@ -193,25 +193,14 @@ class RealBackend:
         )
 
     @staticmethod
-    def _model_sizes(base_url: str) -> dict[str, str]:
-        """Best-effort per-model size from `ollama list`'s underlying /api/tags.
+    def _model_sizes() -> dict[str, str]:
+        """Per-model size, human-formatted, for wizard display.
 
-        Never raises -- an empty result just means sizes aren't shown, the
-        model names themselves already came back fine from ``status()``.
+        Formatting (human_size) is a wizard presentation concern and stays here;
+        fetching the raw sizes is now ollama_client.model_sizes()'s public API
+        (#36) instead of reaching into that module's private _request_json.
         """
-        try:
-            code, tags = ollama_client._request_json("/api/tags", timeout=5)
-            if code != 200:
-                return {}
-            sizes: dict[str, str] = {}
-            for item in tags.get("models", []):
-                name = str(item.get("name") or item.get("model") or "")
-                size = item.get("size")
-                if name and isinstance(size, (int, float)):
-                    sizes[name] = human_size(size)
-            return sizes
-        except Exception:  # noqa: BLE001 - size display is a nice-to-have, never fatal
-            return {}
+        return {name: human_size(size) for name, size in ollama_client.model_sizes().items()}
 
     # -- operations ------------------------------------------------------- #
 
@@ -285,9 +274,9 @@ class RealBackend:
         return str(written)
 
     def _dry_run(self, state: WizardState, emit: EmitFn) -> OperationOutcome:
-        from .. import setup_cli  # private plan tables live here; same repo
+        from .. import setup_cli  # public dry_run_plan() lives here; same repo
 
-        key = setup_cli._plan_key(
+        key, plan = setup_cli.dry_run_plan(
             state.operation,
             clean=False,
             delete_memory=(state.operation == OP_UNINSTALL and state.full_wipe),
@@ -296,7 +285,7 @@ class RealBackend:
         emit(StepEvent("info", f"DRY RUN: no changes will be made for '{key}'."))
         emit(StepEvent("info", f"Managed root: {self._paths.root}"))
         emit(StepEvent("info", f"Detected state: {st.kind.value}"))
-        for i, step in enumerate(setup_cli._DRY_RUN_PLANS.get(key, ()), start=1):
+        for i, step in enumerate(plan, start=1):
             emit(StepEvent("info", f"  {i}. {step}"))
         return OperationOutcome(
             ok=True, status="succeeded",
