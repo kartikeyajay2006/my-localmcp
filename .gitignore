@@ -12,3 +12,5 @@ build/
 .wizard_preview/
 .coverage
 .superpowers/
+neo-localmcp_benchmarks/
+.claude/

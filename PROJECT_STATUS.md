@@ -1,14 +1,17 @@
 # Project Status
 
-Updated: 2026-07-02
+Updated: 2026-07-06
 
 ## Current phase
+
+**1.1.1 (not yet released) is staged on `main`.** Scope, per owner decision (2026-07-06): the full `#10` code-quality-audit backlog (issues #22-#36, PRs #54-#62), the `docs/1.1.1_PLAN.md` benchmark CLI scaffold (issue #9, phases 1a-1f, PR #66), issue #64 (lookup staleness visibility, closed below), and issue #65 (`--live-agent-comparison`, not yet designed/started) are all 1.1.1 work — not a separate 1.2.0. **1.2.0 has no plan of its own yet.** Version is synchronized at `1.1.1` across `neo_localmcp/__init__.py`, `pyproject.toml`, the Claude Desktop manifest, and `README.md`'s install-requirements line; `packages/claude-desktop/neo-localmcp-v1.1.1.mcpb` is rebuilt from a clean checkout. Full suite green (340 passed / 4 skipped), compileall clean. Not yet tagged/published — #65 is the remaining piece of open scope before it can be (see "Next milestone").
+- **Closed #64 (2026-07-06)**: `lookup()` searches the stored index, not live files, and deliberately skips freshness probing on its hot read-only path (a considered perf tradeoff, not an oversight — see the issue). Of the three directions discussed in the issue, went with the cheapest: `index_repo` now stamps a repo-level `last_indexed_at` metadata key (alongside the existing `indexer_version`/`eligible_files`/etc. writes) every time it completes, and `lookup()` surfaces it via one single-key `repo_metadata` read — no per-file rehash, no git/filesystem probing, so the "millisecond query becomes a client timeout" risk the issue's own code comment warns about is untouched. Lets a caller judge staleness risk itself. TDD: `tests/test_repo_memory.py::test_lookup_reports_last_indexed_at_from_stored_metadata` and `::test_lookup_reports_no_last_indexed_at_for_a_never_indexed_repo`, both watched red before the implementation.
 
 1.0.10 setup lifecycle work (Phases 1-16) is complete. `setup.py` is the sole supported lifecycle entrypoint on macOS and Windows; Linux is explicitly deferred. Legacy installer scripts are archived under `_LegacyInstallers/`. Native Python 3.12 CI is green on macOS and Windows (run 28632598884), and the real managed installation is running 1.0.10 from a clean canonical layout.
 
 `setup.py` installs, reinstalls, default-uninstalls while preserving durable data, clean-installs, and full-wipes from a local checkout. It builds and verifies a candidate runtime before promotion, stops Neo-owned processes, unloads only Neo-used Ollama models, migrates recognized legacy layouts, reconnects explicitly selected/recorded clients, and verifies the installed CLI/MCP endpoint.
 
-1.0.9 onboarding-polish work (`docs/1.0.9_PLAN.md`) is complete and released. Version 1.0.10 is synchronized across `neo_localmcp/__init__.py`, `pyproject.toml`, and the Claude Desktop manifest; its bundle is rebuilt during this closeout.
+1.0.9 onboarding-polish work (`docs/1.0.9_PLAN.md`) is complete and released.
 
 ## Acceptance targets
 
@@ -74,4 +77,4 @@ Updated: 2026-07-02
 
 ## Next milestone
 
-Cross-platform acceptance and token benchmark: package on Windows/macOS, run representative Python and C#/XAML tasks, compare discovery and total tokens, and tune excerpt selection from measured misses.
+Finish 1.1.1 and ship it: #65 (`--live-agent-comparison`) is the one remaining piece of designed-but-not-built scope (see priority order in `PROJECT_NOTES.md` 2026-07-06). Beyond that, the cross-platform acceptance and token benchmark — package on Windows/macOS, run representative Python and C#/XAML tasks, compare discovery and total tokens, and tune excerpt selection from measured misses — remains the longer-term goal, but has no version or plan assigned yet.
