@@ -148,6 +148,22 @@ def model_sizes(timeout: float = 5) -> dict[str, int]:
         return {}
 
 
+def _elapsed(started: float) -> float:
+    return round(time.monotonic() - started, 3)
+
+
+def _result(ok: bool, base: dict[str, Any] | None = None, **fields: Any) -> dict[str, Any]:
+    """{"ok": ok} merged with an optional base status dict, then per-call
+    overrides -- removes the repeated `{"ok": ..., **current, "state": ...}`
+    dict literal across ping/start_service/warm/ensure/unload_model (#30,
+    6.1). Purely mechanical: every call site keeps exactly the field set it
+    had before, just built through one path instead of ad hoc dict literals.
+    """
+    result: dict[str, Any] = {"ok": ok, **(base or {})}
+    result.update(fields)
+    return result
+
+
 def status(model: str | None = None, purpose: str = "ranking") -> dict[str, Any]:
     cfg = _cfg()
     base = ollama_base_url()
@@ -193,13 +209,13 @@ def status(model: str | None = None, purpose: str = "ranking") -> dict[str, Any]
         result.update({"state": "timed_out", "error": str(exc) or "health check timed out"})
     except Exception as exc:
         result.update({"state": "unreachable", "error": str(exc)})
-    result["elapsed_seconds"] = round(time.monotonic() - started, 3)
+    result["elapsed_seconds"] = _elapsed(started)
     return result
 
 
 def ping() -> dict[str, Any]:
     current = status()
-    return {"ok": current.get("state") not in {"disabled", "unreachable", "timed_out", "failed"}, **current}
+    return _result(current.get("state") not in {"disabled", "unreachable", "timed_out", "failed"}, current)
 
 
 def start_service() -> dict[str, Any]:
@@ -208,10 +224,10 @@ def start_service() -> dict[str, Any]:
         return {"ok": False, "state": "unreachable", "base_url": base, "error": "remote Ollama services cannot be started by neo-localmcp"}
     current = status()
     if current.get("state") not in {"unreachable", "timed_out"}:
-        return {"ok": True, **current, "action": "already_running"}
+        return _result(True, current, action="already_running")
     executable = shutil.which("ollama")
     if not executable:
-        return {"ok": False, **current, "error": "ollama executable was not found on PATH", "action": "start_failed"}
+        return _result(False, current, error="ollama executable was not found on PATH", action="start_failed")
     kwargs: dict[str, Any] = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
     if os.name == "nt":
         kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
@@ -224,10 +240,10 @@ def start_service() -> dict[str, Any]:
         time.sleep(0.5)
         current = status()
         if current.get("state") not in {"unreachable", "timed_out"}:
-            return {"ok": True, **current, "state": "reachable", "action": "started", "owned_pid": proc.pid}
+            return _result(True, current, state="reachable", action="started", owned_pid=proc.pid)
         if proc.poll() is not None:
             break
-    return {"ok": False, **current, "state": "failed", "action": "start_failed", "owned_pid": proc.pid}
+    return _result(False, current, state="failed", action="start_failed", owned_pid=proc.pid)
 
 
 def stop_service() -> dict[str, Any]:
@@ -248,9 +264,9 @@ def warm(model: str | None = None, purpose: str = "ranking") -> dict[str, Any]:
     cfg = _cfg()
     current = status(chosen, purpose)
     if current.get("state") == "ready":
-        return {"ok": True, **current, "action": "already_loaded"}
+        return _result(True, current, action="already_loaded")
     if current.get("state") != "model_cold":
-        return {"ok": False, **current, "action": "warm_skipped"}
+        return _result(False, current, action="warm_skipped")
     started = time.monotonic()
     try:
         code, payload = _request_json(
@@ -259,15 +275,15 @@ def warm(model: str | None = None, purpose: str = "ranking") -> dict[str, Any]:
             timeout=float(cfg.get("warm_timeout_seconds", 90)),
         )
     except (TimeoutError, socket.timeout) as exc:
-        return {"ok": False, **current, "state": "timed_out", "action": "warm_timed_out", "error": str(exc) or "model warm-up timed out", "elapsed_seconds": round(time.monotonic() - started, 3)}
+        return _result(False, current, state="timed_out", action="warm_timed_out", error=str(exc) or "model warm-up timed out", elapsed_seconds=_elapsed(started))
     except Exception as exc:
-        return {"ok": False, **current, "state": "failed", "action": "warm_failed", "error": str(exc), "elapsed_seconds": round(time.monotonic() - started, 3)}
+        return _result(False, current, state="failed", action="warm_failed", error=str(exc), elapsed_seconds=_elapsed(started))
     if code == 503:
-        return {"ok": False, **current, "state": "busy", "action": "warm_deferred", "error": payload.get("error"), "elapsed_seconds": round(time.monotonic() - started, 3)}
+        return _result(False, current, state="busy", action="warm_deferred", error=payload.get("error"), elapsed_seconds=_elapsed(started))
     if code != 200:
-        return {"ok": False, **current, "state": "failed", "action": "warm_failed", "error": payload.get("error") or f"HTTP {code}"}
+        return _result(False, current, state="failed", action="warm_failed", error=payload.get("error") or f"HTTP {code}")
     ready = status(chosen, purpose)
-    return {"ok": True, **ready, "state": "ready", "action": "warmed", "load_duration": payload.get("load_duration"), "elapsed_seconds": round(time.monotonic() - started, 3)}
+    return _result(True, ready, state="ready", action="warmed", load_duration=payload.get("load_duration"), elapsed_seconds=_elapsed(started))
 
 
 def ensure(model: str | None = None, purpose: str = "ranking", auto_start: bool = True) -> dict[str, Any]:
@@ -295,7 +311,7 @@ def ensure(model: str | None = None, purpose: str = "ranking", auto_start: bool 
                 existing = _read_state()
                 existing["failed_at"] = time.time()
                 _write_state(existing)
-            return {"ok": ok, **current}
+            return _result(ok, current)
     except SupervisorLockTimeout:
         return {"ok": False, "state": "busy", "action": "ensure_lock_timeout", "base_url": ollama_base_url(), "model": _model_for(purpose, model)}
 
@@ -312,15 +328,15 @@ def unload_model(model: str, timeout: float | None = None) -> dict[str, Any]:
     try:
         code, payload = _request_json("/api/generate", method="POST", body={"model": model, "prompt": "", "stream": False, "keep_alive": 0}, timeout=bounded)
     except (TimeoutError, socket.timeout) as exc:
-        return {"ok": False, "model": model, "state": "timed_out", "action": "unload_timed_out", "error": str(exc) or "unload timed out", "elapsed_seconds": round(time.monotonic() - started, 3)}
+        return _result(False, model=model, state="timed_out", action="unload_timed_out", error=str(exc) or "unload timed out", elapsed_seconds=_elapsed(started))
     except Exception as exc:
-        return {"ok": False, "model": model, "state": "failed", "action": "unload_failed", "error": str(exc), "elapsed_seconds": round(time.monotonic() - started, 3)}
-    elapsed = round(time.monotonic() - started, 3)
+        return _result(False, model=model, state="failed", action="unload_failed", error=str(exc), elapsed_seconds=_elapsed(started))
+    elapsed = _elapsed(started)
     if code == 404:
-        return {"ok": False, "model": model, "state": "model_missing", "action": "unload_skipped", "error": payload.get("error") or "model not found", "elapsed_seconds": elapsed}
+        return _result(False, model=model, state="model_missing", action="unload_skipped", error=payload.get("error") or "model not found", elapsed_seconds=elapsed)
     if code != 200:
-        return {"ok": False, "model": model, "state": "failed", "action": "unload_failed", "error": payload.get("error") or f"HTTP {code}", "elapsed_seconds": elapsed}
-    return {"ok": True, "model": model, "state": "model_cold", "action": "unloaded", "elapsed_seconds": elapsed}
+        return _result(False, model=model, state="failed", action="unload_failed", error=payload.get("error") or f"HTTP {code}", elapsed_seconds=elapsed)
+    return _result(True, model=model, state="model_cold", action="unloaded", elapsed_seconds=elapsed)
 
 
 def unload(model: str | None = None, purpose: str = "ranking") -> dict[str, Any]:
@@ -335,7 +351,7 @@ def chat(prompt: str, model: str | None = None, purpose: str = "summary", num_pr
     chosen = str(readiness.get("model") or chosen)
     timeout_seconds = int(cfg.get("fast_timeout_seconds", 60) if purpose in {"ranking", "query"} else cfg.get("summary_timeout_seconds", 200))
     if not readiness.get("ok"):
-        return {"ok": False, "model": chosen, "purpose": purpose, "error": readiness.get("error") or readiness.get("state"), "timed_out": readiness.get("state") == "timed_out", "timeout_seconds": timeout_seconds, "ollama_status": readiness}
+        return _result(False, model=chosen, purpose=purpose, error=readiness.get("error") or readiness.get("state"), timed_out=readiness.get("state") == "timed_out", timeout_seconds=timeout_seconds, ollama_status=readiness)
     options: dict[str, Any] = {"temperature": float(cfg.get("temperature", 0.1)), "num_ctx": int(cfg.get("fast_num_ctx", 8192) if purpose in {"ranking", "query"} else cfg.get("num_ctx", 32768))}
     if num_predict is not None:
         # Bounds worst-case generation length/latency. Without this a model that
@@ -353,14 +369,14 @@ def chat(prompt: str, model: str | None = None, purpose: str = "summary", num_pr
         if code == 503:
             time.sleep(1)
             code, payload = _request_json("/api/generate", method="POST", body=body, timeout=timeout_seconds)
-        elapsed = round(time.monotonic() - started, 3)
+        elapsed = _elapsed(started)
         if code != 200:
             state = "busy" if code == 503 else ("model_missing" if code == 404 else "failed")
-            return {"ok": False, "model": chosen, "purpose": purpose, "state": state, "error": payload.get("error") or f"HTTP {code}", "elapsed_seconds": elapsed, "timeout_seconds": timeout_seconds, "timed_out": False, "ollama_status": readiness}
-        return {"ok": True, "model": chosen, "purpose": purpose, "response": payload.get("response", ""), "elapsed_seconds": elapsed, "timeout_seconds": timeout_seconds, "timed_out": False, "near_timeout": elapsed >= max(1, timeout_seconds - 10), "raw": {key: payload.get(key) for key in ("total_duration", "load_duration", "prompt_eval_count", "prompt_eval_duration", "eval_count", "eval_duration")}, "ollama_status": readiness}
+            return _result(False, model=chosen, purpose=purpose, state=state, error=payload.get("error") or f"HTTP {code}", elapsed_seconds=elapsed, timeout_seconds=timeout_seconds, timed_out=False, ollama_status=readiness)
+        return _result(True, model=chosen, purpose=purpose, response=payload.get("response", ""), elapsed_seconds=elapsed, timeout_seconds=timeout_seconds, timed_out=False, near_timeout=elapsed >= max(1, timeout_seconds - 10), raw={key: payload.get(key) for key in ("total_duration", "load_duration", "prompt_eval_count", "prompt_eval_duration", "eval_count", "eval_duration")}, ollama_status=readiness)
     except (TimeoutError, socket.timeout) as exc:
-        elapsed = round(time.monotonic() - started, 3)
-        return {"ok": False, "model": chosen, "purpose": purpose, "state": "timed_out", "error": str(exc) or f"timed out after {timeout_seconds}s", "elapsed_seconds": elapsed, "timeout_seconds": timeout_seconds, "timed_out": True, "ollama_status": readiness}
+        elapsed = _elapsed(started)
+        return _result(False, model=chosen, purpose=purpose, state="timed_out", error=str(exc) or f"timed out after {timeout_seconds}s", elapsed_seconds=elapsed, timeout_seconds=timeout_seconds, timed_out=True, ollama_status=readiness)
     except Exception as exc:
-        elapsed = round(time.monotonic() - started, 3)
-        return {"ok": False, "model": chosen, "purpose": purpose, "state": "failed", "error": str(exc), "elapsed_seconds": elapsed, "timeout_seconds": timeout_seconds, "timed_out": False, "ollama_status": readiness}
+        elapsed = _elapsed(started)
+        return _result(False, model=chosen, purpose=purpose, state="failed", error=str(exc), elapsed_seconds=elapsed, timeout_seconds=timeout_seconds, timed_out=False, ollama_status=readiness)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import json
 import os
 import subprocess
@@ -15,6 +16,26 @@ from . import tools
 from .config import load_config
 from .identity import IDENTITY
 from .utils import hidden_subprocess_kwargs
+
+
+def _tool_guard(func):
+    """Standardize the error envelope every `@mcp.tool()` needs (#30, 5.1).
+
+    An unhandled exception from a tool call must still return a normal MCP
+    string result, not crash the session -- the deterministic tools
+    underneath already handle their own domain errors, so this only catches
+    the unexpected. `functools.wraps` preserves `func`'s signature via
+    `__wrapped__` so FastMCP's schema introspection still sees the real
+    parameters, not `(*args, **kwargs)`. Applied under `@mcp.tool()`, not
+    over it, so FastMCP registers the guarded coroutine.
+    """
+    @functools.wraps(func)
+    async def wrapper(*args, **kwargs):
+        try:
+            return await func(*args, **kwargs)
+        except Exception as exc:
+            return json.dumps({"ok": False, "error": str(exc)}, indent=2)
+    return wrapper
 
 SERVER_INSTRUCTIONS = (
     "Use prepare_context before broad repository search. It returns bounded, current source excerpts; source remains authoritative. "
@@ -98,13 +119,11 @@ def _context_prepare_worker(task: str, repo_root: str, max_files: int, token_bud
 
 
 @mcp.tool()
+@_tool_guard
 async def prepare_context(task: str, ctx: Context, repo_root: str = "auto", token_budget: int = 3000, max_files: int = 6, use_ollama: bool = False, model: Optional[str] = None) -> str:
     """Return bounded current-source excerpts for a task before broad search."""
-    try:
-        root = await _resolve_repo_root(repo_root, ctx)
-        return _context_prepare_worker(task, root, max_files, token_budget, use_ollama, model)
-    except Exception as exc:
-        return json.dumps({"ok": False, "error": str(exc), "action": "provide repo_root"}, indent=2)
+    root = await _resolve_repo_root(repo_root, ctx)
+    return _context_prepare_worker(task, root, max_files, token_budget, use_ollama, model)
 
 
 @mcp.tool()
@@ -114,6 +133,7 @@ async def context_prepare(task: str, ctx: Context, repo_root: str = "auto", toke
 
 
 @mcp.tool()
+@_tool_guard
 async def file_excerpts(ranges: list[dict[str, Any]], ctx: Context, repo_root: str = "auto", max_chars: int = 20_000, retrieval_id: Optional[str] = None) -> str:
     """Read several exact current-source ranges in one bounded response.
 
@@ -121,74 +141,57 @@ async def file_excerpts(ranges: list[dict[str, Any]], ctx: Context, repo_root: s
     the pulled range matched what was suggested; this only feeds a capped,
     observational retrieval-memory signal and never changes what is returned.
     """
-    try:
-        root = await _resolve_repo_root(repo_root, ctx)
-        return tools.file_excerpts(ranges, root, max_chars, retrieval_id)
-    except Exception as exc:
-        return json.dumps({"ok": False, "error": str(exc)}, indent=2)
+    root = await _resolve_repo_root(repo_root, ctx)
+    return tools.file_excerpts(ranges, root, max_chars, retrieval_id)
 
 
 @mcp.tool()
+@_tool_guard
 async def repo_lookup(query: str, ctx: Context, repo_root: str = "auto", limit: int = 20) -> str:
     """Perform precise persistent lookup for a symbol or path."""
-    try:
-        return tools.repo_lookup(query, await _resolve_repo_root(repo_root, ctx), limit)
-    except Exception as exc:
-        return json.dumps({"ok": False, "error": str(exc)}, indent=2)
+    return tools.repo_lookup(query, await _resolve_repo_root(repo_root, ctx), limit)
 
 
 @mcp.tool()
+@_tool_guard
 async def record_change(summary: str, paths: list[str], ctx: Context, repo_root: str = "auto") -> str:
     """Record a verified logical change and refresh affected paths."""
-    try:
-        return tools.record_change(summary, paths, await _resolve_repo_root(repo_root, ctx))
-    except Exception as exc:
-        return json.dumps({"ok": False, "error": str(exc)}, indent=2)
+    return tools.record_change(summary, paths, await _resolve_repo_root(repo_root, ctx))
 
 
 @mcp.tool()
+@_tool_guard
 async def repo_status(ctx: Context, repo_root: str = "auto") -> str:
     """Report repository index, configuration, Git, and Ollama status without mutation."""
-    try:
-        return tools.status(await _resolve_repo_root(repo_root, ctx))
-    except Exception as exc:
-        return json.dumps({"ok": False, "error": str(exc)}, indent=2)
+    return tools.status(await _resolve_repo_root(repo_root, ctx))
 
 
 @mcp.tool()
+@_tool_guard
 async def doctor(ctx: Context, repo_root: str = "auto") -> str:
     """Run the full read-only neo-localmcp, repository, configuration, and Ollama health check."""
-    try:
-        return tools.doctor(await _resolve_repo_root(repo_root, ctx))
-    except Exception as exc:
-        return json.dumps({"ok": False, "error": str(exc)}, indent=2)
+    return tools.doctor(await _resolve_repo_root(repo_root, ctx))
 
 
 @mcp.tool()
+@_tool_guard
 async def refresh_index(ctx: Context, repo_root: str = "auto", max_files: Optional[int] = None, force: bool = False) -> str:
     """Refresh changed, stale, or missing files in the persistent repository index."""
-    try:
-        return tools.repo_refresh(await _resolve_repo_root(repo_root, ctx), max_files, force)
-    except Exception as exc:
-        return json.dumps({"ok": False, "error": str(exc)}, indent=2)
+    return tools.repo_refresh(await _resolve_repo_root(repo_root, ctx), max_files, force)
 
 
 @mcp.tool()
+@_tool_guard
 async def summarize_file(path: str, ctx: Context, repo_root: str = "auto", model: Optional[str] = None, heading: Optional[str] = None) -> str:
     """Summarize one exact current file, or one Markdown heading section of it, with the configured Ollama summary model and cache it by source hash."""
-    try:
-        return tools.summarize_file(path, await _resolve_repo_root(repo_root, ctx), model, heading)
-    except Exception as exc:
-        return json.dumps({"ok": False, "error": str(exc)}, indent=2)
+    return tools.summarize_file(path, await _resolve_repo_root(repo_root, ctx), model, heading)
 
 
 @mcp.tool()
+@_tool_guard
 async def apply_patch(patch_text: str, ctx: Context, repo_root: str = "auto", check_only: bool = True) -> str:
     """Check or apply an exact developer-approved unified diff; defaults to validation without mutation."""
-    try:
-        return tools.apply_unified_patch(patch_text, await _resolve_repo_root(repo_root, ctx), check_only)
-    except Exception as exc:
-        return json.dumps({"ok": False, "error": str(exc)}, indent=2)
+    return tools.apply_unified_patch(patch_text, await _resolve_repo_root(repo_root, ctx), check_only)
 
 
 @mcp.tool()
