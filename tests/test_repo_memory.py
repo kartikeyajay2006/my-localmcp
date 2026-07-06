@@ -89,6 +89,29 @@ def test_lookup_does_not_probe_git_metadata(tmp_path, isolated_config, monkeypat
     assert result["hits"] or result["symbols"]
 
 
+def test_lookup_reports_last_indexed_at_from_stored_metadata(tmp_path, isolated_config):
+    """Regression for #64: lookup searches the stored index, not live files, so
+    a caller has no way to judge staleness risk. Surface the last-indexed
+    timestamp already recorded by index_repo -- a single stored-metadata read,
+    not a per-file rehash -- so callers can judge staleness themselves without
+    lookup's hot read-only path paying any git/filesystem probing cost."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "module.py").write_text("def widget():\n    pass\n", encoding="utf-8")
+    indexed = repo_memory.index_repo(repo)
+
+    result = repo_memory.lookup("widget", repo)
+
+    assert result["last_indexed_at"] == indexed["indexed_at"]
+
+
+def test_lookup_reports_no_last_indexed_at_for_a_never_indexed_repo(tmp_path, isolated_config):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    result = repo_memory.lookup("widget", repo)
+    assert result["last_indexed_at"] is None
+
+
 def test_file_excerpts_clamps_stale_line_hint_to_eof(tmp_path, isolated_config):
     repo = tmp_path / "repo"
     repo.mkdir()
