@@ -1763,7 +1763,7 @@ git commit -m "refactor(mcp-commands): add editing.py (summarize_file/apply_unif
 
 ---
 
-### Task 11: Create `neo_localmcp/mcp_commands/ollama.py`
+### Task 11: Create `neo_localmcp/mcp_commands/ollama.py` ✅ COMPLETE (commit 85f7b00) — all 4 mcp_commands/ category files now exist
 
 **Why:** `set_ollama`, `ollama_status`, `ollama_ensure`, `ollama_control` are the MCP/CLI-facing Ollama surface — distinct from `ollama_client.py` (daemon RPC primitives) and `installer/ollama.py` (lifecycle-scoped config), per the design doc's disambiguation.
 
@@ -1774,7 +1774,7 @@ git commit -m "refactor(mcp-commands): add editing.py (summarize_file/apply_unif
 - Produces: `set_ollama(base_url: str | None = None, summary_model: str | None = None, fast_model: str | None = None, num_ctx: int | None = None) -> str`, `ollama_status(model: str | None = None, purpose: str = "ranking") -> str`, `ollama_ensure(model: str | None = None, purpose: str = "ranking") -> str`, `ollama_control(action: str, model: str | None = None, purpose: str = "ranking") -> str` — identical signatures to today's `tools.*` equivalents.
 - Consumes (from Task 7): `from ._shared import json_out`.
 
-- [ ] **Step 1: Write `ollama.py`**
+- [x] **Step 1: Write `ollama.py`**
 
 Create `neo_localmcp/mcp_commands/ollama.py`:
 
@@ -1816,13 +1816,13 @@ def ollama_control(action: str, model: str | None = None, purpose: str = "rankin
     return json_out(actions[action]())
 ```
 
-- [ ] **Step 2: Compile-check**
+- [x] **Step 2: Compile-check**
 
 ```bash
 python -m compileall -q neo_localmcp/mcp_commands
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add neo_localmcp/mcp_commands/ollama.py
