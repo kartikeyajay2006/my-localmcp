@@ -4,7 +4,8 @@ import json
 
 import pytest
 
-from neo_localmcp import repo_memory, tools
+from neo_localmcp import repo_memory
+from neo_localmcp.mcp_commands import memory
 from neo_localmcp.query import INTENT_KEYWORDS, FILLER_WORDS, normalize_query
 from neo_localmcp.utils import extract_markdown_headings
 
@@ -20,12 +21,12 @@ def test_record_false_never_writes_a_task_query(tmp_path, isolated_config):
     repo.mkdir()
     (repo / "service.py").write_text("def load_model():\n    return 'ready'\n", encoding="utf-8")
     before = repo_memory.status(str(repo))["counts"]["task_queries"]
-    tools.prepare_context("debug model loading: load_model", str(repo), output_format="json", record=False)
+    memory.prepare_context("debug model loading: load_model", str(repo), output_format="json", record=False)
     after = repo_memory.status(str(repo))["counts"]["task_queries"]
     assert after == before == 0
 
     # Confirm the toggle actually does something -- the default (real usage) does record.
-    tools.prepare_context("debug model loading: load_model", str(repo), output_format="json")
+    memory.prepare_context("debug model loading: load_model", str(repo), output_format="json")
     assert repo_memory.status(str(repo))["counts"]["task_queries"] == before + 1
 
 
@@ -36,7 +37,7 @@ def test_determinism_record_false_never_writes_task_queries(tmp_path, isolated_c
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / "service.py").write_text("def load_model():\n    return 'ready'\n", encoding="utf-8")
-    tools.test_determinism("debug model loading: load_model", str(repo), runs=5, record=False)
+    memory.test_determinism("debug model loading: load_model", str(repo), runs=5, record=False)
     assert repo_memory.status(str(repo))["counts"]["task_queries"] == 0
 
 
@@ -45,7 +46,7 @@ def test_prepare_context_is_bounded_and_complete(tmp_path, isolated_config):
     repo.mkdir()
     (repo / "service.py").write_text("def load_model():\n    return 'ready'\n" + "# filler\n" * 200, encoding="utf-8")
     (repo / "test_service.py").write_text("from service import load_model\n\ndef test_load_model():\n    assert load_model()\n", encoding="utf-8")
-    raw = tools.prepare_context("debug model loading: load_model", str(repo), token_budget=300, max_files=2, output_format="json")
+    raw = memory.prepare_context("debug model loading: load_model", str(repo), token_budget=300, max_files=2, output_format="json")
     result = json.loads(raw)
     assert result["repo_status"]["index_complete"] is True
     assert result["retrieval_metrics"]["estimated_tokens_returned"] <= 305
@@ -63,7 +64,7 @@ def test_cli_text_output_is_ascii_only(tmp_path, isolated_config):
     repo.mkdir()
     (repo / "service.py").write_text("def load_model():\n    return 'ready'\n" + "# filler\n" * 200, encoding="utf-8")
     (repo / "other.py").write_text("def other():\n    return 1\n" + "# filler\n" * 50, encoding="utf-8")
-    raw = tools.prepare_context("debug model loading: load_model", str(repo), token_budget=600, max_files=2, output_format="text")
+    raw = memory.prepare_context("debug model loading: load_model", str(repo), token_budget=600, max_files=2, output_format="text")
     raw.encode("ascii")
 
 
@@ -100,7 +101,7 @@ def test_explicit_document_path_outranks_keyword_noise(tmp_path, isolated_config
     (repo / "docs").mkdir(parents=True)
     (repo / "docs" / "f4_token_menu_plan.md").write_text("# f4 token menu plan\n", encoding="utf-8")
     (repo / "main.py").write_text(("goals architecture decisions implementation phases\n" * 30), encoding="utf-8")
-    raw = tools.prepare_context(
+    raw = memory.prepare_context(
         "Summarize docs/f4_token_menu_plan.md: goals, architecture decisions, implementation phases",
         str(repo), token_budget=300, max_files=1, output_format="json",
     )
@@ -113,7 +114,7 @@ def test_short_milestone_finds_plan_without_explicit_filename(tmp_path, isolated
     (repo / "docs").mkdir(parents=True)
     (repo / "docs" / "f4_token_menu_plan.md").write_text("# f4 token menu plan\n", encoding="utf-8")
     (repo / "main.py").write_text("goals architecture decisions implementation phases and entry-point files\n", encoding="utf-8")
-    raw = tools.prepare_context(
+    raw = memory.prepare_context(
         "f4 token menu: goals, architecture decisions, implementation phases, and entry-point files to modify",
         str(repo), token_budget=300, max_files=1, output_format="json",
     )
@@ -150,7 +151,7 @@ def test_heading_section_found_without_filename_anchor(tmp_path, isolated_config
     repo = tmp_path / "repo"
     repo.mkdir()
     _build_long_plan_repo(repo)
-    raw = tools.prepare_context(
+    raw = memory.prepare_context(
         "m9.6 list mode view rendering checklist outliner tri-state rollup",
         str(repo), token_budget=1500, max_files=3, output_format="json",
     )
@@ -165,7 +166,7 @@ def test_mcp_tiny_output_is_ascii_only_with_matched_heading(tmp_path, isolated_c
     repo = tmp_path / "repo"
     repo.mkdir()
     _build_long_plan_repo(repo)
-    raw = tools.prepare_context(
+    raw = memory.prepare_context(
         "m9.6 list mode view rendering checklist outliner tri-state rollup",
         str(repo), token_budget=1500, max_files=3, output_format="mcp_tiny",
     )
@@ -176,7 +177,7 @@ def test_excerpt_opens_at_matched_section_not_line_one(tmp_path, isolated_config
     repo = tmp_path / "repo"
     repo.mkdir()
     doc = _build_long_plan_repo(repo)
-    raw = tools.prepare_context(
+    raw = memory.prepare_context(
         "m9.6 list mode view rendering checklist outliner tri-state rollup",
         str(repo), token_budget=1500, max_files=3, output_format="json",
     )
@@ -195,7 +196,7 @@ def test_exact_heading_beats_generic_code_symbol_collision(tmp_path, isolated_co
     repo = tmp_path / "repo"
     repo.mkdir()
     _build_long_plan_repo(repo)
-    raw = tools.prepare_context(
+    raw = memory.prepare_context(
         "rendering checklist outliner tri-state rollup",
         str(repo), token_budget=1500, max_files=3, output_format="json",
     )
@@ -208,7 +209,7 @@ def test_filename_anchor_plus_section_terms_returns_section_not_header(tmp_path,
     repo = tmp_path / "repo"
     repo.mkdir()
     _build_long_plan_repo(repo)
-    raw = tools.prepare_context(
+    raw = memory.prepare_context(
         "docs/m9_widget_plan.md m9.6 list mode view rendering checklist outliner tri-state rollup",
         str(repo), token_budget=1500, max_files=3, output_format="json",
     )
@@ -224,7 +225,7 @@ def test_fenced_decoy_heading_does_not_get_matched_as_a_section(tmp_path, isolat
     repo = tmp_path / "repo"
     repo.mkdir()
     _build_long_plan_repo(repo)
-    raw = tools.prepare_context(
+    raw = memory.prepare_context(
         "FAKE HEADING INSIDE A FENCE",
         str(repo), token_budget=1500, max_files=3, output_format="json",
     )
@@ -312,7 +313,7 @@ def test_overloaded_filename_term_does_not_outrank_multi_strong_term_file(tmp_pa
         "    return INDEXER_VERSION\n",
         encoding="utf-8",
     )
-    raw = tools.prepare_context(
+    raw = memory.prepare_context(
         "schema evolution and migration in repo memory: init_db, CREATE TABLE, ALTER TABLE ADD COLUMN, INDEXER_VERSION",
         str(repo), token_budget=1500, max_files=3, output_format="json",
     )
@@ -337,7 +338,7 @@ def test_excerpt_centers_on_highest_weight_hint_not_first_by_line(tmp_path, isol
     lines += ["def handler():", "    # marks RareMarkerNeedle usage here", "    return 1"]
     (repo / "module_a.py").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-    raw = tools.prepare_context("worker RareMarkerNeedle", str(repo), token_budget=1500, max_files=1, output_format="json")
+    raw = memory.prepare_context("worker RareMarkerNeedle", str(repo), token_budget=1500, max_files=1, output_format="json")
     result = json.loads(raw)
     excerpt = next(e for e in result["context_excerpts"] if e["path"] == "module_a.py")
     target_line = next(i for i, line in enumerate(lines, start=1) if "RareMarkerNeedle" in line)

@@ -12,7 +12,7 @@ from urllib.request import url2pathname
 
 from mcp.server.fastmcp import Context, FastMCP
 
-from . import tools
+from .mcp_commands import editing, memory, ollama, system
 from .config import load_config
 from .identity import IDENTITY
 from .utils import hidden_subprocess_kwargs
@@ -142,68 +142,68 @@ async def file_excerpts(ranges: list[dict[str, Any]], ctx: Context, repo_root: s
     observational retrieval-memory signal and never changes what is returned.
     """
     root = await _resolve_repo_root(repo_root, ctx)
-    return tools.file_excerpts(ranges, root, max_chars, retrieval_id)
+    return memory.file_excerpts(ranges, root, max_chars, retrieval_id)
 
 
 @mcp.tool()
 @_tool_guard
 async def repo_lookup(query: str, ctx: Context, repo_root: str = "auto", limit: int = 20) -> str:
     """Perform precise persistent lookup for a symbol or path."""
-    return tools.repo_lookup(query, await _resolve_repo_root(repo_root, ctx), limit)
+    return system.repo_lookup(query, await _resolve_repo_root(repo_root, ctx), limit)
 
 
 @mcp.tool()
 @_tool_guard
 async def record_change(summary: str, paths: list[str], ctx: Context, repo_root: str = "auto") -> str:
     """Record a verified logical change and refresh affected paths."""
-    return tools.record_change(summary, paths, await _resolve_repo_root(repo_root, ctx))
+    return memory.record_change(summary, paths, await _resolve_repo_root(repo_root, ctx))
 
 
 @mcp.tool()
 @_tool_guard
 async def repo_status(ctx: Context, repo_root: str = "auto") -> str:
     """Report repository index, configuration, Git, and Ollama status without mutation."""
-    return tools.status(await _resolve_repo_root(repo_root, ctx))
+    return system.status(await _resolve_repo_root(repo_root, ctx))
 
 
 @mcp.tool()
 @_tool_guard
 async def doctor(ctx: Context, repo_root: str = "auto") -> str:
     """Run the full read-only neo-localmcp, repository, configuration, and Ollama health check."""
-    return tools.doctor(await _resolve_repo_root(repo_root, ctx))
+    return system.doctor(await _resolve_repo_root(repo_root, ctx))
 
 
 @mcp.tool()
 @_tool_guard
 async def refresh_index(ctx: Context, repo_root: str = "auto", max_files: Optional[int] = None, force: bool = False) -> str:
     """Refresh changed, stale, or missing files in the persistent repository index."""
-    return tools.repo_refresh(await _resolve_repo_root(repo_root, ctx), max_files, force)
+    return system.repo_refresh(await _resolve_repo_root(repo_root, ctx), max_files, force)
 
 
 @mcp.tool()
 @_tool_guard
 async def summarize_file(path: str, ctx: Context, repo_root: str = "auto", model: Optional[str] = None, heading: Optional[str] = None) -> str:
     """Summarize one exact current file, or one Markdown heading section of it, with the configured Ollama summary model and cache it by source hash."""
-    return tools.summarize_file(path, await _resolve_repo_root(repo_root, ctx), model, heading)
+    return editing.summarize_file(path, await _resolve_repo_root(repo_root, ctx), model, heading)
 
 
 @mcp.tool()
 @_tool_guard
 async def apply_patch(patch_text: str, ctx: Context, repo_root: str = "auto", check_only: bool = True) -> str:
     """Check or apply an exact developer-approved unified diff; defaults to validation without mutation."""
-    return tools.apply_unified_patch(patch_text, await _resolve_repo_root(repo_root, ctx), check_only)
+    return editing.apply_unified_patch(patch_text, await _resolve_repo_root(repo_root, ctx), check_only)
 
 
 @mcp.tool()
 def ollama_status(model: Optional[str] = None, purpose: str = "ranking") -> str:
     """Report endpoint, installed/loaded model state, and readiness without mutation."""
-    return tools.ollama_status(model, purpose)
+    return ollama.ollama_status(model, purpose)
 
 
 @mcp.tool()
 def ollama_ensure(model: Optional[str] = None, purpose: str = "ranking") -> str:
     """Ensure local Ollama and the requested model are ready; remote services are never started."""
-    return tools.ollama_ensure(model, purpose)
+    return ollama.ollama_ensure(model, purpose)
 
 
 def main() -> None:

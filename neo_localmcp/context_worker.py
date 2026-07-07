@@ -5,7 +5,7 @@ import sys
 import traceback
 from typing import Any
 
-from . import tools
+from .mcp_commands import memory
 
 
 def _configure_utf8_stdio() -> None:
@@ -31,7 +31,7 @@ def main() -> int:
         if not task.strip():
             print("neo-localmcp context_prepare error: missing task")
             return 2
-        result = tools.context_prepare(
+        result = memory.context_prepare(
             task,
             repo_root,
             max_files=max_files,
