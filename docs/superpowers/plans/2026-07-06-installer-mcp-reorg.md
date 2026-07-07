@@ -15,7 +15,7 @@
 - **`git mv` for every file relocation**, never delete+recreate — preserves history.
 - **Full verification after every task:** `python -m pytest -q` and `python -m compileall -q neo_localmcp setup.py` must both stay green. Do not proceed to the next task if either fails.
 - **This is a refactor-only plan.** No task may change observable behavior of any function being moved. If a step's diff does anything beyond "relocate code" + "fix the accompanying path arithmetic that the relocation invalidates" + "update an import," that is a bug in the plan step, not an intended improvement — stop and flag it.
-- **Work happens on a dedicated branch** off `main` (not on `docs/installer-mcp-reorg-design`, which is docs-only). Create it before Task 1: `git checkout main && git checkout -b refactor/installer-mcp-reorg`.
+- **Work happens on a dedicated branch** `refactor/installer-mcp-reorg`, cut from `docs/installer-mcp-reorg-design` so the design spec + this plan + the mermaid diagrams ride along and merge to `main` together with the implementation as one PR. Create it before Task 1: `git checkout docs/installer-mcp-reorg-design && git checkout -b refactor/installer-mcp-reorg`. (See Task 1, Step 1 for the fallback if the docs branch has already merged to `main`.)
 - **Design source of truth:** `docs/superpowers/specs/2026-07-06-installer-mcp-reorg-design.md` and its four mermaid diagrams in `mermaid_diagrams/20260706_*.mmd`. This plan implements that spec exactly; if you find a conflict, the spec wins and this plan has a bug.
 
 ---
@@ -56,8 +56,10 @@
 - [ ] **Step 1: Create the branch**
 
 ```bash
-git checkout main && git checkout -b refactor/installer-mcp-reorg
+git checkout docs/installer-mcp-reorg-design && git checkout -b refactor/installer-mcp-reorg
 ```
+
+Branch off `docs/installer-mcp-reorg-design` (NOT `main`) — that branch carries this plan, the design spec (`docs/superpowers/specs/2026-07-06-installer-mcp-reorg-design.md`), and the four `mermaid_diagrams/20260706_*.mmd` files, so the reorg branch inherits them and they land on `main` together with the implementation in one PR. `main` does not yet have these design artifacts. (If `docs/installer-mcp-reorg-design` has already been merged to `main` by the time you start, branch off `main` instead — either way the goal is a branch that contains both the design docs and the implementation.)
 
 - [ ] **Step 2: Move the file with `git mv`**
 
