@@ -275,9 +275,9 @@ class RealBackend:
         return str(written)
 
     def _dry_run(self, state: WizardState, emit: EmitFn) -> OperationOutcome:
-        from .. import setup_cli  # public dry_run_plan() lives here; same repo
+        from ..installer import cli as installer_cli  # public dry_run_plan() lives here; same repo
 
-        key, plan = setup_cli.dry_run_plan(
+        key, plan = installer_cli.dry_run_plan(
             state.operation,
             clean=False,
             delete_memory=(state.operation == OP_UNINSTALL and state.full_wipe),
