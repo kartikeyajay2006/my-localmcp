@@ -82,7 +82,7 @@ def _sys_checks(root: Path, options: dict[str, Any]) -> list[CheckResult]:
     """Group 'sys': a liveness sweep of the CLI/admin surface.
 
     No LLM, no Ollama -- always safe and effectively free to run. Reuses the
-    existing tools.py functions directly (in-process), not a subprocess
+    existing mcp_commands/system.py functions directly (in-process), not a subprocess
     shell-out to the CLI.
     """
     root_str = str(root)

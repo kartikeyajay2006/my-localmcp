@@ -111,7 +111,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
             ".next", ".svelte-kit", ".turbo", "target", "out", "DerivedData", ".gradle",
             ".neo-localmcp", ".pytest_cache",
             # ".claude/worktrees/" holds full sibling copies of the repo for parallel
-            # agent sessions -- without this, each duplicate tools.py/repo_memory.py
+            # agent sessions -- without this, each duplicate repo_memory.py/utils.py
             # outranks the real working-tree file (issue #28, same class of bug as
             # the .venv* case above).
             ".claude",

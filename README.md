@@ -194,9 +194,9 @@ python setup_wizard.py
 
 The wizard is plain-stdlib — there is no UI toolkit to install. If you run
 `python setup_wizard.py` on a bare clone and `psutil` is missing, the wizard
-detects it and offers to install it for you before starting. Add `--fake` to walk
+detects it and offers to install it for you before starting. Add `--preview` to walk
 the entire flow as a safe simulation that touches nothing on disk
-(`NEO_LOCALMCP_WIZARD_FAKE_STATE=healthy` simulates a returning, already-installed
+(`NEO_LOCALMCP_WIZARD_PREVIEW_STATE=healthy` simulates a returning, already-installed
 user).
 
 Returning users: run `python setup_wizard.py` again any time to reinstall/update,
