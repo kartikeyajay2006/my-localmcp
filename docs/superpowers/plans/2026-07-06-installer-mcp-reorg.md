@@ -1579,7 +1579,7 @@ git commit -m "refactor(mcp-commands): add memory.py (context_prepare/prepare_co
 
 ---
 
-### Task 10: Create `neo_localmcp/mcp_commands/editing.py`
+### Task 10: Create `neo_localmcp/mcp_commands/editing.py` ✅ COMPLETE (commit c80e88e)
 
 **Why:** `summarize_file` and `apply_unified_patch` are both "operate on file content" tools — chosen over the originally-proposed `misc.py` name because "misc" hides what the file does.
 
@@ -1592,7 +1592,7 @@ git commit -m "refactor(mcp-commands): add memory.py (context_prepare/prepare_co
 
 **Test-coupling note:** `tests/test_retrieval_memory.py` does `monkeypatch.setattr(tools, "chat", fake_chat)` thirteen times to intercept `summarize_file`'s internal Ollama call. After this move, that patch target must become `monkeypatch.setattr(editing, "chat", fake_chat)` — fixed in Task 12, Step 5, since that's where the rest of that test file's `tools` references also get updated (keeping all edits to one test file in one task avoids a half-updated intermediate state).
 
-- [ ] **Step 1: Write `editing.py`**
+- [x] **Step 1: Write `editing.py`**
 
 Create `neo_localmcp/mcp_commands/editing.py`:
 
@@ -1748,13 +1748,13 @@ Note: `repo_root_or_cwd` is imported inline inside `summarize_file`/`apply_unifi
 from ..utils import read_text_file, rel, repo_root_or_cwd, run_command, safe_path, sha256_file
 ```
 
-- [ ] **Step 2: Compile-check**
+- [x] **Step 2: Compile-check**
 
 ```bash
 python -m compileall -q neo_localmcp/mcp_commands
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add neo_localmcp/mcp_commands/editing.py
