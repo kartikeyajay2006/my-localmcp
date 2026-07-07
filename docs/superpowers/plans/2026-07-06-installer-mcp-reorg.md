@@ -737,7 +737,7 @@ to (again, only the module/class reference — the `--fake`/`fake` flag rename i
 
 - [ ] **Step 5: Rename the environment variable**
 
-In `neo_localmcp/installer/wizard/preview_backend.py`, change every occurrence of `NEO_LOCALMCP_WIZARD_FAKE_STATE` to `NEO_LOCALMCP_WIZARD_PREVIEW_STATE`. There is exactly one occurrence, in `_seed_state()`:
+In `neo_localmcp/installer/wizard/preview_backend.py`, change **all three** occurrences of `NEO_LOCALMCP_WIZARD_FAKE_STATE` to `NEO_LOCALMCP_WIZARD_PREVIEW_STATE`: the code in `_seed_state()`, the module docstring near the top of the file, and a comment above `_STATE_DIR`. The code occurrence is in `_seed_state()`:
 
 ```python
 def _seed_state() -> dict[str, Any]:
@@ -1146,10 +1146,12 @@ Expected: all 10 tests PASS.
 - [ ] **Step 5: Run the full fast suite so far**
 
 ```bash
-python -m pytest -q -m "not slow"
+python -m pytest -q -m "not slow" --deselect tests/test_distribution.py::test_built_mcpb_embeds_current_package_bytes
 ```
 
 Expected: all PASS (this is the first point where every test touched by Tasks 1-6 runs together).
+
+**Why the `--deselect`:** `test_built_mcpb_embeds_current_package_bytes` walks `neo_localmcp/` and asserts the committed `packages/claude-desktop/neo-localmcp-v<version>.mcpb` bundle contains every file byte-for-byte. Tasks 1-5 moved files under `neo_localmcp/` without regenerating that build artifact, so it is legitimately stale mid-reorg. It is deselected at every intermediate checkpoint and regenerated + run for real once in Task 14. This test checks bundle freshness, not reorg correctness, so deselecting it here loses no coverage of the actual code moves. (The sibling `test_built_mcpb_contains_valid_manifest` still runs and passes — it only checks the manifest + `server.py` presence, and `__version__` is unchanged, so the bundle filename/manifest still match.)
 
 - [ ] **Step 6: Compile-check**
 
@@ -1545,7 +1547,7 @@ print('OK: all', len(expected), 'expected functions present in memory.py')
 "
 ```
 
-Expected output: `OK: all 32 expected functions present in memory.py`
+Expected output: `OK: all 33 expected functions present in memory.py` (the `expected` set lists 33 names; `_mcp_compact_context`'s nested inner `compact_item` also appears in both `old_names` and `new_names` but is deliberately not in `expected`, so it doesn't affect the `missing` check).
 
 - [ ] **Step 4: Commit**
 
@@ -2035,10 +2037,10 @@ python -m pytest -q tests/installer/test_verification.py -v
 Expected: all PASS (this exercises the `_DOCTOR_SNIPPET` fix from Step 6).
 
 ```bash
-python -m pytest -q -m "not slow"
+python -m pytest -q -m "not slow" --deselect tests/test_distribution.py::test_built_mcpb_embeds_current_package_bytes
 ```
 
-Expected: full fast suite PASSES.
+Expected: full fast suite PASSES. (The `--deselect` skips the stale-bundle byte-check, regenerated + run for real in Task 14 — see the same note in Task 6, Step 5. The bundle is still stale here because Tasks 7-12 changed `neo_localmcp/` further.)
 
 - [ ] **Step 10: Compile-check**
 
@@ -2195,10 +2197,10 @@ python -m compileall -q neo_localmcp setup.py setup_wizard.py
 - [ ] **Step 9: Full fast suite**
 
 ```bash
-python -m pytest -q -m "not slow"
+python -m pytest -q -m "not slow" --deselect tests/test_distribution.py::test_built_mcpb_embeds_current_package_bytes
 ```
 
-Expected: all PASS.
+Expected: all PASS. (Last checkpoint with the stale-bundle deselect — Task 14 regenerates the bundle and runs this test for real. This is the final `neo_localmcp/` change, so the bundle rebuilt in Task 14 will be current.)
 
 - [ ] **Step 10: Commit**
 
@@ -2232,13 +2234,31 @@ Add one sentence noting the reorg is complete: version-appropriate phrasing foll
 
 Add a single dated bullet (today's date) summarizing: installer's two frontends (`cli.py`, `wizard/`) consolidated under `installer/`; `tools.py` split into `mcp_commands/{system,memory,ollama,editing}.py` + `_shared.py`; `benchmark.py`+`benchmark_queries/` renamed to `benchmarker/`; wizard "dummy"/"fake" terminology standardized to "preview". Do not edit any existing entry above it — this file is append-only per `CLAUDE.md`'s own stated convention.
 
-- [ ] **Step 4: Full final verification**
+- [ ] **Step 4: Regenerate the `.mcpb` bundle**
+
+Every task since Task 1 changed `neo_localmcp/`'s contents, so the committed `packages/claude-desktop/neo-localmcp-v<version>.mcpb` is stale (this is why the intermediate checkpoints deselected `test_built_mcpb_embeds_current_package_bytes`). Regenerate it now, from the source checkout, using the moved builder (`neo_localmcp.installer.mcpb`, relocated in Task 1). Delete the stale file first — `build_mcpb`'s `_next_free_path` never overwrites, so without the delete it would write `neo-localmcp-v<version>-2.mcpb` instead of regenerating the canonical name:
+
+```bash
+python3 -c "
+import os
+from neo_localmcp import __version__
+from neo_localmcp.installer.mcpb import build_mcpb
+stale = f'packages/claude-desktop/neo-localmcp-v{__version__}.mcpb'
+if os.path.exists(stale):
+    os.remove(stale)
+print('rebuilt:', build_mcpb('.', __version__))
+"
+```
+
+Expected: prints `rebuilt: packages/claude-desktop/neo-localmcp-v<version>.mcpb`. (The `__version__` is unchanged by this refactor — `1.1.1` is still unreleased per `PROJECT_STATUS.md`, so this reorg folds into it with no version bump; the bundle filename is the same, only its contents are regenerated.)
+
+- [ ] **Step 5: Full final verification (bundle byte-check now runs for real)**
 
 ```bash
 python -m pytest -q
 ```
 
-Expected: full suite (including `-m slow` lifecycle tests) PASSES. This is the first point in the whole plan where the slow `tests/installer/test_*_lifecycle.py` tests run — they build a real venv and exercise the real `install`/`reinstall`/`uninstall` path end-to-end through the new `installer/cli.py`, which is the highest-value regression check for Tasks 1-6's path-arithmetic fixes.
+Expected: full suite (including `-m slow` lifecycle tests AND the previously-deselected `test_built_mcpb_embeds_current_package_bytes`, which now passes against the freshly-rebuilt bundle) PASSES. This is the first point in the whole plan where the slow `tests/installer/test_*_lifecycle.py` tests run — they build a real venv and exercise the real `install`/`reinstall`/`uninstall` path end-to-end through the new `installer/cli.py`, which is the highest-value regression check for Tasks 1-6's path-arithmetic fixes. If `test_built_mcpb_embeds_current_package_bytes` still fails here, the bundle rebuild in Step 4 did not take — re-run Step 4 and confirm no stray `.DS_Store` or `-2.mcpb` file was created.
 
 ```bash
 python -m compileall -q neo_localmcp setup.py setup_wizard.py
@@ -2252,13 +2272,13 @@ Expected: no output (success).
 grep -rn "neo_localmcp\.wizard\b\|neo_localmcp\.setup_cli\b\|neo_localmcp\.mcpb_build\b\|neo_localmcp\.tools\b\|neo_localmcp\.benchmark\b\|FakeBackend\|RealBackend\|allow_dummy_toggle\|_ToggleDummy\|NEO_LOCALMCP_WIZARD_FAKE_STATE" neo_localmcp tests setup.py setup_wizard.py pyproject.toml CLAUDE.md README.md 2>/dev/null
 ```
 
-Expected: no output. If anything matches, it is a missed call site from an earlier task — fix it and re-run this grep before proceeding.
+Expected: no output. If anything matches, it is a missed call site from an earlier task — fix it and re-run this grep before proceeding. (`NEO_LOCALMCP_WIZARD_FAKE_STATE` is in this grep specifically because Task 4 renames all of its occurrences in `preview_backend.py` — code, docstring, and comment — plus one in `setup_wizard.py`; this is the backstop that catches any it missed.)
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Commit (includes the regenerated bundle from Step 4)**
 
 ```bash
-git add CLAUDE.md PROJECT_STATUS.md PROJECT_NOTES.md
-git commit -m "docs: update module map and status/notes for installer/mcp-command reorg"
+git add CLAUDE.md PROJECT_STATUS.md PROJECT_NOTES.md "packages/claude-desktop/neo-localmcp-v*.mcpb"
+git commit -m "docs: update module map and status/notes for installer/mcp-command reorg; rebuild .mcpb"
 ```
 
 ---
@@ -2270,3 +2290,4 @@ git commit -m "docs: update module map and status/notes for installer/mcp-comman
 - **One bug not in the original spec, found only by reading `installer/verification.py` directly:** the `_DOCTOR_SNIPPET` string literal embedding `neo_localmcp.tools` as executable subprocess code (Task 12, Step 6) — this would have silently broken every future install's post-install verification if missed, since it's a string, not a static import a simple grep for `from neo_localmcp.tools` would necessarily catch on the first pass (a grep for the bare word "tools" was needed).
 - **One dependency not in the original spec, found only by reading `context_worker.py` directly:** it imports `tools.context_prepare` and is invoked as a subprocess by `server.py` — fixed in Task 12, Step 4.
 - **One dead import found while tracing `tools.py`:** `save_config` is imported but never called directly in `tools.py`'s body (`set_ollama` goes through `installer_configure_models`, which calls `save_config` itself, in a different file) — correctly dropped rather than carried into any new file.
+- **Review-pass catch (blocker, now fixed):** `tests/test_distribution.py::test_built_mcpb_embeds_current_package_bytes` byte-checks the committed `.mcpb` against `neo_localmcp/`; it is unmarked, so it runs in every `-m "not slow"`. The reorg staled the bundle, so the intermediate full-suite checkpoints (Tasks 6, 12, 13) now `--deselect` it and Task 14 Step 4 regenerates the bundle (via the moved `neo_localmcp.installer.mcpb.build_mcpb`, deleting the stale file first) before running the full suite un-deselected. Only ~6 of 32 test files are import-affected by the whole reorg; the rest stay green throughout and are the behavior-preservation net — a broad red suite mid-reorg would signal a real regression, not expected churn.
