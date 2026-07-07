@@ -58,20 +58,13 @@ import argparse  # noqa: E402
 import time  # noqa: E402
 from pathlib import Path  # noqa: E402
 
-from neo_localmcp.installer import (  # noqa: E402
-    ManagedPaths,
-    Operation,
-    OperationContext,
-    OperationResult,
-    OperationStatus,
-    Reporter,
-    confirm_full_wipe,
-    detect_state,
-    install,
-    operation_explanation,
-    reinstall,
-    uninstall,
-)
+from .clients import apply_client_selection  # noqa: E402
+from .ollama import configure_models  # noqa: E402
+from .operations import OperationContext, install, reinstall, uninstall  # noqa: E402
+from .output import Reporter, confirm_full_wipe, operation_explanation  # noqa: E402
+from .paths import ManagedPaths  # noqa: E402
+from .state import detect_state  # noqa: E402
+from .types import Operation, OperationResult, OperationStatus  # noqa: E402
 
 EXIT_SUCCESS = 0
 EXIT_FAILURE = 1
@@ -323,7 +316,7 @@ def _render_dry_run(paths: ManagedPaths, args: argparse.Namespace, reporter: Rep
 
 
 def _source_root() -> Path:
-    return Path(__file__).resolve().parents[1]
+    return Path(__file__).resolve().parents[2]
 
 
 def _source_version() -> str:
@@ -366,8 +359,6 @@ def _render_result(result: OperationResult, reporter: Reporter) -> int:
 
 
 def _run_config_ollama(args: argparse.Namespace, reporter: Reporter) -> int:
-    from neo_localmcp.installer import configure_models
-
     ollama_cfg = configure_models(
         base_url=args.base_url, fast_model=args.fast_model, summary_model=args.summary_model,
     )
@@ -389,8 +380,6 @@ _LEVEL_METHODS = {
 def _run_manage_clients(
     args: argparse.Namespace, context: OperationContext, reporter: Reporter,
 ) -> int:
-    from neo_localmcp.installer import apply_client_selection
-
     outcome = apply_client_selection(
         context.paths,
         args.client,
