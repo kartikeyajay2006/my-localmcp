@@ -41,7 +41,7 @@
 
 ---
 
-### Task 1: Move `mcpb_build.py` → `installer/mcpb.py`
+### Task 1: Move `mcpb_build.py` → `installer/mcpb.py` ✅ COMPLETE (commit 2cc410a)
 
 **Why:** `mcpb_build.py`'s only consumer anywhere in the repo is `wizard/real_backend.py` (soon `installer/wizard/live_backend.py`) and its own test file — it is installer-only, so it belongs inside `installer/`.
 
@@ -53,7 +53,7 @@
 **Interfaces:**
 - Produces: `neo_localmcp.installer.mcpb.build_mcpb(source_root: Path | str, version: str) -> Path | None` — identical signature/behavior to the old `neo_localmcp.mcpb_build.build_mcpb`.
 
-- [ ] **Step 1: Create the branch**
+- [x] **Step 1: Create the branch**
 
 ```bash
 git checkout docs/installer-mcp-reorg-design && git checkout -b refactor/installer-mcp-reorg
@@ -61,7 +61,7 @@ git checkout docs/installer-mcp-reorg-design && git checkout -b refactor/install
 
 Branch off `docs/installer-mcp-reorg-design` (NOT `main`) — that branch carries this plan, the design spec (`docs/superpowers/specs/2026-07-06-installer-mcp-reorg-design.md`), and the four `mermaid_diagrams/20260706_*.mmd` files, so the reorg branch inherits them and they land on `main` together with the implementation in one PR. `main` does not yet have these design artifacts. (If `docs/installer-mcp-reorg-design` has already been merged to `main` by the time you start, branch off `main` instead — either way the goal is a branch that contains both the design docs and the implementation.)
 
-- [ ] **Step 2: Move the file with `git mv`**
+- [x] **Step 2: Move the file with `git mv`**
 
 ```bash
 git mv neo_localmcp/mcpb_build.py neo_localmcp/installer/mcpb.py
@@ -69,7 +69,7 @@ git mv neo_localmcp/mcpb_build.py neo_localmcp/installer/mcpb.py
 
 Do not edit the file's contents — `build_mcpb()`'s logic has no `__file__`-relative path assumptions (it takes `source_root` as a parameter), so nothing inside the file needs to change.
 
-- [ ] **Step 3: Update `real_backend.py`'s import**
+- [x] **Step 3: Update `real_backend.py`'s import**
 
 In `neo_localmcp/wizard/real_backend.py`, change line 21 from:
 
@@ -83,7 +83,7 @@ to:
 from ..mcpb import build_mcpb
 ```
 
-- [ ] **Step 4: Update `test_mcpb_build.py`'s import**
+- [x] **Step 4: Update `test_mcpb_build.py`'s import**
 
 In `tests/test_mcpb_build.py`, change line 7 from:
 
@@ -101,7 +101,7 @@ Then update every call site in that file from `mcpb_build.build_mcpb(...)` to `m
 
 Do NOT touch the file's bottom section (`# -- wizard hook --`, lines 95+) yet — those `real_backend`/`RealBackend` references are handled in Task 3/Task 6. Leave them as-is for now; this task only fixes the `mcpb_build` → `mcpb` rename.
 
-- [ ] **Step 5: Run the affected tests**
+- [x] **Step 5: Run the affected tests**
 
 ```bash
 python -m pytest -q tests/test_mcpb_build.py -k "not wizard"
@@ -109,7 +109,7 @@ python -m pytest -q tests/test_mcpb_build.py -k "not wizard"
 
 Expected: the four non-wizard tests (`test_build_writes_versioned_bundle`, `test_bundle_contents_match_layout`, `test_second_build_does_not_overwrite`, `test_returns_none_without_staging`) PASS. The three `test_wizard_*` tests at the bottom will still fail/error at this point because they still reference `neo_localmcp.wizard` (unmoved) — that's expected; Task 6 fixes them. Confirm only that the four non-wizard tests pass and nothing you touched broke.
 
-- [ ] **Step 6: Compile-check**
+- [x] **Step 6: Compile-check**
 
 ```bash
 python -m compileall -q neo_localmcp setup.py
@@ -117,7 +117,7 @@ python -m compileall -q neo_localmcp setup.py
 
 Expected: no output (success).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add neo_localmcp/installer/mcpb.py neo_localmcp/mcpb_build.py neo_localmcp/wizard/real_backend.py tests/test_mcpb_build.py
@@ -371,37 +371,18 @@ git mv neo_localmcp/wizard/real_backend.py neo_localmcp/installer/wizard/live_ba
 
 - [ ] **Step 3: Fix `live_backend.py`'s import depth and class name**
 
-In `neo_localmcp/installer/wizard/live_backend.py`, change the import block from:
+**Note on the file's actual current state:** Task 1 moved `mcpb_build.py` to `installer/mcpb.py` while this file was still at its old location (`neo_localmcp/wizard/real_backend.py`, `..` = `neo_localmcp/`). Reaching `neo_localmcp/installer/mcpb.py` from there needs `from ..installer.mcpb import build_mcpb` (NOT `from ..mcpb import build_mcpb` — that would resolve to a nonexistent `neo_localmcp.mcpb`). If Task 1 was executed correctly, the file's import block currently reads `from ..installer.mcpb import build_mcpb`, not `from ..mcpb_build import build_mcpb`. Verify this with `grep -n "mcpb" neo_localmcp/wizard/real_backend.py` before proceeding — if it still shows `..mcpb_build`, Task 1 was not completed correctly and must be fixed first.
 
-```python
-import neo_localmcp
-from .. import client_setup, config, ollama_client
-from ..mcpb import build_mcpb
-from ..installer import cli as installer_cli  # (from Task 2, Step 6 — already migrated in-file)
-```
+Also per Task 2, Step 6, the `_dry_run` method's inline import currently reads `from ..installer import cli as installer_cli`.
 
-Wait — reconcile with Task 2's Step 6 output. After Task 2, this file (still at its *old* location during Task 2) had:
-
-```python
-import neo_localmcp
-from .. import client_setup, config, ollama_client
-from ..mcpb import build_mcpb
-```
-
-at the top, plus inside `_dry_run`:
-
-```python
-from ..installer import cli as installer_cli
-```
-
-Now, in this task (the file has physically moved to `neo_localmcp/installer/wizard/live_backend.py`), fix **all** relative imports for the new depth (`wizard/` → `installer/` → `neo_localmcp/` is now three levels, not two):
+In `neo_localmcp/installer/wizard/live_backend.py` (this task's new location, after Step 2's `git mv` above), fix **all** relative imports for the new depth (`wizard/` → `installer/` → `neo_localmcp/` is now three levels, not two — moving `wizard/` one level deeper changes every dot-count that used to reach `neo_localmcp/` or `installer/` from the old `neo_localmcp/wizard/` location).
 
 Change the top-of-file imports from:
 
 ```python
 import neo_localmcp
 from .. import client_setup, config, ollama_client
-from ..mcpb import build_mcpb
+from ..installer.mcpb import build_mcpb
 from ..installer import (
     ManagedPaths,
     Operation,
