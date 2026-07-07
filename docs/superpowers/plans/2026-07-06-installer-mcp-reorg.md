@@ -126,7 +126,7 @@ git commit -m "refactor(installer): move mcpb_build.py into installer/ as mcpb.p
 
 ---
 
-### Task 2: Move `setup_cli.py` → `installer/cli.py`
+### Task 2: Move `setup_cli.py` → `installer/cli.py` ✅ COMPLETE (commit a0684a5)
 
 **Why:** `setup_cli.py` exists purely to parse args and call `neo_localmcp.installer` operations — it is the installer's CLI frontend and belongs inside the domain it drives, directly analogous to `wizard/` being the installer's UI frontend (Task 3).
 
@@ -142,13 +142,13 @@ git commit -m "refactor(installer): move mcpb_build.py into installer/ as mcpb.p
 - Produces: `neo_localmcp.installer.cli.main(argv: list[str] | None = None) -> int`, `neo_localmcp.installer.cli.dry_run_plan(operation: str, *, clean: bool = False, delete_memory: bool = False) -> tuple[str, tuple[str, ...]]`, `neo_localmcp.installer.cli.build_parser() -> argparse.ArgumentParser`, `neo_localmcp.installer.cli.build_context(reporter: Reporter | None = None) -> OperationContext` — all identical signatures to the old `neo_localmcp.setup_cli` equivalents.
 - Consumes (from Task 1, already in place): nothing new.
 
-- [ ] **Step 1: Move the file with `git mv`**
+- [x] **Step 1: Move the file with `git mv`**
 
 ```bash
 git mv neo_localmcp/setup_cli.py neo_localmcp/installer/cli.py
 ```
 
-- [ ] **Step 2: Fix `_source_root()`'s path depth**
+- [x] **Step 2: Fix `_source_root()`'s path depth**
 
 In `neo_localmcp/installer/cli.py`, change:
 
@@ -164,7 +164,7 @@ def _source_root() -> Path:
     return Path(__file__).resolve().parents[2]
 ```
 
-- [ ] **Step 3: Convert the module-level import from absolute to relative-sibling**
+- [x] **Step 3: Convert the module-level import from absolute to relative-sibling**
 
 In `neo_localmcp/installer/cli.py`, change:
 
@@ -215,7 +215,7 @@ from .state import detect_state  # noqa: E402
 from .types import Operation, OperationResult, OperationStatus  # noqa: E402
 ```
 
-- [ ] **Step 4: Replace the two inline `from neo_localmcp.installer import X` calls**
+- [x] **Step 4: Replace the two inline `from neo_localmcp.installer import X` calls**
 
 In `_run_config_ollama` (was line 369), change:
 
@@ -253,7 +253,7 @@ def _run_manage_clients(
     outcome = apply_client_selection(
 ```
 
-- [ ] **Step 5: Update `setup.py`'s delegation**
+- [x] **Step 5: Update `setup.py`'s delegation**
 
 In `setup.py`, change line 44 from:
 
@@ -267,7 +267,7 @@ to:
         from neo_localmcp.installer.cli import main
 ```
 
-- [ ] **Step 6: Update `real_backend.py`'s dynamic dry-run import**
+- [x] **Step 6: Update `real_backend.py`'s dynamic dry-run import**
 
 In `neo_localmcp/wizard/real_backend.py`, inside `_dry_run` (was lines 277-280), change:
 
@@ -301,7 +301,7 @@ to:
 
 This is correct for Task 2 (file still at `neo_localmcp/wizard/`). Task 3 will correct the dot-depth again when the file itself moves.
 
-- [ ] **Step 7: Run the affected tests**
+- [x] **Step 7: Run the affected tests**
 
 ```bash
 python -m pytest -q tests/installer/test_setup_cli.py
@@ -315,13 +315,13 @@ python -m pytest -q tests/installer/ -k "not lifecycle"
 
 Expected: all PASS (the `test_*_lifecycle.py` files are slow/real-venv tests; skip them here for speed, they run in full verification at the end).
 
-- [ ] **Step 8: Compile-check**
+- [x] **Step 8: Compile-check**
 
 ```bash
 python -m compileall -q neo_localmcp setup.py
 ```
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add neo_localmcp/installer/cli.py neo_localmcp/setup_cli.py setup.py neo_localmcp/wizard/real_backend.py
