@@ -1048,7 +1048,7 @@ git commit -m "refactor(wizard): purge 'dummy' terminology from console.py, stan
 
 ---
 
-### Task 6: Update `tests/test_wizard.py` for the new module paths and names
+### Task 6: Update `tests/test_wizard.py` for the new module paths and names ✅ COMPLETE (commit 642d1e4) — INSTALLER/WIZARD CHECKPOINT DONE (Tasks 1-6)
 
 **Why:** This is the one test file directly exercising the wizard backends by name; it must follow every rename from Tasks 3-5.
 
@@ -1057,7 +1057,7 @@ git commit -m "refactor(wizard): purge 'dummy' terminology from console.py, stan
 
 **Interfaces:** No production interfaces change here — this task only updates test code to match Tasks 3-5's already-completed renames.
 
-- [ ] **Step 1: Update the imports**
+- [x] **Step 1: Update the imports**
 
 Change:
 
@@ -1083,7 +1083,7 @@ from neo_localmcp.installer.wizard.backend import (
 )
 ```
 
-- [ ] **Step 2: Rename the `_isolated_fake_backend` helper and its body**
+- [x] **Step 2: Rename the `_isolated_fake_backend` helper and its body**
 
 Change:
 
@@ -1115,7 +1115,7 @@ def _isolated_preview_backend(tmp_path, monkeypatch):
     return preview_backend.PreviewBackend()
 ```
 
-- [ ] **Step 3: Rename every test function and call site**
+- [x] **Step 3: Rename every test function and call site**
 
 Apply this mechanical rename across the whole file (every occurrence):
 - `_isolated_fake_backend` → `_isolated_preview_backend` (all 7 call sites)
@@ -1154,7 +1154,7 @@ Apply this mechanical rename across the whole file (every occurrence):
   ```
   and `backend = RealBackend()` → `backend = LiveBackend()`
 
-- [ ] **Step 4: Run the full wizard test file**
+- [x] **Step 4: Run the full wizard test file**
 
 ```bash
 python -m pytest -q tests/test_wizard.py -v
@@ -1162,7 +1162,7 @@ python -m pytest -q tests/test_wizard.py -v
 
 Expected: all 10 tests PASS.
 
-- [ ] **Step 5: Run the full fast suite so far**
+- [x] **Step 5: Run the full fast suite so far**
 
 ```bash
 python -m pytest -q -m "not slow" --deselect tests/test_distribution.py::test_built_mcpb_embeds_current_package_bytes
@@ -1172,13 +1172,13 @@ Expected: all PASS (this is the first point where every test touched by Tasks 1-
 
 **Why the `--deselect`:** `test_built_mcpb_embeds_current_package_bytes` walks `neo_localmcp/` and asserts the committed `packages/claude-desktop/neo-localmcp-v<version>.mcpb` bundle contains every file byte-for-byte. Tasks 1-5 moved files under `neo_localmcp/` without regenerating that build artifact, so it is legitimately stale mid-reorg. It is deselected at every intermediate checkpoint and regenerated + run for real once in Task 14. This test checks bundle freshness, not reorg correctness, so deselecting it here loses no coverage of the actual code moves. (The sibling `test_built_mcpb_contains_valid_manifest` still runs and passes — it only checks the manifest + `server.py` presence, and `__version__` is unchanged, so the bundle filename/manifest still match.)
 
-- [ ] **Step 6: Compile-check**
+- [x] **Step 6: Compile-check**
 
 ```bash
 python -m compileall -q neo_localmcp setup.py setup_wizard.py
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add tests/test_wizard.py
@@ -2313,10 +2313,10 @@ Expected: no output (success).
 - [ ] **Step 7: Verify no stray references remain**
 
 ```bash
-grep -rn "neo_localmcp\.wizard\b\|neo_localmcp\.setup_cli\b\|neo_localmcp\.mcpb_build\b\|neo_localmcp\.tools\b\|neo_localmcp\.benchmark\b\|FakeBackend\|RealBackend\|allow_dummy_toggle\|_ToggleDummy\|NEO_LOCALMCP_WIZARD_FAKE_STATE\|--fake" neo_localmcp tests setup.py setup_wizard.py pyproject.toml CLAUDE.md README.md 2>/dev/null
+grep -rn "neo_localmcp\.wizard\b\|neo_localmcp\.setup_cli\b\|neo_localmcp\.mcpb_build\b\|neo_localmcp\.tools\b\|neo_localmcp\.benchmark\b\|FakeBackend\|RealBackend\|allow_dummy_toggle\|_ToggleDummy\|NEO_LOCALMCP_WIZARD_FAKE_STATE\|--fake\|wizard/real_backend\|wizard/fake_backend\|tools\.set_ollama\|tools\.doctor\|tools\.prepare_context\|tools\.summarize_file\|tools\.apply_unified_patch\|\btools\.py\b" neo_localmcp tests setup.py setup_wizard.py pyproject.toml CLAUDE.md README.md 2>/dev/null
 ```
 
-Expected: no output. If anything matches, it is a missed call site from an earlier task — fix it and re-run this grep before proceeding. (`NEO_LOCALMCP_WIZARD_FAKE_STATE` is in this grep specifically because Task 4 renames all of its occurrences in `preview_backend.py` — code, docstring, and comment — plus one in `setup_wizard.py`; `--fake` is included because of the `README.md` fix in Step 2; this is the backstop that catches anything either missed. `PROJECT_STATUS.md` is deliberately NOT in this grep's file list — its `--fake` mentions are dated historical status entries left untouched per Step 3's note.)
+Expected: no output. If anything matches, it is a missed call site OR a stale docstring/comment from an earlier task — fix it and re-run this grep before proceeding. This step's original pattern only matched dotted module paths (`neo_localmcp.wizard`, `neo_localmcp.tools`, etc.); Task 6's review found two production-code docstrings that reference the old layout in prose that wouldn't match those patterns: `neo_localmcp/installer/ollama.py`'s docstring says `` ``wizard/real_backend.py`` `` (slash-style path, not a dotted import) and `` ``tools.set_ollama`` `` (bare `tools.`, no `neo_localmcp.` prefix — also now wrong regardless of path style, since Task 12 deletes `tools.py` and moves `set_ollama` to `mcp_commands/ollama.py`). The added patterns (`wizard/real_backend`, `wizard/fake_backend`, and the specific `tools.<function>`/`tools.py` prose mentions) are a backstop for this class of docstring-prose staleness, not just code-level imports. When you find a match, fix the prose to name the actual current location (e.g. `` ``installer/wizard/live_backend.py`` ``, `` ``mcp_commands/ollama.set_ollama`` ``) rather than deleting the cross-reference. (`NEO_LOCALMCP_WIZARD_FAKE_STATE` is in this grep specifically because Task 4 renames all of its occurrences in `preview_backend.py` — code, docstring, and comment — plus one in `setup_wizard.py`; `--fake` is included because of the `README.md` fix in Step 2; this is the backstop that catches anything either missed. `PROJECT_STATUS.md` is deliberately NOT in this grep's file list — its `--fake` mentions are dated historical status entries left untouched per Step 3's note.)
 
 - [ ] **Step 8: Commit (includes the regenerated bundle from Step 5)**
 
