@@ -1,0 +1,93 @@
+%% Current-state dependency graph: installer + wizard subsystem
+%% Edges labeled with the specific function(s)/symbol(s) the source needs from the target.
+%% Dotted edges = dynamic (in-function) import rather than module-level import.
+graph TD
+    subgraph ROOT["repo root (packaging entrypoints)"]
+        setup_py["setup.py"]
+        setup_wizard_py["setup_wizard.py"]
+    end
+
+    subgraph WIZARD["neo_localmcp/wizard/"]
+        backend["backend.py<br/>(Protocol + data shapes, zero deps)"]
+        console["console.py<br/>(pure UI state machine, zero business logic)"]
+        real_backend["real_backend.py<br/>(live adapter, ~400 lines)"]
+        fake_backend["fake_backend.py<br/>(hermetic simulator, ~400 lines)"]
+        preflight["preflight.py<br/>(stdlib-only bootstrap)"]
+        ansi["_ansi.py"]
+    end
+
+    setup_cli["setup_cli.py<br/>(installer argparse, 449 lines)"]
+
+    subgraph INSTALLER["neo_localmcp/installer/ (12 files, already clean)"]
+        operations["operations.py"]
+        types_mod["types.py"]
+        paths_mod["paths.py"]
+        state_mod["state.py"]
+        output_mod["output.py"]
+        processes_mod["processes.py"]
+        migration_mod["migration.py"]
+        runtime_mod["runtime.py"]
+        verification_mod["verification.py"]
+        installer_ollama["ollama.py"]
+        installer_clients["clients.py"]
+        init_barrel["__init__.py (barrel, re-exports all 11 siblings)"]
+    end
+
+    lifecycle["lifecycle.py<br/>(shared w/ server.py, cli.py too)"]
+    client_setup["client_setup.py<br/>(shared w/ cli.py too)"]
+    ollama_client["ollama_client.py<br/>(shared w/ tools.py too)"]
+    config["config.py<br/>(shared everywhere)"]
+    mcpb_build["mcpb_build.py<br/>(installer-ONLY consumer)"]
+    templates["templates/claude-code/commands/*.md"]
+
+    setup_py -->|"calls main()"| setup_cli
+    setup_wizard_py -->|"calls ensure_dependencies()"| preflight
+    setup_wizard_py -->|"calls run()"| console
+
+    console -->|"type-checks against Protocol"| backend
+    console -->|"instantiates on --fake"| fake_backend
+    console -->|"instantiates by default"| real_backend
+    console --> ansi
+    fake_backend -->|"implements"| backend
+    real_backend -->|"implements"| backend
+
+    setup_cli -->|"needs install()/reinstall()/uninstall()"| operations
+    setup_cli -->|"needs configure_models()"| installer_ollama
+    setup_cli -->|"needs apply_client_selection()"| installer_clients
+    setup_cli -->|"needs detect_state()"| state_mod
+
+    real_backend -->|"needs install()/reinstall()/uninstall()"| operations
+    real_backend -->|"needs configure_models()"| installer_ollama
+    real_backend -->|"needs apply_client_selection(), read_registrations()"| installer_clients
+    real_backend -->|"needs detect_state()"| state_mod
+    real_backend -->|"needs build_mcpb()"| mcpb_build
+    real_backend -->|"needs status(), model_sizes()"| ollama_client
+    real_backend -->|"needs client_status()"| client_setup
+    real_backend -->|"needs load_config()"| config
+
+    operations --> types_mod
+    operations --> paths_mod
+    operations --> state_mod
+    operations --> output_mod
+    operations --> processes_mod
+    operations --> migration_mod
+    operations --> runtime_mod
+    operations --> verification_mod
+    operations --> installer_ollama
+    operations --> installer_clients
+    operations -.->|"dynamic import: list_servers()"| lifecycle
+
+    processes_mod -.->|"dynamic import: request_stop()"| lifecycle
+    verification_mod -->|"needs unregister_server()"| lifecycle
+    verification_mod -->|"needs read_registrations(), verify_registrations()"| installer_clients
+    verification_mod --> runtime_mod
+
+    installer_ollama -->|"needs unload_model()"| ollama_client
+    installer_ollama -->|"needs load_config()/save_config()"| config
+
+    installer_clients -->|"needs setup_*()/remove_*()"| client_setup
+
+    client_setup -->|"reads command templates"| templates
+    client_setup --> config
+
+    init_barrel -.->|"re-exports all 11 sibling modules (79 symbols)"| operations

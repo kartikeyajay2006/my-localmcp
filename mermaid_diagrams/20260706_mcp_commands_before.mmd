@@ -1,0 +1,33 @@
+%% Current-state dependency graph: MCP tool/command layer
+%% tools.py is a single 1164-line file mixing all 4 logical categories together.
+graph TD
+    server_py["server.py<br/>(thin FastMCP entrypoint, 231 lines)"]
+    cli_py["cli.py<br/>(general neo-localmcp CLI, 337 lines)"]
+    tools_py["tools.py -- 1164 lines, ALL 4 categories mixed:<br/>SYSTEM + MEMORY + OLLAMA + MISC in one file"]
+    benchmark_py["benchmark.py<br/>(450 lines, CLI-only admin tool)"]
+    benchmark_queries["benchmark_queries/*.jsonl"]
+    repo_memory["repo_memory.py"]
+    query_py["query.py"]
+    utils_py["utils.py"]
+    ollama_client2["ollama_client.py"]
+    config2["config.py"]
+    installer_ollama2["installer/ollama.py"]
+    client_setup2["client_setup.py"]
+    lifecycle2["lifecycle.py"]
+
+    server_py -->|"needs prepare_context, file_excerpts, repo_lookup,<br/>record_change, status, doctor, repo_refresh,<br/>summarize_file, apply_unified_patch,<br/>ollama_status, ollama_ensure"| tools_py
+    cli_py -->|"needs ~20 tools.* functions across all 4 categories"| tools_py
+    cli_py -->|"needs client_status(), setup_clients(), remove_clients()"| client_setup2
+    cli_py -->|"needs run_benchmark()"| benchmark_py
+    cli_py -->|"needs list_servers(), stop_servers()"| lifecycle2
+
+    tools_py --> repo_memory
+    tools_py --> query_py
+    tools_py --> utils_py
+    tools_py -->|"needs chat/ensure/ping/start_service/status/stop_service/unload/warm"| ollama_client2
+    tools_py --> config2
+    tools_py -->|"needs configure_models()"| installer_ollama2
+
+    benchmark_py -->|"needs ~8 tools.* functions"| tools_py
+    benchmark_py --> repo_memory
+    benchmark_py --> benchmark_queries
