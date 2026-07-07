@@ -4,7 +4,7 @@ import json
 import zipfile
 from pathlib import Path
 
-from neo_localmcp import mcpb_build
+from neo_localmcp.installer import mcpb
 
 
 def _make_source_root(tmp_path: Path, *, version: str = "9.9.9") -> Path:
@@ -44,14 +44,14 @@ def _target_dir(root: Path) -> Path:
 
 def test_build_writes_versioned_bundle(tmp_path):
     root = _make_source_root(tmp_path, version="9.9.9")
-    written = mcpb_build.build_mcpb(root, "9.9.9")
+    written = mcpb.build_mcpb(root, "9.9.9")
     assert written == _target_dir(root) / "neo-localmcp-v9.9.9.mcpb"
     assert written.exists()
 
 
 def test_bundle_contents_match_layout(tmp_path):
     root = _make_source_root(tmp_path, version="9.9.9")
-    written = mcpb_build.build_mcpb(root, "9.9.9")
+    written = mcpb.build_mcpb(root, "9.9.9")
     with zipfile.ZipFile(written) as archive:
         names = {n.replace("\\", "/") for n in archive.namelist()}
         manifest = json.loads(archive.read("manifest.json"))
@@ -75,9 +75,9 @@ def test_bundle_contents_match_layout(tmp_path):
 
 def test_second_build_does_not_overwrite(tmp_path):
     root = _make_source_root(tmp_path, version="9.9.9")
-    first = mcpb_build.build_mcpb(root, "9.9.9")
-    second = mcpb_build.build_mcpb(root, "9.9.9")
-    third = mcpb_build.build_mcpb(root, "9.9.9")
+    first = mcpb.build_mcpb(root, "9.9.9")
+    second = mcpb.build_mcpb(root, "9.9.9")
+    third = mcpb.build_mcpb(root, "9.9.9")
     assert first == _target_dir(root) / "neo-localmcp-v9.9.9.mcpb"
     assert second == _target_dir(root) / "neo-localmcp-v9.9.9-2.mcpb"
     assert third == _target_dir(root) / "neo-localmcp-v9.9.9-3.mcpb"
@@ -89,7 +89,7 @@ def test_returns_none_without_staging(tmp_path):
     root = tmp_path / "not-a-checkout"
     (root / "neo_localmcp").mkdir(parents=True)
     (root / "neo_localmcp" / "__init__.py").write_text("", encoding="utf-8")
-    assert mcpb_build.build_mcpb(root, "9.9.9") is None
+    assert mcpb.build_mcpb(root, "9.9.9") is None
 
 
 # -- wizard hook ---------------------------------------------------------- #
