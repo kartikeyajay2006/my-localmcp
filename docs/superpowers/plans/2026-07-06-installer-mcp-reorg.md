@@ -805,7 +805,7 @@ git commit -m "refactor(wizard): rename fake_backend.py to preview_backend.py, F
 
 ---
 
-### Task 5: Purge remaining "dummy" terminology in `console.py`
+### Task 5: Purge remaining "dummy" terminology in `console.py` ✅ COMPLETE (commit 13d513d)
 
 **Why:** The UI previously used three inconsistent words for the same concept ("fake" in code, "dummy" in the toggle key/exception, "preview" in the state dir name). Task 4 fixed the file/class names; this task fixes the remaining UI copy, the toggle mechanism, and the `--fake` CLI flag, so "preview" is the only word used anywhere.
 
@@ -817,7 +817,7 @@ git commit -m "refactor(wizard): rename fake_backend.py to preview_backend.py, F
 
 **Interfaces:** No public interface changes — this task is pure text/identifier renaming inside `console.py`'s private implementation. `run(argv)`'s signature is unchanged; only the flag string it looks for in `argv` changes from `"--fake"` to `"--preview"`.
 
-- [ ] **Step 1: Rename the `_ToggleDummy` exception**
+- [x] **Step 1: Rename the `_ToggleDummy` exception**
 
 In `neo_localmcp/installer/wizard/console.py`, change:
 
@@ -833,7 +833,7 @@ class _TogglePreview(Exception):
     """Raised by the main-menu prompt when the user types 'p'/'preview'."""
 ```
 
-- [ ] **Step 2: Rename the `allow_dummy_toggle` parameter and its usages**
+- [x] **Step 2: Rename the `allow_dummy_toggle` parameter and its usages**
 
 Find the input-primitive method (was around line 166-174) and change:
 
@@ -875,7 +875,7 @@ becomes:
                 self._enter_preview()
 ```
 
-- [ ] **Step 3: Rename `_enter_preview_dummy` → `_enter_preview`**
+- [x] **Step 3: Rename `_enter_preview_dummy` → `_enter_preview`**
 
 From Task 4's Step 4, the method currently reads:
 
@@ -899,7 +899,7 @@ Change the method name (keep the body from Task 4):
 
 (The call site fixed in Step 2 above already calls `self._enter_preview()`.)
 
-- [ ] **Step 4: Fix the "[Preview Dummy]" UI label**
+- [x] **Step 4: Fix the "[Preview Dummy]" UI label**
 
 Find (was around line 107):
 
@@ -913,7 +913,7 @@ Change to:
             title += "   " + _ansi.yellow("[Preview Mode]")
 ```
 
-- [ ] **Step 5: Fix the "Preview Dummy is active" warning string**
+- [x] **Step 5: Fix the "Preview Dummy is active" warning string**
 
 Find (was around line 501):
 
@@ -927,7 +927,7 @@ Change to:
                 "** Preview mode is active -- choosing Yes will show a demo output. "
 ```
 
-- [ ] **Step 6: Rename the `--fake` flag to `--preview` in `run()`**
+- [x] **Step 6: Rename the `--fake` flag to `--preview` in `run()`**
 
 Change:
 
@@ -947,7 +947,7 @@ def run(argv: list[str] | None = None) -> int:
 
 (Keep the local variable named `fake` — it's an internal boolean, not user-facing; renaming it adds churn with zero benefit. Only the *string it matches against* changes.)
 
-- [ ] **Step 7: Update `setup_wizard.py`'s docstring**
+- [x] **Step 7: Update `setup_wizard.py`'s docstring**
 
 Change:
 
@@ -971,7 +971,7 @@ Flags:
 
 (The env var name here was already fixed in Task 4/Step 5 — this step only changes the flag name in the docstring.)
 
-- [ ] **Step 8: Fix cosmetic `--fake` mentions in `preview_backend.py`**
+- [x] **Step 8: Fix cosmetic `--fake` mentions in `preview_backend.py`**
 
 In `neo_localmcp/installer/wizard/preview_backend.py`, the module docstring and one comment mention `--fake`:
 
@@ -1009,7 +1009,7 @@ becomes:
 
 And the three occurrences of `"This is a simulation (--fake)."` / `"This was a simulation (--fake) - nothing on disk changed."` / `"This was a simulation (--fake)."` in the `run_operation`/`_simulate_install_like`/`_simulate_uninstall` methods all become `--preview` instead of `--fake` (mechanical string replacement, same three spots identified in the file already).
 
-- [ ] **Step 9: Fix cosmetic `--fake` mention in `preflight.py`**
+- [x] **Step 9: Fix cosmetic `--fake` mention in `preflight.py`**
 
 In `neo_localmcp/installer/wizard/preflight.py`, change:
 
@@ -1025,7 +1025,7 @@ to:
     # the original arguments (e.g. --preview) across the restart.
 ```
 
-- [ ] **Step 10: Run the affected tests**
+- [x] **Step 10: Run the affected tests**
 
 ```bash
 python -m pytest -q tests/installer/ -k "not lifecycle"
@@ -1033,13 +1033,13 @@ python -m pytest -q tests/installer/ -k "not lifecycle"
 
 Expected: all PASS (no test yet directly exercises `console.py`'s toggle mechanism — `tests/test_wizard.py` tests the backends, not the console UI, per Task 6's fix).
 
-- [ ] **Step 11: Compile-check**
+- [x] **Step 11: Compile-check**
 
 ```bash
 python -m compileall -q neo_localmcp setup.py setup_wizard.py
 ```
 
-- [ ] **Step 12: Commit**
+- [x] **Step 12: Commit**
 
 ```bash
 git add -A
@@ -2236,6 +2236,7 @@ git commit -m "refactor(benchmark): rename benchmark.py + benchmark_queries/ to 
 
 **Files:**
 - Modify: `CLAUDE.md` (Module map section)
+- Modify: `README.md:196-199` (review-pass addition — see Step 2)
 - Modify: `PROJECT_STATUS.md` (one status line, per repo convention: "should be updated at the end of any session that changes verified behavior")
 - Modify: `PROJECT_NOTES.md` (append one dated entry — do not edit prior entries, it's an append-only log)
 
@@ -2245,15 +2246,39 @@ git commit -m "refactor(benchmark): rename benchmark.py + benchmark_queries/ to 
 
 Read the current "## Module map (`neo_localmcp/`)" section and replace it with an accurate description of the post-reorg layout: `server.py` (unchanged description), `mcp_commands/system.py`+`memory.py`+`ollama.py`+`editing.py`+`_shared.py` (replacing the single `tools.py` bullet, one line per file describing its category), `cli.py` (unchanged description, note it's now unambiguous since the installer CLI moved), `repo_memory.py`/`ollama_client.py`/`lifecycle.py`/`client_setup.py`/`config.py` (unchanged descriptions — these did not move), `installer/` (new bullet: the lifecycle package, now also home to `cli.py` — the installer CLI frontend — and `wizard/` — the interactive UI frontend, plus `mcpb.py`), `benchmarker/` (new bullet, replacing any `benchmark.py` mention if one exists), `query.py`/`identity.py` (unchanged). Do not describe internal `installer/` submodules exhaustively here — that level of detail belongs in the design spec, not this always-loaded file; keep each bullet to 1-2 sentences, matching the existing style of every other bullet in this section.
 
-- [ ] **Step 2: Update `PROJECT_STATUS.md`**
+- [ ] **Step 2: Fix `README.md`'s stale `--fake` mention (review-pass addition, Task 5)**
 
-Add one sentence noting the reorg is complete: version-appropriate phrasing following the existing "Current phase" paragraph's style (see the file's existing entries for tone/format — dated, factual, references what changed).
+Task 5's review found this line was never scheduled for a fix by any task — it's the one genuinely live, user-facing doc reference to the old flag/env-var names (as opposed to `PROJECT_STATUS.md`'s several `--fake` mentions, which are dated historical status entries describing verification that happened on 2026-07-03 under the old flag name, and are correctly left untouched per this repo's convention against rewriting historical log entries). `README.md` lines 196-199 currently read:
 
-- [ ] **Step 3: Append one entry to `PROJECT_NOTES.md`**
+```markdown
+The wizard is plain-stdlib — there is no UI toolkit to install. If you run
+`python setup_wizard.py` on a bare clone and `psutil` is missing, the wizard
+detects it and offers to install it for you before starting. Add `--fake` to walk
+the entire flow as a safe simulation that touches nothing on disk
+(`NEO_LOCALMCP_WIZARD_FAKE_STATE=healthy` simulates a returning, already-installed
+user).
+```
+
+Change to:
+
+```markdown
+The wizard is plain-stdlib — there is no UI toolkit to install. If you run
+`python setup_wizard.py` on a bare clone and `psutil` is missing, the wizard
+detects it and offers to install it for you before starting. Add `--preview` to walk
+the entire flow as a safe simulation that touches nothing on disk
+(`NEO_LOCALMCP_WIZARD_PREVIEW_STATE=healthy` simulates a returning, already-installed
+user).
+```
+
+- [ ] **Step 3: Update `PROJECT_STATUS.md`**
+
+Add one sentence noting the reorg is complete: version-appropriate phrasing following the existing "Current phase" paragraph's style (see the file's existing entries for tone/format — dated, factual, references what changed). Do not edit the existing dated `--fake`/`FakeBackend` mentions elsewhere in this file (lines ~30-33) — those describe verification that happened under the old names and are historical record, not current documentation.
+
+- [ ] **Step 4: Append one entry to `PROJECT_NOTES.md`**
 
 Add a single dated bullet (today's date) summarizing: installer's two frontends (`cli.py`, `wizard/`) consolidated under `installer/`; `tools.py` split into `mcp_commands/{system,memory,ollama,editing}.py` + `_shared.py`; `benchmark.py`+`benchmark_queries/` renamed to `benchmarker/`; wizard "dummy"/"fake" terminology standardized to "preview". Do not edit any existing entry above it — this file is append-only per `CLAUDE.md`'s own stated convention.
 
-- [ ] **Step 4: Regenerate the `.mcpb` bundle**
+- [ ] **Step 5: Regenerate the `.mcpb` bundle**
 
 Every task since Task 1 changed `neo_localmcp/`'s contents, so the committed `packages/claude-desktop/neo-localmcp-v<version>.mcpb` is stale (this is why the intermediate checkpoints deselected `test_built_mcpb_embeds_current_package_bytes`). Regenerate it now, from the source checkout, using the moved builder (`neo_localmcp.installer.mcpb`, relocated in Task 1). Delete the stale file first — `build_mcpb`'s `_next_free_path` never overwrites, so without the delete it would write `neo-localmcp-v<version>-2.mcpb` instead of regenerating the canonical name:
 
@@ -2271,13 +2296,13 @@ print('rebuilt:', build_mcpb('.', __version__))
 
 Expected: prints `rebuilt: packages/claude-desktop/neo-localmcp-v<version>.mcpb`. (The `__version__` is unchanged by this refactor — `1.1.1` is still unreleased per `PROJECT_STATUS.md`, so this reorg folds into it with no version bump; the bundle filename is the same, only its contents are regenerated.)
 
-- [ ] **Step 5: Full final verification (bundle byte-check now runs for real)**
+- [ ] **Step 6: Full final verification (bundle byte-check now runs for real)**
 
 ```bash
 python -m pytest -q
 ```
 
-Expected: full suite (including `-m slow` lifecycle tests AND the previously-deselected `test_built_mcpb_embeds_current_package_bytes`, which now passes against the freshly-rebuilt bundle) PASSES. This is the first point in the whole plan where the slow `tests/installer/test_*_lifecycle.py` tests run — they build a real venv and exercise the real `install`/`reinstall`/`uninstall` path end-to-end through the new `installer/cli.py`, which is the highest-value regression check for Tasks 1-6's path-arithmetic fixes. If `test_built_mcpb_embeds_current_package_bytes` still fails here, the bundle rebuild in Step 4 did not take — re-run Step 4 and confirm no stray `.DS_Store` or `-2.mcpb` file was created.
+Expected: full suite (including `-m slow` lifecycle tests AND the previously-deselected `test_built_mcpb_embeds_current_package_bytes`, which now passes against the freshly-rebuilt bundle) PASSES. This is the first point in the whole plan where the slow `tests/installer/test_*_lifecycle.py` tests run — they build a real venv and exercise the real `install`/`reinstall`/`uninstall` path end-to-end through the new `installer/cli.py`, which is the highest-value regression check for Tasks 1-6's path-arithmetic fixes. If `test_built_mcpb_embeds_current_package_bytes` still fails here, the bundle rebuild in Step 5 did not take — re-run Step 5 and confirm no stray `.DS_Store` or `-2.mcpb` file was created.
 
 ```bash
 python -m compileall -q neo_localmcp setup.py setup_wizard.py
@@ -2285,18 +2310,18 @@ python -m compileall -q neo_localmcp setup.py setup_wizard.py
 
 Expected: no output (success).
 
-- [ ] **Step 5: Verify no stray references remain**
+- [ ] **Step 7: Verify no stray references remain**
 
 ```bash
-grep -rn "neo_localmcp\.wizard\b\|neo_localmcp\.setup_cli\b\|neo_localmcp\.mcpb_build\b\|neo_localmcp\.tools\b\|neo_localmcp\.benchmark\b\|FakeBackend\|RealBackend\|allow_dummy_toggle\|_ToggleDummy\|NEO_LOCALMCP_WIZARD_FAKE_STATE" neo_localmcp tests setup.py setup_wizard.py pyproject.toml CLAUDE.md README.md 2>/dev/null
+grep -rn "neo_localmcp\.wizard\b\|neo_localmcp\.setup_cli\b\|neo_localmcp\.mcpb_build\b\|neo_localmcp\.tools\b\|neo_localmcp\.benchmark\b\|FakeBackend\|RealBackend\|allow_dummy_toggle\|_ToggleDummy\|NEO_LOCALMCP_WIZARD_FAKE_STATE\|--fake" neo_localmcp tests setup.py setup_wizard.py pyproject.toml CLAUDE.md README.md 2>/dev/null
 ```
 
-Expected: no output. If anything matches, it is a missed call site from an earlier task — fix it and re-run this grep before proceeding. (`NEO_LOCALMCP_WIZARD_FAKE_STATE` is in this grep specifically because Task 4 renames all of its occurrences in `preview_backend.py` — code, docstring, and comment — plus one in `setup_wizard.py`; this is the backstop that catches any it missed.)
+Expected: no output. If anything matches, it is a missed call site from an earlier task — fix it and re-run this grep before proceeding. (`NEO_LOCALMCP_WIZARD_FAKE_STATE` is in this grep specifically because Task 4 renames all of its occurrences in `preview_backend.py` — code, docstring, and comment — plus one in `setup_wizard.py`; `--fake` is included because of the `README.md` fix in Step 2; this is the backstop that catches anything either missed. `PROJECT_STATUS.md` is deliberately NOT in this grep's file list — its `--fake` mentions are dated historical status entries left untouched per Step 3's note.)
 
-- [ ] **Step 6: Commit (includes the regenerated bundle from Step 4)**
+- [ ] **Step 8: Commit (includes the regenerated bundle from Step 5)**
 
 ```bash
-git add CLAUDE.md PROJECT_STATUS.md PROJECT_NOTES.md "packages/claude-desktop/neo-localmcp-v*.mcpb"
+git add CLAUDE.md README.md PROJECT_STATUS.md PROJECT_NOTES.md "packages/claude-desktop/neo-localmcp-v*.mcpb"
 git commit -m "docs: update module map and status/notes for installer/mcp-command reorg; rebuild .mcpb"
 ```
 
