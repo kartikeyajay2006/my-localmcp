@@ -7,7 +7,7 @@ walk the whole flow safely (``python setup_wizard.py --fake``).
 Simulated state persists across runs in ``.wizard_preview/state.json`` at the
 repo root (gitignored), so a later ``--fake`` run sees what a previous
 simulated install/uninstall would have left behind. If that file doesn't
-exist yet, the starting state is seeded from NEO_LOCALMCP_WIZARD_FAKE_STATE:
+exist yet, the starting state is seeded from NEO_LOCALMCP_WIZARD_PREVIEW_STATE:
 ``absent`` (default -- a fresh clone) or ``healthy`` (a returning user who has
 already installed and wants to reconfigure).
 """
@@ -56,9 +56,9 @@ _STEP_DELAY = 0.35
 
 # Persisted simulation state, so a later `--fake` run (or mid-session `d`
 # toggle) sees what a previous simulated install/uninstall would have left
-# behind, instead of always restarting from the same NEO_LOCALMCP_WIZARD_FAKE_STATE
+# behind, instead of always restarting from the same NEO_LOCALMCP_WIZARD_PREVIEW_STATE
 # seed. Never touches any real managed root, venv, or client config.
-_STATE_DIR = Path(__file__).resolve().parents[2] / ".wizard_preview"
+_STATE_DIR = Path(__file__).resolve().parents[3] / ".wizard_preview"
 _STATE_PATH = _STATE_DIR / "state.json"
 
 _BLANK_STATE: dict[str, Any] = {
@@ -73,7 +73,7 @@ _BLANK_STATE: dict[str, Any] = {
 
 
 def _seed_state() -> dict[str, Any]:
-    start = os.environ.get("NEO_LOCALMCP_WIZARD_FAKE_STATE", "absent").strip().lower()
+    start = os.environ.get("NEO_LOCALMCP_WIZARD_PREVIEW_STATE", "absent").strip().lower()
     installed = start in {"healthy", "installed", "returning"}
     state = dict(_BLANK_STATE)
     if installed:
@@ -161,7 +161,7 @@ def _fake_client_meta(key: str) -> tuple[str, str, bool]:
             True)
 
 
-class FakeBackend:
+class PreviewBackend:
     """A fully navigable, side-effect-free WizardBackend."""
 
     def __init__(self) -> None:
