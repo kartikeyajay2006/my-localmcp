@@ -330,7 +330,7 @@ git commit -m "refactor(installer): move setup_cli.py into installer/ as cli.py"
 
 ---
 
-### Task 3: Move `wizard/` → `installer/wizard/`, rename `real_backend.py`/`RealBackend` → `live_backend.py`/`LiveBackend`
+### Task 3: Move `wizard/` → `installer/wizard/`, rename `real_backend.py`/`RealBackend` → `live_backend.py`/`LiveBackend` ✅ COMPLETE (commit 5c7e32d)
 
 **Why:** The wizard is the installer's interactive UI frontend, same reasoning as Task 2's CLI frontend. `RealBackend`/`FakeBackend` naming was flagged as confusing; `LiveBackend` is the clearer opposite of the "preview" backend (renamed in Task 4).
 
@@ -351,7 +351,7 @@ git commit -m "refactor(installer): move setup_cli.py into installer/ as cli.py"
 - Produces: `neo_localmcp.installer.wizard.console.run(argv: list[str] | None = None) -> int`; `neo_localmcp.installer.wizard.live_backend.LiveBackend` (implements `WizardBackend`); `neo_localmcp.installer.wizard.backend.WizardBackend`, `.WizardState`, `.DetectedInfo`, `.ClientOption`, `.OllamaInfo`, `.OperationOutcome`, `.StepEvent`, `.EmitFn`, `.human_size`, `.CLIENT_KEYS`, `.CLIENT_LABELS`, `.OP_INSTALL`, `.OP_REINSTALL`, `.OP_UNINSTALL`, `.OP_CONFIG_OLLAMA`, `.OP_MANAGE_CLIENTS`, `.FULL_WIPE_PHRASE` — all identical to today's `neo_localmcp.wizard.backend` exports, just at the new module path.
 - Consumes (from Task 1 and Task 2, already in place): `neo_localmcp.installer.mcpb.build_mcpb`, `neo_localmcp.installer.cli.dry_run_plan`.
 
-- [ ] **Step 1: Move the four unchanged-content files with `git mv`**
+- [x] **Step 1: Move the four unchanged-content files with `git mv`**
 
 ```bash
 mkdir -p neo_localmcp/installer/wizard
@@ -363,13 +363,13 @@ git mv neo_localmcp/wizard/backend.py neo_localmcp/installer/wizard/backend.py
 
 Do not edit these four files' contents in this step.
 
-- [ ] **Step 2: Move and rename `real_backend.py` → `live_backend.py`**
+- [x] **Step 2: Move and rename `real_backend.py` → `live_backend.py`**
 
 ```bash
 git mv neo_localmcp/wizard/real_backend.py neo_localmcp/installer/wizard/live_backend.py
 ```
 
-- [ ] **Step 3: Fix `live_backend.py`'s import depth and class name**
+- [x] **Step 3: Fix `live_backend.py`'s import depth and class name**
 
 **Note on the file's actual current state:** Task 1 moved `mcpb_build.py` to `installer/mcpb.py` while this file was still at its old location (`neo_localmcp/wizard/real_backend.py`, `..` = `neo_localmcp/`). Reaching `neo_localmcp/installer/mcpb.py` from there needs `from ..installer.mcpb import build_mcpb` (NOT `from ..mcpb import build_mcpb` — that would resolve to a nonexistent `neo_localmcp.mcpb`). If Task 1 was executed correctly, the file's import block currently reads `from ..installer.mcpb import build_mcpb`, not `from ..mcpb_build import build_mcpb`. Verify this with `grep -n "mcpb" neo_localmcp/wizard/real_backend.py` before proceeding — if it still shows `..mcpb_build`, Task 1 was not completed correctly and must be fixed first.
 
@@ -467,7 +467,7 @@ to:
         key, plan = installer_cli.dry_run_plan(
 ```
 
-- [ ] **Step 4: Rename the class `RealBackend` → `LiveBackend`**
+- [x] **Step 4: Rename the class `RealBackend` → `LiveBackend`**
 
 In `neo_localmcp/installer/wizard/live_backend.py`, change:
 
@@ -485,7 +485,7 @@ class LiveBackend:
 
 This is the only place the class is *defined*; every other file that references `RealBackend` is fixed in Task 6.
 
-- [ ] **Step 5: Move `console.py` and fix its import depth**
+- [x] **Step 5: Move `console.py` and fix its import depth**
 
 ```bash
 git mv neo_localmcp/wizard/console.py neo_localmcp/installer/wizard/console.py
@@ -543,7 +543,7 @@ to:
 
 Also update the `from .backend import (...)` import at the top of `console.py` — no change needed, it's already a same-package sibling import (`backend.py` moved alongside `console.py`).
 
-- [ ] **Step 6: Update `setup_wizard.py`'s delegation**
+- [x] **Step 6: Update `setup_wizard.py`'s delegation**
 
 In `setup_wizard.py`, change:
 
@@ -575,7 +575,7 @@ def main() -> int:
     return run(sys.argv[1:])
 ```
 
-- [ ] **Step 7: Update `tests/test_mcpb_build.py`'s wizard-hook section**
+- [x] **Step 7: Update `tests/test_mcpb_build.py`'s wizard-hook section**
 
 Finish what Task 1/Step 4 deferred. In `tests/test_mcpb_build.py`, change:
 
@@ -595,7 +595,7 @@ from neo_localmcp.installer.wizard.backend import WizardState  # noqa: E402
 
 And every `rb.RealBackend()` call site (there are 4: in `_run`'s type hint and in `test_wizard_install_surfaces_built_bundle`, `test_wizard_uninstall_does_not_build`, `test_wizard_survives_build_failure`) becomes `rb.LiveBackend()`. The `monkeypatch.setattr(rb, "install", ...)`, `monkeypatch.setattr(rb, "uninstall", ...)`, `monkeypatch.setattr(rb, "build_mcpb", ...)` calls need NO change — they patch attributes on the `rb` module object itself (which still exists, just aliased to `live_backend` now), and those names (`install`, `uninstall`, `build_mcpb`) are still imported into that module's namespace after Task 3's Step 3 edits.
 
-- [ ] **Step 8: Run the affected tests**
+- [x] **Step 8: Run the affected tests**
 
 ```bash
 python -m pytest -q tests/test_mcpb_build.py
@@ -611,13 +611,13 @@ Expected: all PASS.
 
 Note: `tests/test_wizard.py` will still fail at this point — it's fixed in Task 6.
 
-- [ ] **Step 9: Compile-check**
+- [x] **Step 9: Compile-check**
 
 ```bash
 python -m compileall -q neo_localmcp setup.py
 ```
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add -A
@@ -634,6 +634,7 @@ git commit -m "refactor(installer): move wizard/ into installer/wizard/, rename 
 
 **Files:**
 - Move + rename: `neo_localmcp/installer/wizard/fake_backend.py` → `neo_localmcp/installer/wizard/preview_backend.py`, class `FakeBackend` → `PreviewBackend`
+- Modify: `neo_localmcp/installer/wizard/backend.py` (docstring only, Step 6 — a gap the Task 3 review surfaced: no other task was scheduled to fix its stale module-path references)
 
 **Interfaces:**
 - Produces: `neo_localmcp.installer.wizard.preview_backend.PreviewBackend` (implements `WizardBackend`), module attributes `_STATE_PATH`, `_STATE_DIR`, `_STEP_DELAY` (same names, same meaning, just class/module renamed) — these three names are monkeypatched by `tests/test_wizard.py` (fixed in Task 6), so they must keep their exact names.
@@ -746,7 +747,40 @@ becomes:
              NEO_LOCALMCP_WIZARD_PREVIEW_STATE=healthy to simulate a returning user
 ```
 
-- [ ] **Step 6: Run the affected tests**
+- [ ] **Step 6: Fix `backend.py`'s stale docstring (review-pass addition, Task 3)**
+
+Task 3's review found that `neo_localmcp/installer/wizard/backend.py`'s module docstring (lines 4-7) was never scheduled for a fix by any task: it names the two backend implementations by their OLD module paths and OLD class names, and nothing else in this plan touches it. Fix it now, in this task, since this is where both renames it needs (`fake_backend`→`preview_backend`, and the `real_backend`→`live_backend` rename Task 3 already did) are both in scope. Change:
+
+```python
+"""The seam between the wizard UI and real lifecycle work.
+
+Screens depend only on :class:`WizardBackend` and the plain dataclasses here --
+never on ``neo_localmcp.installer`` directly. Two implementations satisfy this
+contract: :mod:`neo_localmcp.wizard.fake_backend` (in-memory, side-effect free,
+for walking the flow) and :mod:`neo_localmcp.wizard.real_backend` (drives the
+actual install lifecycle). Swapping them is a one-line change in ``app.py``.
+
+This module is stdlib-only on purpose so it stays importable everywhere.
+"""
+```
+
+to:
+
+```python
+"""The seam between the wizard UI and real lifecycle work.
+
+Screens depend only on :class:`WizardBackend` and the plain dataclasses here --
+never on ``neo_localmcp.installer`` directly. Two implementations satisfy this
+contract: :mod:`neo_localmcp.installer.wizard.preview_backend` (in-memory,
+side-effect free, for walking the flow) and
+:mod:`neo_localmcp.installer.wizard.live_backend` (drives the actual install
+lifecycle). Swapping them is a one-line change in ``app.py``.
+
+This module is stdlib-only on purpose so it stays importable everywhere.
+"""
+```
+
+- [ ] **Step 7: Run the affected tests**
 
 ```bash
 python -m pytest -q tests/test_mcpb_build.py tests/installer/ -k "not lifecycle"
@@ -754,13 +788,13 @@ python -m pytest -q tests/test_mcpb_build.py tests/installer/ -k "not lifecycle"
 
 Expected: all PASS (nothing here references `fake_backend`/`FakeBackend` yet — `test_wizard.py` is Task 6).
 
-- [ ] **Step 7: Compile-check**
+- [ ] **Step 8: Compile-check**
 
 ```bash
 python -m compileall -q neo_localmcp setup.py setup_wizard.py
 ```
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add -A
