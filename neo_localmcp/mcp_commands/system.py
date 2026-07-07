@@ -9,7 +9,7 @@ Config and health (``init``, ``status``, ``where``, ``model_status``,
 
 from __future__ import annotations
 
-from .. import repo_memory
+from ..retrieval import repo_memory
 from ..config import CONFIG_PATH, ensure_config, load_config
 from ..identity import IDENTITY
 from ..ollama_client import ping

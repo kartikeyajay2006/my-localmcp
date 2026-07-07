@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from neo_localmcp import repo_memory
+from neo_localmcp.retrieval import repo_memory
 from neo_localmcp.mcp_commands import editing, memory
 
 pytestmark = pytest.mark.retrieval

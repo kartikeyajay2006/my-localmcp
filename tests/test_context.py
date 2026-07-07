@@ -4,9 +4,9 @@ import json
 
 import pytest
 
-from neo_localmcp import repo_memory
+from neo_localmcp.retrieval import repo_memory
 from neo_localmcp.mcp_commands import memory
-from neo_localmcp.query import INTENT_KEYWORDS, FILLER_WORDS, normalize_query
+from neo_localmcp.retrieval.query import INTENT_KEYWORDS, FILLER_WORDS, normalize_query
 from neo_localmcp.utils import extract_markdown_headings
 
 pytestmark = pytest.mark.retrieval
@@ -236,7 +236,7 @@ def test_fenced_decoy_heading_does_not_get_matched_as_a_section(tmp_path, isolat
 
 
 def test_section_boundaries_update_after_heading_insert_and_removal(tmp_path, isolated_config):
-    from neo_localmcp import repo_memory
+    from neo_localmcp.retrieval import repo_memory
 
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -271,7 +271,7 @@ def test_section_boundaries_update_after_heading_insert_and_removal(tmp_path, is
 
 
 def test_reindexing_unchanged_markdown_file_is_a_cheap_noop(tmp_path, isolated_config):
-    from neo_localmcp import repo_memory
+    from neo_localmcp.retrieval import repo_memory
 
     repo = tmp_path / "repo"
     repo.mkdir()

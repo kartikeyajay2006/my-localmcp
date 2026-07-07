@@ -6,10 +6,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from .config import db_path, load_config
+from ..config import db_path, load_config
 
 INDEXER_VERSION = "1.2.0"
-from .utils import extract_symbols, git_info, language_for_path, read_text_file, rel, repo_id, repo_root_or_cwd, safe_path, scan_repo_files, sha256_file, simple_terms
+from ..utils import extract_symbols, git_info, language_for_path, read_text_file, rel, repo_id, repo_root_or_cwd, safe_path, scan_repo_files, sha256_file, simple_terms
 
 # Retrieval-memory tuning (1.0.6, P4). Kept intentionally conservative: structural
 # evidence (heading/milestone matches in mcp_commands/memory.py) always scores far higher than
