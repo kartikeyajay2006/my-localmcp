@@ -5,7 +5,7 @@ import sys
 import traceback
 from typing import Any
 
-from .mcp_commands import memory
+from . import memory
 
 
 def _configure_utf8_stdio() -> None:

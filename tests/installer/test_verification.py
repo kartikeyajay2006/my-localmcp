@@ -55,7 +55,7 @@ class ScriptedCommandRunner:
             return "package-version"
         if joined.endswith("--help"):
             return "cli-startup"
-        if "import neo_localmcp.server" in joined:
+        if "import neo_localmcp.mcp.server" in joined:
             return "server-import"
         return "other"
 
@@ -116,7 +116,7 @@ def _passing_runner(expected_version: str) -> ScriptedCommandRunner:
 
 def _healthy_doctor_payload() -> dict:
     """A doctor() payload shaped like the real system.doctor() output for a
-    healthy install: top-level ``ok`` is always True (hardcoded in mcp_commands/system.py), the
+    healthy install: top-level ``ok`` is always True (hardcoded in mcp/system.py), the
     substantive required signals ``config_exists``/``db_open`` are True, and
     Ollama is unreachable (which must NOT make the required doctor check fail)."""
     return {

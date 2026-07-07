@@ -166,7 +166,7 @@ def test_rg_search_fallback_interprets_the_query_as_a_regex(tmp_path, isolated_c
     CI runner has no rg preinstalled, unlike the windows-latest runner used
     during local development), the pure-Python fallback path did a literal
     substring match of the *entire* regex-syntax query string -- including the
-    '(?:...|...)' alternation syntax mcp_commands/memory.py always sends it -- against each
+    '(?:...|...)' alternation syntax mcp/memory.py always sends it -- against each
     line, so it silently matched nothing at all, for single or multi-term
     batches alike. Surfaced live by CI on 2026-07-03; see PROJECT_NOTES.md."""
     monkeypatch.setattr(utils, "which", lambda name: None)

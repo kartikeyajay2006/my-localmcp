@@ -29,7 +29,7 @@ VALIDATION_COMMAND_TIMEOUT = 120.0
 
 _INTERPRETER_SNIPPET = "import sys; print('%d.%d.%d' % sys.version_info[:3])"
 _PACKAGE_VERSION_SNIPPET = "import neo_localmcp; print(neo_localmcp.__version__)"
-_SERVER_IMPORT_SNIPPET = "import neo_localmcp.server"
+_SERVER_IMPORT_SNIPPET = "import neo_localmcp.mcp.server"
 
 
 # --------------------------------------------------------------------------- #
