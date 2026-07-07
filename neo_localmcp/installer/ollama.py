@@ -9,9 +9,10 @@ failure rather than blocking install/reinstall/uninstall.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from .. import ollama_client
-from ..config import load_config
+from ..config import load_config, save_config
 
 
 @dataclass(frozen=True)
@@ -30,6 +31,37 @@ def configured_models() -> tuple[str, ...]:
         if name and name not in seen:
             seen.append(str(name))
     return tuple(seen)
+
+
+def configure_models(
+    *,
+    base_url: str | None = None,
+    fast_model: str | None = None,
+    summary_model: str | None = None,
+    num_ctx: int | None = None,
+) -> dict[str, Any]:
+    """Merge non-empty overrides into the persisted Ollama config and save it.
+
+    Only fields that are given (truthy) are changed; omitted fields keep
+    their current persisted value. Returns the updated ``ollama`` config
+    block. Shared by ``tools.set_ollama`` (the ``neo-localmcp set-ollama``
+    runtime command), the wizard's "Configure Ollama models" operation
+    (``wizard/real_backend.py``), and ``setup.py config-ollama`` -- the three
+    surfaces that let a user change these settings -- so there is exactly one
+    place that decides what "setting the Ollama config" means.
+    """
+    cfg = load_config()
+    ollama_cfg = cfg.setdefault("ollama", {})
+    if base_url:
+        ollama_cfg["base_url"] = base_url.rstrip("/")
+    if fast_model:
+        ollama_cfg["fast_model"] = fast_model
+    if summary_model:
+        ollama_cfg["summary_model"] = summary_model
+    if num_ctx:
+        ollama_cfg["num_ctx"] = int(num_ctx)
+    save_config(cfg)
+    return ollama_cfg
 
 
 def unload_model(model: str, timeout: float = 5.0) -> ModelUnloadResult:

@@ -233,6 +233,28 @@ def build_parser() -> argparse.ArgumentParser:
     )
     uninstall_parser.set_defaults(operation="uninstall")
 
+    config_ollama_parser = sub.add_parser(
+        "config-ollama",
+        help="Set the Ollama base URL and/or fast/summary models. Omitted flags keep their current value.",
+    )
+    config_ollama_parser.add_argument("--base-url")
+    config_ollama_parser.add_argument("--fast-model")
+    config_ollama_parser.add_argument("--summary-model")
+    config_ollama_parser.set_defaults(operation="config-ollama")
+
+    manage_clients_parser = sub.add_parser(
+        "manage-clients",
+        help="Reconcile which clients are connected to the currently installed runtime.",
+    )
+    manage_clients_parser.add_argument(
+        "--client",
+        action="append",
+        choices=("claude-code", "codex", "claude-desktop"),
+        default=[],
+        help="Client that should stay connected. Repeat for multiple; omit entirely to disconnect all.",
+    )
+    manage_clients_parser.set_defaults(operation="manage-clients")
+
     return parser
 
 
@@ -343,6 +365,47 @@ def _render_result(result: OperationResult, reporter: Reporter) -> int:
     return _STATUS_EXIT_CODES[result.status]
 
 
+def _run_config_ollama(args: argparse.Namespace, reporter: Reporter) -> int:
+    from neo_localmcp.installer import configure_models
+
+    ollama_cfg = configure_models(
+        base_url=args.base_url, fast_model=args.fast_model, summary_model=args.summary_model,
+    )
+    reporter.action(
+        f"Saved Ollama config: fast={ollama_cfg.get('fast_model')}, "
+        f"summary={ollama_cfg.get('summary_model')}, base_url={ollama_cfg.get('base_url')}"
+    )
+    return EXIT_SUCCESS
+
+
+_LEVEL_METHODS = {
+    "info": Reporter.info,
+    "warning": Reporter.warn,
+    "error": Reporter.error,
+    "action": Reporter.action,
+}
+
+
+def _run_manage_clients(
+    args: argparse.Namespace, context: OperationContext, reporter: Reporter,
+) -> int:
+    from neo_localmcp.installer import apply_client_selection
+
+    outcome = apply_client_selection(
+        context.paths,
+        args.client,
+        server_command=context.paths.server_executable,
+        on_event=lambda level, message: _LEVEL_METHODS[level](reporter, message),
+    )
+    if not outcome.ok:
+        return EXIT_FAILURE
+    reporter.summary(
+        "manage-clients succeeded",
+        {"connected": ", ".join(outcome.connected) or "none"},
+    )
+    return EXIT_SUCCESS
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -357,6 +420,11 @@ def main(argv: list[str] | None = None) -> int:
     context = build_context(reporter)
     if args.operation == "install":
         context.selected_clients = list(args.client)
+
+    if args.operation == "config-ollama":
+        return _run_config_ollama(args, reporter)
+    if args.operation == "manage-clients":
+        return _run_manage_clients(args, context, reporter)
 
     if getattr(args, "dry_run", False):
         _render_dry_run(context.paths, args, reporter)
