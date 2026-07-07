@@ -1831,7 +1831,7 @@ git commit -m "refactor(mcp-commands): add ollama.py (set_ollama/ollama_status/o
 
 ---
 
-### Task 12: Delete `tools.py`, repoint every caller
+### Task 12: Delete `tools.py`, repoint every caller ✅ COMPLETE (commit 610fa52) — tools.py deleted, MCP command split done
 
 **Why:** All four category files now exist with verified-complete content (Tasks 8-11); this task is the atomic cutover — delete the monolith and fix every real caller in one pass so there is never a half-migrated state where some code imports `tools` and other code imports `mcp_commands`.
 
@@ -1847,7 +1847,7 @@ git commit -m "refactor(mcp-commands): add ollama.py (set_ollama/ollama_status/o
 
 **Interfaces:** No new interfaces — this task only repoints existing callers to the functions Tasks 8-11 already produced.
 
-- [ ] **Step 1: Delete `tools.py`**
+- [x] **Step 1: Delete `tools.py`**
 
 ```bash
 git rm neo_localmcp/tools.py
@@ -1855,7 +1855,7 @@ git rm neo_localmcp/tools.py
 
 (Before running this, double check every function it contained has a home: cross-reference against the "Interfaces: Produces" lists in Tasks 8, 9, 10, 11 — 11 + 32 + 2 + 4 = every public function accounted for, plus the 3 shared helpers from Task 7. If anything is missing, stop and add it to the appropriate category file before proceeding.)
 
-- [ ] **Step 2: Fix `server.py`**
+- [x] **Step 2: Fix `server.py`**
 
 Change the import (was line 15):
 
@@ -1886,7 +1886,7 @@ Then update each call site:
 
 (`_context_prepare_worker` at line 81 does not call `tools.*` directly — it subprocess-invokes `neo_localmcp.context_worker`, fixed separately in Step 4 below — no change needed in `server.py` for that function.)
 
-- [ ] **Step 3: Fix `cli.py`**
+- [x] **Step 3: Fix `cli.py`**
 
 Change the import (was line 8):
 
@@ -1932,7 +1932,7 @@ Then update each call site:
 | `cmd_apply_patch` (187) | `tools.apply_unified_patch(patch_text, args.repo_root, check_only=args.check_only)` | `editing.apply_unified_patch(patch_text, args.repo_root, check_only=args.check_only)` |
 | `cmd_record_change` (192) | `tools.record_change(args.summary, args.paths, args.repo_root)` | `memory.record_change(args.summary, args.paths, args.repo_root)` |
 
-- [ ] **Step 4: Fix `context_worker.py`**
+- [x] **Step 4: Fix `context_worker.py`**
 
 Change:
 
@@ -1958,7 +1958,7 @@ to:
         result = memory.context_prepare(
 ```
 
-- [ ] **Step 5: Fix `benchmark.py`**
+- [x] **Step 5: Fix `benchmark.py`**
 
 Change:
 
@@ -1985,7 +1985,7 @@ Then update each call site:
 
 Also update the comment at (was line 397): `"# same precedent as mcpb_build.py's _next_free_path"` → `"# same precedent as installer/mcpb.py's _next_free_path"` (accuracy, since Task 1 already moved that file).
 
-- [ ] **Step 6: Fix `installer/verification.py`'s embedded snippet**
+- [x] **Step 6: Fix `installer/verification.py`'s embedded snippet**
 
 Change:
 
@@ -2001,7 +2001,7 @@ _DOCTOR_SNIPPET = "import sys; from neo_localmcp.mcp_commands.system import doct
 
 This snippet is executed as a subprocess script inside a candidate/managed venv during post-install verification (`_check_doctor`) — it must reference the doctor() function's real new location, or every install's verification step would start failing with an `ImportError`.
 
-- [ ] **Step 7: Fix `tests/test_context.py`**
+- [x] **Step 7: Fix `tests/test_context.py`**
 
 Change:
 
@@ -2018,7 +2018,7 @@ from neo_localmcp.mcp_commands import memory
 
 Then replace every `tools.prepare_context(...)` and `tools.test_determinism(...)` call site with `memory.prepare_context(...)` / `memory.test_determinism(...)` respectively (mechanical prefix swap; there are ~15 call sites, all `tools.prepare_context(` or `tools.test_determinism(`).
 
-- [ ] **Step 8: Fix `tests/test_retrieval_memory.py`**
+- [x] **Step 8: Fix `tests/test_retrieval_memory.py`**
 
 Change:
 
@@ -2041,7 +2041,7 @@ Then:
 - Every `monkeypatch.setattr(tools, "chat", ...)` → `monkeypatch.setattr(editing, "chat", ...)` (13 occurrences — these intercept `summarize_file`'s internal Ollama call, which now lives in `editing.py`)
 - The comment `# structural milestone boost defined in tools.py` → `# structural milestone boost defined in mcp_commands/memory.py`
 
-- [ ] **Step 9: Run the full affected test surface**
+- [x] **Step 9: Run the full affected test surface**
 
 ```bash
 python -m pytest -q tests/test_context.py tests/test_retrieval_memory.py tests/test_benchmark.py -v
@@ -2061,13 +2061,13 @@ python -m pytest -q -m "not slow" --deselect tests/test_distribution.py::test_bu
 
 Expected: full fast suite PASSES. (The `--deselect` skips the stale-bundle byte-check, regenerated + run for real in Task 14 — see the same note in Task 6, Step 5. The bundle is still stale here because Tasks 7-12 changed `neo_localmcp/` further.)
 
-- [ ] **Step 10: Compile-check**
+- [x] **Step 10: Compile-check**
 
 ```bash
 python -m compileall -q neo_localmcp setup.py setup_wizard.py
 ```
 
-- [ ] **Step 11: Manual smoke test (per `CLAUDE.md`)**
+- [x] **Step 11: Manual smoke test (per `CLAUDE.md`)**
 
 ```bash
 python -m neo_localmcp.cli doctor
@@ -2076,7 +2076,7 @@ python -m neo_localmcp.cli context "debug repository indexing: index_repo, refre
 
 Expected: both commands produce their normal JSON/text output with no `ImportError`/`ModuleNotFoundError`.
 
-- [ ] **Step 12: Commit**
+- [x] **Step 12: Commit**
 
 ```bash
 git add -A
