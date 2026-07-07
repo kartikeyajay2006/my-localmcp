@@ -1,3 +1,11 @@
+"""The two source-touching MCP tools.
+
+``summarize_file`` (whole file, or one Markdown section, cached by source
+hash) and ``apply_unified_patch`` -- the only writer in the entire tool
+surface, and only via an exact developer-approved diff validated with
+``git apply --check`` first. Neither generates code.
+"""
+
 from __future__ import annotations
 
 import json

@@ -1,3 +1,11 @@
+"""Ollama-facing MCP tools.
+
+A thin MCP/CLI surface over the daemon primitives in ``ollama_client`` and the
+lifecycle-scoped model config in ``installer.ollama``: ``set_ollama``,
+``ollama_status``, ``ollama_ensure``, and the ``ollama_control`` dispatcher.
+It configures and reports readiness; it never owns daemon or config policy.
+"""
+
 from __future__ import annotations
 
 from ..installer import configure_models as installer_configure_models
