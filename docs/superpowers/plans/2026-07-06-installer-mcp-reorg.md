@@ -1189,7 +1189,7 @@ git commit -m "test(wizard): update test_wizard.py for installer/wizard/ move an
 
 ---
 
-### Task 7: Create `neo_localmcp/mcp_commands/_shared.py`
+### Task 7: Create `neo_localmcp/mcp_commands/_shared.py` ✅ COMPLETE (commit 46ebfc7)
 
 **Why:** Three helpers in `tools.py` are genuinely used across what will become 2+ separate category files (`json_out` by all four; `_format_model_timing`/`_ns_to_seconds` and `_slim_status_for_nesting` by both `memory.py`'s `context_prepare` and `editing.py`'s `summarize_file`/`_summarize_section`). Per the design's rule ("no category imports another category — promote to `_shared.py` instead"), these three live here.
 
@@ -1200,14 +1200,14 @@ git commit -m "test(wizard): update test_wizard.py for installer/wizard/ move an
 **Interfaces:**
 - Produces: `neo_localmcp.mcp_commands._shared.json_out(data: Any) -> str`, `neo_localmcp.mcp_commands._shared._format_model_timing(result: dict[str, Any] | None) -> dict[str, Any] | None`, `neo_localmcp.mcp_commands._shared._slim_status_for_nesting(status: dict[str, Any] | None) -> dict[str, Any] | None`. Tasks 8-11 consume these via `from ._shared import json_out` etc.
 
-- [ ] **Step 1: Create the package directory and empty `__init__.py`**
+- [x] **Step 1: Create the package directory and empty `__init__.py`**
 
 ```bash
 mkdir -p neo_localmcp/mcp_commands
 touch neo_localmcp/mcp_commands/__init__.py
 ```
 
-- [ ] **Step 2: Write `_shared.py`**
+- [x] **Step 2: Write `_shared.py`**
 
 Create `neo_localmcp/mcp_commands/_shared.py` with exactly this content (moved verbatim from `tools.py` lines 25-53 and 1018-1024 — `json_out`, `_ns_to_seconds`, `_format_model_timing`, `_slim_status_for_nesting`):
 
@@ -1260,13 +1260,13 @@ def _slim_status_for_nesting(status: dict[str, Any] | None) -> dict[str, Any] | 
 
 Do not delete these four definitions from `tools.py` yet — `tools.py` still exists and is still what `server.py`/`cli.py`/etc. import from until Task 12. This task only creates the new file; Task 12 removes the old one.
 
-- [ ] **Step 2: Compile-check the new file**
+- [x] **Step 2: Compile-check the new file**
 
 ```bash
 python -m compileall -q neo_localmcp/mcp_commands
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add neo_localmcp/mcp_commands/__init__.py neo_localmcp/mcp_commands/_shared.py
