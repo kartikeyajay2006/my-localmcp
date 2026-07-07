@@ -43,4 +43,4 @@ where = ["."]
 include = ["neo_localmcp*"]
 
 [tool.setuptools.package-data]
-neo_localmcp = ["neo.toml", "templates/claude-code/commands/neo-localmcp/*.md", "benchmark_queries/*.jsonl"]
+neo_localmcp = ["neo.toml", "templates/claude-code/commands/neo-localmcp/*.md", "benchmarker/queries/*.jsonl"]
