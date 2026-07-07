@@ -17,9 +17,8 @@ from pathlib import Path
 from typing import Any
 
 import neo_localmcp
-from .. import client_setup, config, ollama_client
-from ..installer.mcpb import build_mcpb
-from ..installer import (
+from ... import client_setup, config, ollama_client
+from .. import (
     ManagedPaths,
     Operation,
     OperationContext,
@@ -32,7 +31,8 @@ from ..installer import (
     reinstall,
     uninstall,
 )
-from ..installer import clients as clients_mod
+from .. import clients as clients_mod
+from ..mcpb import build_mcpb
 from .backend import (
     CLIENT_KEYS,
     CLIENT_LABELS,
@@ -84,7 +84,7 @@ def _reporter_forwarding_to(emit: EmitFn) -> Reporter:
     return Reporter(output_fn=output_fn)
 
 
-class RealBackend:
+class LiveBackend:
     """Drives real install/reinstall/uninstall + config against the managed root."""
 
     def __init__(self) -> None:
@@ -275,7 +275,7 @@ class RealBackend:
         return str(written)
 
     def _dry_run(self, state: WizardState, emit: EmitFn) -> OperationOutcome:
-        from ..installer import cli as installer_cli  # public dry_run_plan() lives here; same repo
+        from .. import cli as installer_cli  # public dry_run_plan() lives here; same repo
 
         key, plan = installer_cli.dry_run_plan(
             state.operation,

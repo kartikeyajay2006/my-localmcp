@@ -648,7 +648,7 @@ def run(argv: list[str] | None = None) -> int:
 
         backend: WizardBackend = FakeBackend()
     else:
-        from .real_backend import RealBackend
+        from .live_backend import LiveBackend
 
-        backend = RealBackend()
+        backend = LiveBackend()
     return ConsoleWizard(backend=backend, fake=fake).run()
