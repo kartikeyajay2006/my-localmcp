@@ -6,7 +6,7 @@ import sys
 from typing import Any
 
 from .mcp_commands import editing, memory, ollama, system
-from .benchmark import run_benchmark
+from .benchmarker import run_benchmark
 from .client_setup import client_status, remove_clients, setup_clients
 from .config import CONFIG_PATH, ensure_config
 from .identity import IDENTITY

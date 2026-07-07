@@ -17,9 +17,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from . import repo_memory
-from .mcp_commands import memory, ollama, system
-from .utils import git_info, repo_root_or_cwd
+from .. import repo_memory
+from ..mcp_commands import memory, ollama, system
+from ..utils import git_info, repo_root_or_cwd
 
 # How many real indexed symbols to turn into mechanical synthetic queries.
 # Deterministic sample (repo_memory.sample_symbols orders by file/line), not
@@ -137,7 +137,7 @@ def _mem_synthetic_checks(root: Path) -> list[CheckResult]:
 
 
 def _default_queries_path() -> Path:
-    return Path(__file__).resolve().parent / "benchmark_queries" / "default.jsonl"
+    return Path(__file__).resolve().parent / "queries" / "default.jsonl"
 
 
 def _load_natural_queries(path: Path | None) -> list[dict[str, Any]]:
