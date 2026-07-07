@@ -18,7 +18,7 @@ from typing import Any
 
 import neo_localmcp
 from .. import client_setup, config, ollama_client
-from ..mcpb_build import build_mcpb
+from ..installer.mcpb import build_mcpb
 from ..installer import (
     ManagedPaths,
     Operation,
