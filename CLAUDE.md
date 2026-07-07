@@ -46,14 +46,19 @@ neo-localmcp context "debug repository indexing: index_repo, refresh" --repo-roo
 ## Module map (`neo_localmcp/`)
 
 - `server.py` — FastMCP entrypoint; registers with `lifecycle.py` and runs the stdio loop.
-- `tools.py` — MCP tool implementations (`prepare_context`/`context_prepare`, `file_excerpts`, `summarize_file`, `apply_patch`, etc.).
-- `cli.py` — CLI subcommands (`index`, `context`, `doctor`, `servers`, `stop`, `setup`, ...). Administration is CLI-only, never exposed as an MCP tool.
+- `mcp_commands/system.py` — status/lifecycle MCP tools: `init`, `status`, `where`, `model_status`, `doctor`, `repo_index`/`repo_reindex`/`repo_refresh`, `reset_repo`/`reset_all`, `repo_lookup`.
+- `mcp_commands/memory.py` — the context-retrieval pipeline: `prepare_context`/`context_prepare`, `file_context`/`file_excerpts`, `record_change`, `test_determinism`, plus the scoring/ranking/formatting internals that back them.
+- `mcp_commands/ollama.py` — Ollama-facing MCP tools: `set_ollama`, `ollama_status`, `ollama_ensure`, `ollama_control`.
+- `mcp_commands/editing.py` — the two source-touching MCP tools: `summarize_file` and `apply_unified_patch` (the only writer, and only via an exact developer-approved diff).
+- `mcp_commands/_shared.py` — small helpers shared across the above (`json_out`, model-timing formatting, response-slimming for nested calls); not an MCP tool module itself.
+- `cli.py` — CLI subcommands (`index`, `context`, `doctor`, `servers`, `stop`, `setup`, ...). Administration is CLI-only, never exposed as an MCP tool; now unambiguous now that the installer CLI has its own `cli.py` under `installer/`.
 - `repo_memory.py` — SQLite persistence: repo/file/symbol index, `repo_fts`, and the retrieval-boost implicit-feedback memory (`get_boost_map`, `record_task_query`, `record_retrieval_feedback`).
 - `ollama_client.py` — Ollama lifecycle (status/start/warm/ensure), bounded inference (`num_predict`), never auto-downloads models.
 - `lifecycle.py` — server registry + graceful-stop (`neo-localmcp stop`), used by `setup.py` before touching runtime files.
 - `client_setup.py` — registers and deregisters neo-localmcp for Claude Code / Claude Desktop / Codex (`setup_*`/`remove_*` per surface, plus `remove_client`/`remove_clients` dispatchers). Claude Desktop removal is detect-and-warn only — the extension itself is removed through Claude's own UI, not automated.
 - `config.py` — single source of truth for `APP_DIR` (`~/.neo-localmcp` by default) and `config.yaml` defaults. Despite the extension, the on-disk content is JSON (legacy naming, kept for backward compatibility — see the `CONFIG_PATH` comment).
-- `wizard/` — the guided terminal installer behind `setup_wizard.py`: a plain, stdlib-only, full-screen *numbered* wizard (no TUI toolkit). `preflight.py` is stdlib-only (dependency bootstrap, only `psutil`); `backend.py` is the `WizardBackend` Protocol + data shapes; `fake_backend.py`/`real_backend.py` are the two implementations (the real one only *calls* `installer/` + `config`/`ollama_client`/`client_setup`, never reimplements lifecycle); `console.py` is the UI + `run()` entrypoint. The UI layer is deliberately backend-agnostic — it was swapped from an initial Textual version to this numbered one with zero backend changes.
+- `installer/` — the lifecycle package (path/process/state/verification machinery, `mcpb.py`'s bundle builder), now also home to both installer frontends: `cli.py` (the scriptable installer CLI, moved from the old top-level `setup_cli.py`) and `wizard/` (the guided terminal installer behind `setup_wizard.py` — plain, stdlib-only, full-screen *numbered* UI, no TUI toolkit; its `preview_backend.py`/`live_backend.py` are the two `WizardBackend` implementations). See `docs/` design specs for this package's internal submodule breakdown — that level of detail doesn't belong in this always-loaded file.
+- `benchmarker/` — retrieval-quality benchmarking: package `__init__.py` plus `queries/` (the query fixtures, e.g. `default.jsonl`) it runs against.
 - `query.py` — natural/hybrid task-string parsing into intent + strong/weak terms.
 - `identity.py` / `neo.toml` — product naming constants (only place that should ever need to change if the product is renamed).
 

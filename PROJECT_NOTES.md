@@ -1,5 +1,9 @@
 # Project Notes
 
+## 2026-07-07
+
+- **Installer/mcp-command reorg (14-task plan) complete.** Installer's two frontends -- `setup_cli.py` and the top-level `wizard/` package -- are consolidated under `neo_localmcp/installer/` (`installer/cli.py`, `installer/wizard/`), with `real_backend.py`/`fake_backend.py` renamed to `live_backend.py`/`preview_backend.py` as part of a full wizard "dummy"/"fake" terminology standardization to "preview" (flag `--preview`, env var `NEO_LOCALMCP_WIZARD_PREVIEW_STATE`). `tools.py`'s single-file MCP tool surface (1164 lines) is split into `mcp_commands/system.py` (status/lifecycle tools), `mcp_commands/memory.py` (the context-retrieval pipeline), `mcp_commands/ollama.py` (Ollama-facing tools), `mcp_commands/editing.py` (the two source-touching tools), and a shared `mcp_commands/_shared.py`. `benchmark.py`/`benchmark_queries/` are renamed to `benchmarker/` (package + `queries/`). `CLAUDE.md`'s module map, `README.md`'s wizard `--preview` mention, and `PROJECT_STATUS.md` are updated to match; `packages/claude-desktop/neo-localmcp-v1.1.1.mcpb` rebuilt against the new layout. Full suite green, including the previously-deselected `test_built_mcpb_embeds_current_package_bytes` bundle byte-check and the slow real-lifecycle installer tests, run for real for the first time in this plan.
+
 ## 2026-07-06 (2)
 
 - **`setup.py` and `setup_wizard.py` now feature-parity (docs-only follow-up).** Tracing the full setup lifecycle call chain during feature completion revealed the Ollama-config and client-reconciliation logic are now shared across three callers (wizard/CLI/`set-ollama` runtime command), one implementation each. Added `config-ollama` and `manage-clients` examples to README.md's setup.py usage block, a status line to PROJECT_STATUS.md, and this entry -- no code changes, just documentation of the achieved parity for the record.

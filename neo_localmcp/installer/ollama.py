@@ -46,7 +46,7 @@ def configure_models(
     their current persisted value. Returns the updated ``ollama`` config
     block. Shared by ``mcp_commands.ollama.set_ollama`` (the ``neo-localmcp set-ollama``
     runtime command), the wizard's "Configure Ollama models" operation
-    (``wizard/real_backend.py``), and ``setup.py config-ollama`` -- the three
+    (``installer/wizard/live_backend.py``), and ``setup.py config-ollama`` -- the three
     surfaces that let a user change these settings -- so there is exactly one
     place that decides what "setting the Ollama config" means.
     """
