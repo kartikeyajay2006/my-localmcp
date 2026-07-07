@@ -68,8 +68,7 @@ neo-localmcp context "debug repository indexing: index_repo, refresh" --repo-roo
   release bumps it in lockstep with `pyproject.toml`'s `version` and
   `packages/claude-desktop/mcpb/manifest.json` — the three must always match.
 - **macOS and Windows are the supported 1.0.10 platforms.** `setup.py` is the sole
-  lifecycle policy surface. Linux support is deferred. Legacy platform installers
-  are retained under `_LegacyInstallers/` for historical reference only.
+  lifecycle policy surface. Linux support is deferred.
 - **Repository memory is centralized, not per-repo.** All indexed repos share one
   `~/.neo-localmcp/repo-context.sqlite`, distinguished internally by `repo_id`
   (canonical root + git remote). A "wipe memory" action affects every indexed repo,
