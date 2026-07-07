@@ -2,10 +2,10 @@
 
 Touches no processes, venvs, network, or files. Every ``run_*`` method sleeps
 briefly between simulated steps so the live progress log looks real. Use it to
-walk the whole flow safely (``python setup_wizard.py --fake``).
+walk the whole flow safely (``python setup_wizard.py --preview``).
 
 Simulated state persists across runs in ``.wizard_preview/state.json`` at the
-repo root (gitignored), so a later ``--fake`` run sees what a previous
+repo root (gitignored), so a later ``--preview`` run sees what a previous
 simulated install/uninstall would have left behind. If that file doesn't
 exist yet, the starting state is seeded from NEO_LOCALMCP_WIZARD_PREVIEW_STATE:
 ``absent`` (default -- a fresh clone) or ``healthy`` (a returning user who has
@@ -54,7 +54,7 @@ _FAKE_INSTALLED_MODELS = tuple(sorted(_FAKE_MODEL_SIZES_RAW))
 
 _STEP_DELAY = 0.35
 
-# Persisted simulation state, so a later `--fake` run (or mid-session `d`
+# Persisted simulation state, so a later `--preview` run (or mid-session `p`
 # toggle) sees what a previous simulated install/uninstall would have left
 # behind, instead of always restarting from the same NEO_LOCALMCP_WIZARD_PREVIEW_STATE
 # seed. Never touches any real managed root, venv, or client config.
@@ -248,7 +248,7 @@ class PreviewBackend:
             return OperationOutcome(
                 ok=True, status="succeeded",
                 title="Dry run complete - nothing was changed.",
-                detail_lines=("This is a simulation (--fake).",),
+                detail_lines=("This is a simulation (--preview).",),
             )
 
         steps = _PLAN.get(op, _PLAN[OP_INSTALL])
@@ -275,7 +275,7 @@ class PreviewBackend:
             detail_lines=(
                 f"Clients connected: {clients}",
                 f"Ollama: fast={self._fast_model}, summary={self._summary_model}",
-                "This was a simulation (--fake) - nothing on disk changed.",
+                "This was a simulation (--preview) - nothing on disk changed.",
             ),
             next_command="neo-localmcp doctor",
         )
@@ -305,7 +305,7 @@ class PreviewBackend:
         return OperationOutcome(
             ok=True, status="succeeded",
             title="Uninstall complete (simulated).",
-            detail_lines=(note, "This was a simulation (--fake)."),
+            detail_lines=(note, "This was a simulation (--preview)."),
         )
 
     def apply_ollama_config(self, state: WizardState, emit: EmitFn) -> OperationOutcome:
