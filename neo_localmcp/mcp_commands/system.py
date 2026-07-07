@@ -1,3 +1,12 @@
+"""System and repository-management MCP tools.
+
+Config and health (``init``, ``status``, ``where``, ``model_status``,
+``doctor``) plus the repository index lifecycle (``repo_index``,
+``repo_reindex``, ``repo_refresh``, ``repo_lookup``, ``reset_repo``,
+``reset_all``). No context ranking or summarization -- those belong to
+``memory`` and ``editing``.
+"""
+
 from __future__ import annotations
 
 from .. import repo_memory

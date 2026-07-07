@@ -1,3 +1,13 @@
+"""The deterministic context-retrieval pipeline.
+
+``prepare_context``/``context_prepare`` and everything that backs them --
+candidate scoring, heading matching, excerpt-range selection, the capped
+recency-gated retrieval-boost nudge, and the MCP/CLI renderers -- plus
+``file_context``, ``file_excerpts``, ``record_change``, and
+``test_determinism``. Ollama only ever re-ranks here; the deterministic
+result built without it is always authoritative.
+"""
+
 from __future__ import annotations
 
 import hashlib
