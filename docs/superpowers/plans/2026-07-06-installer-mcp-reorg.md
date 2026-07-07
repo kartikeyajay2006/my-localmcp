@@ -1275,7 +1275,7 @@ git commit -m "refactor(mcp-commands): add _shared.py with json_out/_format_mode
 
 ---
 
-### Task 8: Create `neo_localmcp/mcp_commands/system.py`
+### Task 8: Create `neo_localmcp/mcp_commands/system.py` ✅ COMPLETE (commit 89354e4)
 
 **Why:** `init`, `status`, `where`, `model_status`, `doctor`, `repo_index`, `repo_reindex`, `repo_refresh`, `repo_lookup`, `reset_repo`, `reset_all` are the "system/repo management" category — none of them touch context-ranking, summarization, or Ollama configuration beyond a basic reachability ping.
 
@@ -1286,7 +1286,7 @@ git commit -m "refactor(mcp-commands): add _shared.py with json_out/_format_mode
 - Produces: `init() -> str`, `status(repo_root: str = "auto") -> str`, `where(repo_root: str = "auto") -> str`, `model_status() -> str`, `doctor(repo_root: str = "auto") -> str`, `repo_index(repo_root: str = "auto", max_files: int | None = None, force: bool = False) -> str`, `repo_reindex(repo_root: str = "auto", max_files: int | None = None) -> str`, `repo_refresh(repo_root: str = "auto", max_files: int | None = None, force: bool = False) -> str`, `repo_lookup(query: str, repo_root: str = "auto", limit: int = 20) -> str`, `reset_repo(repo_root: str = "auto") -> str`, `reset_all() -> str` — identical signatures to today's `tools.*` equivalents.
 - Consumes (from Task 7): `from ._shared import json_out`.
 
-- [ ] **Step 1: Write `system.py`**
+- [x] **Step 1: Write `system.py`**
 
 Create `neo_localmcp/mcp_commands/system.py`, moving these functions verbatim from `tools.py` (lines 350-427 for `init`/`status`/`where`/`model_status`/`doctor`/`repo_index`/`repo_reindex`/`reset_repo`/`reset_all`, plus lines 501 and 505 for `repo_refresh`/`repo_lookup`):
 
@@ -1404,13 +1404,13 @@ def repo_lookup(query: str, repo_root: str = "auto", limit: int = 20) -> str:
 
 Note: `doctor()`'s `from .. import lifecycle` stays a deferred/inline import exactly as it was in `tools.py` (avoids a module-level dependency cycle risk — preserve this behavior verbatim, don't "clean it up" to a top-level import).
 
-- [ ] **Step 2: Compile-check**
+- [x] **Step 2: Compile-check**
 
 ```bash
 python -m compileall -q neo_localmcp/mcp_commands
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add neo_localmcp/mcp_commands/system.py
