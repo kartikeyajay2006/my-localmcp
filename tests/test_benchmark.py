@@ -48,8 +48,8 @@ def test_full_expands_to_every_registered_group(tmp_path, isolated_config, monke
     # installed is exactly the "unit" test silently making a real network
     # call" problem this repo has already found and flagged elsewhere
     # (tests/installer/test_verification.py, PROJECT_NOTES 2026-07-05).
-    monkeypatch.setattr(benchmark.tools, "ollama_status", lambda: json.dumps({"state": "ready", "model": "fake-model", "installed": True}))
-    monkeypatch.setattr(benchmark.tools, "ollama_ensure", lambda: json.dumps({"ok": True, "state": "ready"}))
+    monkeypatch.setattr(benchmark.ollama, "ollama_status", lambda: json.dumps({"state": "ready", "model": "fake-model", "installed": True}))
+    monkeypatch.setattr(benchmark.ollama, "ollama_ensure", lambda: json.dumps({"ok": True, "state": "ready"}))
     repo = _seed_repo(tmp_path / "repo")
     report = benchmark.run_benchmark(["full"], repo_root=str(repo), out_dir=str(tmp_path / "out"))
     assert report["groups_requested"] == ["full"]
@@ -106,8 +106,8 @@ def _fake_ollama_status(state, **overrides):
 
 def test_ollama_group_healthy(monkeypatch, tmp_path, isolated_config):
     repo = _seed_repo(tmp_path / "repo")
-    monkeypatch.setattr(benchmark.tools, "ollama_status", lambda: _fake_ollama_status("ready"))
-    monkeypatch.setattr(benchmark.tools, "ollama_ensure", lambda: json.dumps({"ok": True, "state": "ready"}))
+    monkeypatch.setattr(benchmark.ollama, "ollama_status", lambda: _fake_ollama_status("ready"))
+    monkeypatch.setattr(benchmark.ollama, "ollama_ensure", lambda: json.dumps({"ok": True, "state": "ready"}))
     report = benchmark.run_benchmark(["ollama"], repo_root=str(repo), out_dir=str(tmp_path / "out"))
     assert report["ok"] is True
     by_name = {c["name"]: c for c in report["checks"]}
@@ -119,8 +119,8 @@ def test_ollama_group_healthy(monkeypatch, tmp_path, isolated_config):
 
 def test_ollama_group_flags_unreachable_without_crashing(monkeypatch, tmp_path, isolated_config):
     repo = _seed_repo(tmp_path / "repo")
-    monkeypatch.setattr(benchmark.tools, "ollama_status", lambda: _fake_ollama_status("unreachable", installed=False, error="connection refused"))
-    monkeypatch.setattr(benchmark.tools, "ollama_ensure", lambda: (_ for _ in ()).throw(AssertionError("must not attempt ensure() when unreachable")))
+    monkeypatch.setattr(benchmark.ollama, "ollama_status", lambda: _fake_ollama_status("unreachable", installed=False, error="connection refused"))
+    monkeypatch.setattr(benchmark.ollama, "ollama_ensure", lambda: (_ for _ in ()).throw(AssertionError("must not attempt ensure() when unreachable")))
     report = benchmark.run_benchmark(["ollama"], repo_root=str(repo), out_dir=str(tmp_path / "out"))
     assert report["ok"] is False
     by_name = {c["name"]: c for c in report["checks"]}
@@ -130,8 +130,8 @@ def test_ollama_group_flags_unreachable_without_crashing(monkeypatch, tmp_path, 
 
 def test_ollama_group_flags_missing_model_even_when_reachable(monkeypatch, tmp_path, isolated_config):
     repo = _seed_repo(tmp_path / "repo")
-    monkeypatch.setattr(benchmark.tools, "ollama_status", lambda: _fake_ollama_status("model_cold", installed=False))
-    monkeypatch.setattr(benchmark.tools, "ollama_ensure", lambda: json.dumps({"ok": True, "state": "ready"}))
+    monkeypatch.setattr(benchmark.ollama, "ollama_status", lambda: _fake_ollama_status("model_cold", installed=False))
+    monkeypatch.setattr(benchmark.ollama, "ollama_ensure", lambda: json.dumps({"ok": True, "state": "ready"}))
     report = benchmark.run_benchmark(["ollama"], repo_root=str(repo), out_dir=str(tmp_path / "out"))
     by_name = {c["name"]: c for c in report["checks"]}
     assert by_name["model_present"]["ok"] is False
@@ -140,8 +140,8 @@ def test_ollama_group_flags_missing_model_even_when_reachable(monkeypatch, tmp_p
 
 def test_ollama_group_disabled_by_config_is_not_a_failure(monkeypatch, tmp_path, isolated_config):
     repo = _seed_repo(tmp_path / "repo")
-    monkeypatch.setattr(benchmark.tools, "ollama_status", lambda: _fake_ollama_status("disabled"))
-    monkeypatch.setattr(benchmark.tools, "ollama_ensure", lambda: (_ for _ in ()).throw(AssertionError("must not attempt ensure() when disabled")))
+    monkeypatch.setattr(benchmark.ollama, "ollama_status", lambda: _fake_ollama_status("disabled"))
+    monkeypatch.setattr(benchmark.ollama, "ollama_ensure", lambda: (_ for _ in ()).throw(AssertionError("must not attempt ensure() when disabled")))
     report = benchmark.run_benchmark(["ollama"], repo_root=str(repo), out_dir=str(tmp_path / "out"))
     assert report["ok"] is True
     by_name = {c["name"]: c for c in report["checks"]}
@@ -152,8 +152,8 @@ def test_ollama_group_disabled_by_config_is_not_a_failure(monkeypatch, tmp_path,
 def test_ollama_group_reliability_reflects_partial_failures(monkeypatch, tmp_path, isolated_config):
     repo = _seed_repo(tmp_path / "repo")
     attempts = iter([True, False, True])
-    monkeypatch.setattr(benchmark.tools, "ollama_status", lambda: _fake_ollama_status("ready"))
-    monkeypatch.setattr(benchmark.tools, "ollama_ensure", lambda: json.dumps({"ok": next(attempts)}))
+    monkeypatch.setattr(benchmark.ollama, "ollama_status", lambda: _fake_ollama_status("ready"))
+    monkeypatch.setattr(benchmark.ollama, "ollama_ensure", lambda: json.dumps({"ok": next(attempts)}))
     report = benchmark.run_benchmark(["ollama"], repo_root=str(repo), out_dir=str(tmp_path / "out"))
     by_name = {c["name"]: c for c in report["checks"]}
     assert by_name["reliability"]["ok"] is False

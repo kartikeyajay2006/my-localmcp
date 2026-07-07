@@ -5,7 +5,7 @@ import json
 import sys
 from typing import Any
 
-from . import tools
+from .mcp_commands import editing, memory, ollama, system
 from .benchmark import run_benchmark
 from .client_setup import client_status, remove_clients, setup_clients
 from .config import CONFIG_PATH, ensure_config
@@ -17,27 +17,27 @@ def print_json_text(text: str) -> None:
 
 
 def cmd_init(args: argparse.Namespace) -> int:
-    print_json_text(tools.init())
+    print_json_text(system.init())
     return 0
 
 
 def cmd_status(args: argparse.Namespace) -> int:
-    print_json_text(tools.status(args.repo_root))
+    print_json_text(system.status(args.repo_root))
     return 0
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
-    print_json_text(tools.doctor(args.repo_root))
+    print_json_text(system.doctor(args.repo_root))
     return 0
 
 
 def cmd_where(args: argparse.Namespace) -> int:
-    print_json_text(tools.where(args.repo_root))
+    print_json_text(system.where(args.repo_root))
     return 0
 
 
 def cmd_model_status(args: argparse.Namespace) -> int:
-    print_json_text(tools.model_status())
+    print_json_text(system.model_status())
     return 0
 
 
@@ -106,22 +106,22 @@ def cmd_clients(args: argparse.Namespace) -> int:
 
 
 def cmd_set_ollama(args: argparse.Namespace) -> int:
-    print_json_text(tools.set_ollama(args.base_url, args.summary_model, args.fast_model, args.num_ctx))
+    print_json_text(ollama.set_ollama(args.base_url, args.summary_model, args.fast_model, args.num_ctx))
     return 0
 
 
 def cmd_index(args: argparse.Namespace) -> int:
-    print_json_text(tools.repo_index(args.repo_root, max_files=args.max_files, force=args.force))
+    print_json_text(system.repo_index(args.repo_root, max_files=args.max_files, force=args.force))
     return 0
 
 
 def cmd_refresh(args: argparse.Namespace) -> int:
-    print_json_text(tools.repo_refresh(args.repo_root, max_files=args.max_files, force=args.force))
+    print_json_text(system.repo_refresh(args.repo_root, max_files=args.max_files, force=args.force))
     return 0
 
 
 def cmd_reindex(args: argparse.Namespace) -> int:
-    print_json_text(tools.repo_reindex(args.repo_root, max_files=args.max_files))
+    print_json_text(system.repo_reindex(args.repo_root, max_files=args.max_files))
     return 0
 
 
@@ -129,7 +129,7 @@ def cmd_reset_repo(args: argparse.Namespace) -> int:
     if not args.yes:
         print_json_text(json.dumps({"ok": False, "error": "Refusing to reset without --yes", "hint": "Run: neo-localmcp reset-repo --yes"}, indent=2))
         return 2
-    print_json_text(tools.reset_repo(args.repo_root))
+    print_json_text(system.reset_repo(args.repo_root))
     return 0
 
 
@@ -137,12 +137,12 @@ def cmd_reset_all(args: argparse.Namespace) -> int:
     if not args.yes:
         print_json_text(json.dumps({"ok": False, "error": "Refusing to reset all repo context without --yes", "hint": "Run: neo-localmcp reset-all --yes"}, indent=2))
         return 2
-    print_json_text(tools.reset_all())
+    print_json_text(system.reset_all())
     return 0
 
 
 def cmd_test_determinism(args: argparse.Namespace) -> int:
-    print_json_text(tools.test_determinism(args.task, args.repo_root, runs=args.runs, max_files=args.max_files, limit=args.limit, reset_repo_first=args.reset_repo, reindex_first=args.reindex_first))
+    print_json_text(memory.test_determinism(args.task, args.repo_root, runs=args.runs, max_files=args.max_files, limit=args.limit, reset_repo_first=args.reset_repo, reindex_first=args.reindex_first))
     return 0
 
 
@@ -157,39 +157,39 @@ def cmd_benchmark(args: argparse.Namespace) -> int:
 
 
 def cmd_lookup(args: argparse.Namespace) -> int:
-    print_json_text(tools.repo_lookup(args.query, args.repo_root, args.limit))
+    print_json_text(system.repo_lookup(args.query, args.repo_root, args.limit))
     return 0
 
 
 def cmd_file(args: argparse.Namespace) -> int:
-    print_json_text(tools.file_context(args.path, args.repo_root, args.around_line, args.context_lines))
+    print_json_text(memory.file_context(args.path, args.repo_root, args.around_line, args.context_lines))
     return 0
 
 
 def cmd_context(args: argparse.Namespace) -> int:
     use_ollama = bool(args.ollama_rank) and not bool(args.no_ollama)
-    print_json_text(tools.prepare_context(args.task, args.repo_root, token_budget=args.token_budget, max_files=args.max_files, use_ollama=use_ollama, model=args.model, output_format=args.format))
+    print_json_text(memory.prepare_context(args.task, args.repo_root, token_budget=args.token_budget, max_files=args.max_files, use_ollama=use_ollama, model=args.model, output_format=args.format))
     return 0
 
 
 def cmd_ollama(args: argparse.Namespace) -> int:
-    print_json_text(tools.ollama_control(args.ollama_action, getattr(args, "model", None), getattr(args, "purpose", "ranking")))
+    print_json_text(ollama.ollama_control(args.ollama_action, getattr(args, "model", None), getattr(args, "purpose", "ranking")))
     return 0
 
 
 def cmd_summarize(args: argparse.Namespace) -> int:
-    print_json_text(tools.summarize_file(args.path, args.repo_root, args.model, args.heading))
+    print_json_text(editing.summarize_file(args.path, args.repo_root, args.model, args.heading))
     return 0
 
 
 def cmd_apply_patch(args: argparse.Namespace) -> int:
     patch_text = sys.stdin.read() if args.patch_file == "-" else open(args.patch_file, "r", encoding="utf-8").read()
-    print_json_text(tools.apply_unified_patch(patch_text, args.repo_root, check_only=args.check_only))
+    print_json_text(editing.apply_unified_patch(patch_text, args.repo_root, check_only=args.check_only))
     return 0
 
 
 def cmd_record_change(args: argparse.Namespace) -> int:
-    print_json_text(tools.record_change(args.summary, args.paths, args.repo_root))
+    print_json_text(memory.record_change(args.summary, args.paths, args.repo_root))
     return 0
 
 

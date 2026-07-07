@@ -44,7 +44,7 @@ def configure_models(
 
     Only fields that are given (truthy) are changed; omitted fields keep
     their current persisted value. Returns the updated ``ollama`` config
-    block. Shared by ``tools.set_ollama`` (the ``neo-localmcp set-ollama``
+    block. Shared by ``mcp_commands.ollama.set_ollama`` (the ``neo-localmcp set-ollama``
     runtime command), the wizard's "Configure Ollama models" operation
     (``wizard/real_backend.py``), and ``setup.py config-ollama`` -- the three
     surfaces that let a user change these settings -- so there is exactly one
