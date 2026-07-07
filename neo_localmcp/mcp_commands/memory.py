@@ -18,10 +18,10 @@ from pathlib import Path
 from typing import Any
 
 from .. import __version__
-from .. import repo_memory
+from ..retrieval import repo_memory
 from ..identity import IDENTITY
 from ..ollama_client import chat
-from ..query import category_boost, classify_path, extract_file_references, normalize_query, term_key as compute_term_key
+from ..retrieval.query import category_boost, classify_path, extract_file_references, normalize_query, term_key as compute_term_key
 from ..utils import repo_root_or_cwd, rg_search
 from ._shared import _format_model_timing, _slim_status_for_nesting, json_out
 

@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from .. import repo_memory
+from ..retrieval import repo_memory
 from ..mcp_commands import memory, ollama, system
 from ..utils import git_info, repo_root_or_cwd
 

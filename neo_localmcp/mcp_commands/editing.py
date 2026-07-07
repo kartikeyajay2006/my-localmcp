@@ -13,7 +13,7 @@ import re
 import tempfile
 from pathlib import Path
 
-from .. import repo_memory
+from ..retrieval import repo_memory
 from ..config import load_config
 from ..ollama_client import chat
 from ..utils import read_text_file, rel, repo_root_or_cwd, run_command, safe_path, sha256_file
