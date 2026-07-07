@@ -1421,7 +1421,7 @@ git commit -m "refactor(mcp-commands): add system.py (init/status/where/doctor/r
 
 ---
 
-### Task 9: Create `neo_localmcp/mcp_commands/memory.py`
+### Task 9: Create `neo_localmcp/mcp_commands/memory.py` ✅ COMPLETE (commit b10ef24) — biggest/riskiest task, independently re-verified
 
 **Why:** This is the context-retrieval/ranking pipeline — `context_prepare`/`prepare_context` and everything that exists solely to support them (scoring, heading matching, excerpt-range selection, retrieval-boost, determinism testing). It is the largest and highest-risk file in this plan; move it verbatim, do not refactor its internals.
 
@@ -1432,7 +1432,7 @@ git commit -m "refactor(mcp-commands): add system.py (init/status/where/doctor/r
 - Produces: `context_prepare(...) -> str`, `prepare_context(...) -> str`, `file_context(...) -> str`, `file_excerpts(...) -> str`, `record_change(...) -> str`, `test_determinism(...) -> str` — identical signatures to today's `tools.*` equivalents. Also produces (private, used only within this file): `_render_context_text`, `_mcp_compact_context`, `_mcp_tiny_context_text`, `_format`, `_project_read_first_item`, `_git_summary`, `_sanitize_ollama_advisory`, `_stable_context_projection`, `_stable_hash`, `_resolve_reference`, `_line_hint_from_reason`, `_add_candidate`, `_group_line_hints_for_guidance`, `_agent_guidance`, `_term_score`, `_heading_words`, `_heading_match_score`, `_best_heading_section`, `_score_index_and_symbol_hits`, `_score_batched_search`, `_resolve_explicit_paths`, `_apply_retrieval_boost`, `_select_read_first`, `_build_excerpt_ranges`, `_run_ollama_ranking`, `_hint_sort_key`, `_compact_line_hints`, plus module constants `LINE_HINT_MAX_PER_FILE`, `READ_FIRST_MAX`, `_MILESTONE_RE`, `_MAX_SECTION_LINES`.
 - Consumes (from Task 7): `from ._shared import json_out, _format_model_timing, _slim_status_for_nesting`.
 
-- [ ] **Step 1: Write `memory.py`**
+- [x] **Step 1: Write `memory.py`**
 
 Create `neo_localmcp/mcp_commands/memory.py` with this import header:
 
@@ -1533,13 +1533,13 @@ from ._shared import _format_model_timing, _slim_status_for_nesting, json_out
 
 Copy every one of these function/constant bodies **exactly** as they appear in the current `neo_localmcp/tools.py` (available to read at that path until Task 12 deletes it) — do not paraphrase, reformat, or "improve" anything. The only allowed change anywhere in this file is the import header above.
 
-- [ ] **Step 2: Compile-check**
+- [x] **Step 2: Compile-check**
 
 ```bash
 python -m compileall -q neo_localmcp/mcp_commands
 ```
 
-- [ ] **Step 3: Sanity-check for accidental omissions**
+- [x] **Step 3: Sanity-check for accidental omissions**
 
 ```bash
 python -c "
@@ -1568,7 +1568,7 @@ print('OK: all', len(expected), 'expected functions present in memory.py')
 
 Expected output: `OK: all 33 expected functions present in memory.py` (the `expected` set lists 33 names; `_mcp_compact_context`'s nested inner `compact_item` also appears in both `old_names` and `new_names` but is deliberately not in `expected`, so it doesn't affect the `missing` check).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add neo_localmcp/mcp_commands/memory.py
