@@ -293,10 +293,10 @@ class ConsoleWizard:
             return rows[choice - 1][0]
 
     def _enter_preview_dummy(self) -> None:
-        """One-way switch to the FakeBackend for the rest of this process."""
-        from .fake_backend import FakeBackend
+        """One-way switch to the PreviewBackend for the rest of this process."""
+        from .preview_backend import PreviewBackend
 
-        self.backend = FakeBackend()
+        self.backend = PreviewBackend()
         self.fake = True
         self.detected = self.backend.detect()
         self.prefs = self.backend.load_prefs()
@@ -644,9 +644,9 @@ def run(argv: list[str] | None = None) -> int:
     argv = list(argv or [])
     fake = "--fake" in argv
     if fake:
-        from .fake_backend import FakeBackend
+        from .preview_backend import PreviewBackend
 
-        backend: WizardBackend = FakeBackend()
+        backend: WizardBackend = PreviewBackend()
     else:
         from .live_backend import LiveBackend
 
