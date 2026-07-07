@@ -626,7 +626,7 @@ git commit -m "refactor(installer): move wizard/ into installer/wizard/, rename 
 
 ---
 
-### Task 4: Rename `fake_backend.py` → `preview_backend.py`, `FakeBackend` → `PreviewBackend`
+### Task 4: Rename `fake_backend.py` → `preview_backend.py`, `FakeBackend` → `PreviewBackend` ✅ COMPLETE (commit 8e7212c)
 
 **Why:** Consistent with the "preview" naming chosen for the wizard's simulation mode (see Task 5 for the full terminology purge). Splitting this into its own task from Task 5 keeps the file-rename mechanics separate from the pure text/terminology edits inside `console.py`.
 
@@ -639,13 +639,15 @@ git commit -m "refactor(installer): move wizard/ into installer/wizard/, rename 
 **Interfaces:**
 - Produces: `neo_localmcp.installer.wizard.preview_backend.PreviewBackend` (implements `WizardBackend`), module attributes `_STATE_PATH`, `_STATE_DIR`, `_STEP_DELAY` (same names, same meaning, just class/module renamed) — these three names are monkeypatched by `tests/test_wizard.py` (fixed in Task 6), so they must keep their exact names.
 
-- [ ] **Step 1: Move and rename**
+- [x] **Step 1: Move and rename**
+
+**Note:** Task 3's file list deliberately excluded `fake_backend.py` — it moved the other six wizard/ files into `installer/wizard/` but left `fake_backend.py` behind at its original top-level location, `neo_localmcp/wizard/fake_backend.py`, specifically for this task to move+rename in one step. Verify with `ls neo_localmcp/wizard/` (should show only `fake_backend.py` and possibly stale `__pycache__/`) before running:
 
 ```bash
-git mv neo_localmcp/installer/wizard/fake_backend.py neo_localmcp/installer/wizard/preview_backend.py
+git mv neo_localmcp/wizard/fake_backend.py neo_localmcp/installer/wizard/preview_backend.py
 ```
 
-- [ ] **Step 2: Fix `_STATE_DIR`'s path depth**
+- [x] **Step 2: Fix `_STATE_DIR`'s path depth**
 
 In `neo_localmcp/installer/wizard/preview_backend.py`, change:
 
@@ -659,7 +661,7 @@ to:
 _STATE_DIR = Path(__file__).resolve().parents[3] / ".wizard_preview"
 ```
 
-- [ ] **Step 3: Rename the class**
+- [x] **Step 3: Rename the class**
 
 Change:
 
@@ -675,7 +677,7 @@ class PreviewBackend:
     """A fully navigable, side-effect-free WizardBackend."""
 ```
 
-- [ ] **Step 4: Update `console.py`'s references to the moved/renamed module**
+- [x] **Step 4: Update `console.py`'s references to the moved/renamed module**
 
 In `neo_localmcp/installer/wizard/console.py`:
 
@@ -719,7 +721,7 @@ to (again, only the module/class reference — the `--fake`/`fake` flag rename i
         backend: WizardBackend = PreviewBackend()
 ```
 
-- [ ] **Step 5: Rename the environment variable**
+- [x] **Step 5: Rename the environment variable**
 
 In `neo_localmcp/installer/wizard/preview_backend.py`, change **all three** occurrences of `NEO_LOCALMCP_WIZARD_FAKE_STATE` to `NEO_LOCALMCP_WIZARD_PREVIEW_STATE`: the code in `_seed_state()`, the module docstring near the top of the file, and a comment above `_STATE_DIR`. The code occurrence is in `_seed_state()`:
 
@@ -747,7 +749,7 @@ becomes:
              NEO_LOCALMCP_WIZARD_PREVIEW_STATE=healthy to simulate a returning user
 ```
 
-- [ ] **Step 6: Fix `backend.py`'s stale docstring (review-pass addition, Task 3)**
+- [x] **Step 6: Fix `backend.py`'s stale docstring (review-pass addition, Task 3)**
 
 Task 3's review found that `neo_localmcp/installer/wizard/backend.py`'s module docstring (lines 4-7) was never scheduled for a fix by any task: it names the two backend implementations by their OLD module paths and OLD class names, and nothing else in this plan touches it. Fix it now, in this task, since this is where both renames it needs (`fake_backend`→`preview_backend`, and the `real_backend`→`live_backend` rename Task 3 already did) are both in scope. Change:
 
@@ -780,7 +782,7 @@ This module is stdlib-only on purpose so it stays importable everywhere.
 """
 ```
 
-- [ ] **Step 7: Run the affected tests**
+- [x] **Step 7: Run the affected tests**
 
 ```bash
 python -m pytest -q tests/test_mcpb_build.py tests/installer/ -k "not lifecycle"
@@ -788,13 +790,13 @@ python -m pytest -q tests/test_mcpb_build.py tests/installer/ -k "not lifecycle"
 
 Expected: all PASS (nothing here references `fake_backend`/`FakeBackend` yet — `test_wizard.py` is Task 6).
 
-- [ ] **Step 8: Compile-check**
+- [x] **Step 8: Compile-check**
 
 ```bash
 python -m compileall -q neo_localmcp setup.py setup_wizard.py
 ```
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add -A
