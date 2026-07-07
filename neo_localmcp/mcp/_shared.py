@@ -1,4 +1,4 @@
-"""Helpers shared across the mcp_commands category modules.
+"""Helpers shared across the mcp category modules.
 
 Not a tool module itself. Only the pieces used by more than one category live
 here -- ``json_out`` (every category serializes its result through it) and the

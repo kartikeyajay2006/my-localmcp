@@ -12,10 +12,10 @@ from urllib.request import url2pathname
 
 from mcp.server.fastmcp import Context, FastMCP
 
-from .mcp_commands import editing, memory, ollama, system
-from .config import load_config
-from .identity import IDENTITY
-from .utils import hidden_subprocess_kwargs
+from . import editing, memory, ollama, system
+from ..config import load_config
+from ..identity import IDENTITY
+from ..utils import hidden_subprocess_kwargs
 
 
 def _tool_guard(func):
@@ -104,7 +104,7 @@ def _context_prepare_worker(task: str, repo_root: str, max_files: int, token_bud
     worker_env["PYTHONUTF8"] = "1"
     try:
         proc = subprocess.run(
-            [sys.executable, "-m", "neo_localmcp.context_worker"], input=json.dumps(payload),
+            [sys.executable, "-m", "neo_localmcp.mcp.context_worker"], input=json.dumps(payload),
             text=True, encoding="utf-8", errors="replace", capture_output=True,
             timeout=timeout_seconds, env=worker_env, stdin=None,
             **hidden_subprocess_kwargs(),
@@ -210,9 +210,9 @@ def main() -> None:
     # Register this server and start the stop-file watcher before entering the
     # blocking mcp.run() loop, so `neo-localmcp stop` (and the upgrade flow) can
     # ask it to exit gracefully instead of relying on an external force-kill.
-    from . import __version__
-    from . import lifecycle
-    from .config import ensure_config
+    from .. import __version__
+    from .. import lifecycle
+    from ..config import ensure_config
 
     ensure_config()
     try:

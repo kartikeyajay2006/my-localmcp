@@ -5,7 +5,7 @@ import json
 import pytest
 
 from neo_localmcp.retrieval import repo_memory
-from neo_localmcp.mcp_commands import editing, memory
+from neo_localmcp.mcp import editing, memory
 
 pytestmark = pytest.mark.retrieval
 
@@ -140,7 +140,7 @@ def test_memory_boost_never_exceeds_structural_milestone_score(tmp_path, isolate
         result = json.loads(raw)
         excerpt = result["context_excerpts"][0]
         memory.file_excerpts([{"path": excerpt["path"], "start_line": excerpt["start_line"], "end_line": excerpt["end_line"]}], str(repo), retrieval_id=result["retrieval_id"])
-    assert repo_memory.RETRIEVAL_BOOST_CAP < 60  # structural milestone boost defined in mcp_commands/memory.py
+    assert repo_memory.RETRIEVAL_BOOST_CAP < 60  # structural milestone boost defined in mcp/memory.py
 
 
 def test_correcting_pull_elsewhere_does_not_boost(tmp_path, isolated_config):

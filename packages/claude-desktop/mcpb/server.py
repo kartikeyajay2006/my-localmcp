@@ -1,4 +1,4 @@
-from neo_localmcp.server import main
+from neo_localmcp.mcp.server import main
 
 if __name__ == "__main__":
     main()

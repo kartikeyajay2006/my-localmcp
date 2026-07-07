@@ -5,7 +5,7 @@ import json
 import sys
 from typing import Any
 
-from .mcp_commands import editing, memory, ollama, system
+from .mcp import editing, memory, ollama, system
 from .benchmarker import run_benchmark
 from .client_setup import client_status, remove_clients, setup_clients
 from .config import CONFIG_PATH, ensure_config
@@ -42,7 +42,7 @@ def cmd_model_status(args: argparse.Namespace) -> int:
 
 
 def cmd_serve(args: argparse.Namespace) -> int:
-    from .server import main as server_main
+    from .mcp.server import main as server_main
     server_main()
     return 0
 

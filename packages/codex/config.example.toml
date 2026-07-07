@@ -4,7 +4,7 @@
 
 [mcp_servers.neo-localmcp]
 command = "C:\\Users\\Neel\\.neo-localmcp\\venv\\Scripts\\python.exe"
-args = ["-m", "neo_localmcp.server"]
+args = ["-m", "neo_localmcp.mcp.server"]
 
 [mcp_servers.neo-localmcp.env]
 NEO_LOCALMCP_CONFIG = "C:\\Users\\Neel\\.neo-localmcp\\config.yaml"

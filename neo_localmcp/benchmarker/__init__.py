@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ..retrieval import repo_memory
-from ..mcp_commands import memory, ollama, system
+from ..mcp import memory, ollama, system
 from ..utils import git_info, repo_root_or_cwd
 
 # How many real indexed symbols to turn into mechanical synthetic queries.
@@ -82,7 +82,7 @@ def _sys_checks(root: Path, options: dict[str, Any]) -> list[CheckResult]:
     """Group 'sys': a liveness sweep of the CLI/admin surface.
 
     No LLM, no Ollama -- always safe and effectively free to run. Reuses the
-    existing mcp_commands/system.py functions directly (in-process), not a subprocess
+    existing mcp/system.py functions directly (in-process), not a subprocess
     shell-out to the CLI.
     """
     root_str = str(root)

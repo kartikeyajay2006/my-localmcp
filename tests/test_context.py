@@ -5,7 +5,7 @@ import json
 import pytest
 
 from neo_localmcp.retrieval import repo_memory
-from neo_localmcp.mcp_commands import memory
+from neo_localmcp.mcp import memory
 from neo_localmcp.retrieval.query import INTENT_KEYWORDS, FILLER_WORDS, normalize_query
 from neo_localmcp.utils import extract_markdown_headings
 
