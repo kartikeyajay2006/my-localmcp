@@ -2230,7 +2230,7 @@ git commit -m "refactor(benchmark): rename benchmark.py + benchmark_queries/ to 
 
 ---
 
-### Task 14: Update `CLAUDE.md`'s module map + final full verification
+### Task 14: Update `CLAUDE.md`'s module map + final full verification ✅ COMPLETE (commit d3e551e) — ALL 14 TASKS DONE
 
 **Why:** `CLAUDE.md`'s "Module map" section is the authoritative documented structure per this repo's own convention — it must match reality, or it goes stale the moment this PR merges.
 
@@ -2242,11 +2242,11 @@ git commit -m "refactor(benchmark): rename benchmark.py + benchmark_queries/ to 
 
 **Interfaces:** Documentation only, no code interfaces.
 
-- [ ] **Step 1: Rewrite `CLAUDE.md`'s Module map section**
+- [x] **Step 1: Rewrite `CLAUDE.md`'s Module map section**
 
 Read the current "## Module map (`neo_localmcp/`)" section and replace it with an accurate description of the post-reorg layout: `server.py` (unchanged description), `mcp_commands/system.py`+`memory.py`+`ollama.py`+`editing.py`+`_shared.py` (replacing the single `tools.py` bullet, one line per file describing its category), `cli.py` (unchanged description, note it's now unambiguous since the installer CLI moved), `repo_memory.py`/`ollama_client.py`/`lifecycle.py`/`client_setup.py`/`config.py` (unchanged descriptions — these did not move), `installer/` (new bullet: the lifecycle package, now also home to `cli.py` — the installer CLI frontend — and `wizard/` — the interactive UI frontend, plus `mcpb.py`), `benchmarker/` (new bullet, replacing any `benchmark.py` mention if one exists), `query.py`/`identity.py` (unchanged). Do not describe internal `installer/` submodules exhaustively here — that level of detail belongs in the design spec, not this always-loaded file; keep each bullet to 1-2 sentences, matching the existing style of every other bullet in this section.
 
-- [ ] **Step 2: Fix `README.md`'s stale `--fake` mention (review-pass addition, Task 5)**
+- [x] **Step 2: Fix `README.md`'s stale `--fake` mention (review-pass addition, Task 5)**
 
 Task 5's review found this line was never scheduled for a fix by any task — it's the one genuinely live, user-facing doc reference to the old flag/env-var names (as opposed to `PROJECT_STATUS.md`'s several `--fake` mentions, which are dated historical status entries describing verification that happened on 2026-07-03 under the old flag name, and are correctly left untouched per this repo's convention against rewriting historical log entries). `README.md` lines 196-199 currently read:
 
@@ -2270,15 +2270,15 @@ the entire flow as a safe simulation that touches nothing on disk
 user).
 ```
 
-- [ ] **Step 3: Update `PROJECT_STATUS.md`**
+- [x] **Step 3: Update `PROJECT_STATUS.md`**
 
 Add one sentence noting the reorg is complete: version-appropriate phrasing following the existing "Current phase" paragraph's style (see the file's existing entries for tone/format — dated, factual, references what changed). Do not edit the existing dated `--fake`/`FakeBackend` mentions elsewhere in this file (lines ~30-33) — those describe verification that happened under the old names and are historical record, not current documentation.
 
-- [ ] **Step 4: Append one entry to `PROJECT_NOTES.md`**
+- [x] **Step 4: Append one entry to `PROJECT_NOTES.md`**
 
 Add a single dated bullet (today's date) summarizing: installer's two frontends (`cli.py`, `wizard/`) consolidated under `installer/`; `tools.py` split into `mcp_commands/{system,memory,ollama,editing}.py` + `_shared.py`; `benchmark.py`+`benchmark_queries/` renamed to `benchmarker/`; wizard "dummy"/"fake" terminology standardized to "preview". Do not edit any existing entry above it — this file is append-only per `CLAUDE.md`'s own stated convention.
 
-- [ ] **Step 5: Regenerate the `.mcpb` bundle**
+- [x] **Step 5: Regenerate the `.mcpb` bundle**
 
 Every task since Task 1 changed `neo_localmcp/`'s contents, so the committed `packages/claude-desktop/neo-localmcp-v<version>.mcpb` is stale (this is why the intermediate checkpoints deselected `test_built_mcpb_embeds_current_package_bytes`). Regenerate it now, from the source checkout, using the moved builder (`neo_localmcp.installer.mcpb`, relocated in Task 1). Delete the stale file first — `build_mcpb`'s `_next_free_path` never overwrites, so without the delete it would write `neo-localmcp-v<version>-2.mcpb` instead of regenerating the canonical name:
 
@@ -2296,7 +2296,7 @@ print('rebuilt:', build_mcpb('.', __version__))
 
 Expected: prints `rebuilt: packages/claude-desktop/neo-localmcp-v<version>.mcpb`. (The `__version__` is unchanged by this refactor — `1.1.1` is still unreleased per `PROJECT_STATUS.md`, so this reorg folds into it with no version bump; the bundle filename is the same, only its contents are regenerated.)
 
-- [ ] **Step 6: Full final verification (bundle byte-check now runs for real)**
+- [x] **Step 6: Full final verification (bundle byte-check now runs for real)**
 
 ```bash
 python -m pytest -q
@@ -2310,7 +2310,7 @@ python -m compileall -q neo_localmcp setup.py setup_wizard.py
 
 Expected: no output (success).
 
-- [ ] **Step 7: Verify no stray references remain**
+- [x] **Step 7: Verify no stray references remain**
 
 ```bash
 grep -rn "neo_localmcp\.wizard\b\|neo_localmcp\.setup_cli\b\|neo_localmcp\.mcpb_build\b\|neo_localmcp\.tools\b\|neo_localmcp\.benchmark\b\|FakeBackend\|RealBackend\|allow_dummy_toggle\|_ToggleDummy\|NEO_LOCALMCP_WIZARD_FAKE_STATE\|--fake\|wizard/real_backend\|wizard/fake_backend\|tools\.set_ollama\|tools\.doctor\|tools\.prepare_context\|tools\.summarize_file\|tools\.apply_unified_patch\|\btools\.py\b" neo_localmcp tests setup.py setup_wizard.py pyproject.toml CLAUDE.md README.md 2>/dev/null
@@ -2318,7 +2318,7 @@ grep -rn "neo_localmcp\.wizard\b\|neo_localmcp\.setup_cli\b\|neo_localmcp\.mcpb_
 
 Expected: no output. If anything matches, it is a missed call site OR a stale docstring/comment from an earlier task — fix it and re-run this grep before proceeding. This step's original pattern only matched dotted module paths (`neo_localmcp.wizard`, `neo_localmcp.tools`, etc.); Task 6's review found two production-code docstrings that reference the old layout in prose that wouldn't match those patterns: `neo_localmcp/installer/ollama.py`'s docstring says `` ``wizard/real_backend.py`` `` (slash-style path, not a dotted import) and `` ``tools.set_ollama`` `` (bare `tools.`, no `neo_localmcp.` prefix — also now wrong regardless of path style, since Task 12 deletes `tools.py` and moves `set_ollama` to `mcp_commands/ollama.py`). The added patterns (`wizard/real_backend`, `wizard/fake_backend`, and the specific `tools.<function>`/`tools.py` prose mentions) are a backstop for this class of docstring-prose staleness, not just code-level imports. When you find a match, fix the prose to name the actual current location (e.g. `` ``installer/wizard/live_backend.py`` ``, `` ``mcp_commands/ollama.set_ollama`` ``) rather than deleting the cross-reference. (`NEO_LOCALMCP_WIZARD_FAKE_STATE` is in this grep specifically because Task 4 renames all of its occurrences in `preview_backend.py` — code, docstring, and comment — plus one in `setup_wizard.py`; `--fake` is included because of the `README.md` fix in Step 2; this is the backstop that catches anything either missed. `PROJECT_STATUS.md` is deliberately NOT in this grep's file list — its `--fake` mentions are dated historical status entries left untouched per Step 3's note.)
 
-- [ ] **Step 8: Commit (includes the regenerated bundle from Step 5)**
+- [x] **Step 8: Commit (includes the regenerated bundle from Step 5)**
 
 ```bash
 git add CLAUDE.md README.md PROJECT_STATUS.md PROJECT_NOTES.md "packages/claude-desktop/neo-localmcp-v*.mcpb"
