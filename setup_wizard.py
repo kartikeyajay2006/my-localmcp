@@ -20,10 +20,10 @@ is not. Nothing that needs it may be imported until ``ensure_dependencies`` has
 returned.
 
 Flags:
-    --fake   Run against an in-memory simulation. No processes, venvs, network,
-             or files are touched -- a safe way to walk the whole flow. Set
-             NEO_LOCALMCP_WIZARD_PREVIEW_STATE=healthy to simulate a returning user
-             (already-installed) instead of a first-time clone.
+    --preview   Run against an in-memory simulation. No processes, venvs, network,
+                or files are touched -- a safe way to walk the whole flow. Set
+                NEO_LOCALMCP_WIZARD_PREVIEW_STATE=healthy to simulate a returning user
+                (already-installed) instead of a first-time clone.
 """
 
 from __future__ import annotations
