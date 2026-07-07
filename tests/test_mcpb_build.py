@@ -95,8 +95,8 @@ def test_returns_none_without_staging(tmp_path):
 # -- wizard hook ---------------------------------------------------------- #
 
 from neo_localmcp.installer import Operation, OperationStatus  # noqa: E402
-from neo_localmcp.wizard import real_backend as rb  # noqa: E402
-from neo_localmcp.wizard.backend import WizardState  # noqa: E402
+from neo_localmcp.installer.wizard import live_backend as rb  # noqa: E402
+from neo_localmcp.installer.wizard.backend import WizardState  # noqa: E402
 
 
 class _Result:
@@ -107,14 +107,14 @@ class _Result:
         self.warnings: list[str] = []
 
 
-def _run(backend: rb.RealBackend, state: WizardState):
+def _run(backend: rb.LiveBackend, state: WizardState):
     events: list = []
     outcome = backend.run_operation(state, events.append)
     return outcome, events
 
 
 def test_wizard_install_surfaces_built_bundle(monkeypatch):
-    backend = rb.RealBackend()
+    backend = rb.LiveBackend()
     monkeypatch.setattr(rb, "install", lambda ctx, clean: _Result("install"))
     calls = []
     monkeypatch.setattr(rb, "build_mcpb", lambda root, version: calls.append((root, version)) or Path("/repo/neo-localmcp-v9.9.9.mcpb"))
@@ -127,7 +127,7 @@ def test_wizard_install_surfaces_built_bundle(monkeypatch):
 
 
 def test_wizard_uninstall_does_not_build(monkeypatch):
-    backend = rb.RealBackend()
+    backend = rb.LiveBackend()
     monkeypatch.setattr(rb, "uninstall", lambda ctx, delete_memory, assume_yes: _Result("uninstall"))
     called = []
     monkeypatch.setattr(rb, "build_mcpb", lambda root, version: called.append(1))
@@ -138,7 +138,7 @@ def test_wizard_uninstall_does_not_build(monkeypatch):
 
 
 def test_wizard_survives_build_failure(monkeypatch):
-    backend = rb.RealBackend()
+    backend = rb.LiveBackend()
     monkeypatch.setattr(rb, "install", lambda ctx, clean: _Result("install"))
 
     def boom(root, version):

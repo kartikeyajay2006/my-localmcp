@@ -51,12 +51,12 @@ if str(REPO_ROOT) not in sys.path:
 
 def main() -> int:
     # Stdlib-only preflight -- may print, prompt, pip-install, and re-exec.
-    from neo_localmcp.wizard.preflight import ensure_dependencies
+    from neo_localmcp.installer.wizard.preflight import ensure_dependencies
 
     ensure_dependencies(REPO_ROOT, sys.argv)
 
     # Dependencies are guaranteed present past this point.
-    from neo_localmcp.wizard.console import run
+    from neo_localmcp.installer.wizard.console import run
 
     return run(sys.argv[1:])
 
