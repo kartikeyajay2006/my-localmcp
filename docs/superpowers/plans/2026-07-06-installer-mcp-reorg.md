@@ -2087,7 +2087,7 @@ git commit -m "refactor(mcp-commands): delete tools.py, repoint server/cli/conte
 
 ---
 
-### Task 13: Rename `benchmark.py` + `benchmark_queries/` → `benchmarker/`
+### Task 13: Rename `benchmark.py` + `benchmark_queries/` → `benchmarker/` ✅ COMPLETE (commit de8074e)
 
 **Why:** Colocates the runner with its fixture data under one package name, matching the "benchmarker" concept from the design.
 
@@ -2103,7 +2103,7 @@ git commit -m "refactor(mcp-commands): delete tools.py, repoint server/cli/conte
 **Interfaces:**
 - Produces: `neo_localmcp.benchmarker.run_benchmark(groups: list[str], repo_root: str = "auto", out_dir: str | None = None, queries_path: str | None = None) -> dict[str, Any]`, `.resolve_groups(requested: list[str]) -> list[str]`, `.GROUPS: dict[str, Callable[[Path, dict[str, Any]], list[CheckResult]]]` — identical to today's `neo_localmcp.benchmark` equivalents, just at the new module path.
 
-- [ ] **Step 1: Move the directory and file**
+- [x] **Step 1: Move the directory and file**
 
 ```bash
 mkdir -p neo_localmcp/benchmarker
@@ -2111,7 +2111,7 @@ git mv neo_localmcp/benchmark.py neo_localmcp/benchmarker/__init__.py
 git mv neo_localmcp/benchmark_queries neo_localmcp/benchmarker/queries
 ```
 
-- [ ] **Step 2: Update the queries-path folder name**
+- [x] **Step 2: Update the queries-path folder name**
 
 In `neo_localmcp/benchmarker/__init__.py`, change:
 
@@ -2127,7 +2127,7 @@ def _default_queries_path() -> Path:
     return Path(__file__).resolve().parent / "queries" / "default.jsonl"
 ```
 
-- [ ] **Step 3: Update `benchmarker/__init__.py`'s own imports for the new depth**
+- [x] **Step 3: Update `benchmarker/__init__.py`'s own imports for the new depth**
 
 This file was `neo_localmcp/benchmark.py` (direct child of `neo_localmcp/`); it is now `neo_localmcp/benchmarker/__init__.py` (one level deeper). Its imports change from:
 
@@ -2147,7 +2147,7 @@ from ..utils import git_info, repo_root_or_cwd
 
 (This assumes Task 12 already repointed this file's `tools` import to `mcp_commands` — confirm that edit is present before making this depth change; if Task 12 was somehow skipped, do both edits together here.)
 
-- [ ] **Step 4: Update `cli.py`'s import**
+- [x] **Step 4: Update `cli.py`'s import**
 
 Change:
 
@@ -2161,7 +2161,7 @@ to:
 from .benchmarker import run_benchmark
 ```
 
-- [ ] **Step 5: Update `tests/test_benchmark.py`'s import**
+- [x] **Step 5: Update `tests/test_benchmark.py`'s import**
 
 Change:
 
@@ -2177,7 +2177,7 @@ from neo_localmcp import benchmarker as benchmark
 
 (Aliasing to `benchmark` keeps every call site in this test file — `benchmark.resolve_groups(...)`, `benchmark.GROUPS`, etc. — unchanged, since only the import needs to move; there's no value in touching 20+ call sites in this file for a pure rename.)
 
-- [ ] **Step 6: Update `pyproject.toml`'s package-data glob**
+- [x] **Step 6: Update `pyproject.toml`'s package-data glob**
 
 Change:
 
@@ -2193,7 +2193,7 @@ to:
 neo_localmcp = ["neo.toml", "templates/claude-code/commands/neo-localmcp/*.md", "benchmarker/queries/*.jsonl"]
 ```
 
-- [ ] **Step 7: Run the affected tests**
+- [x] **Step 7: Run the affected tests**
 
 ```bash
 python -m pytest -q tests/test_benchmark.py -v
@@ -2207,13 +2207,13 @@ python -m neo_localmcp.cli benchmark sys --repo-root .
 
 Expected: runs to completion, writes a report under `./neo-localmcp_benchmarks/`, no `ImportError`.
 
-- [ ] **Step 8: Compile-check**
+- [x] **Step 8: Compile-check**
 
 ```bash
 python -m compileall -q neo_localmcp setup.py setup_wizard.py
 ```
 
-- [ ] **Step 9: Full fast suite**
+- [x] **Step 9: Full fast suite**
 
 ```bash
 python -m pytest -q -m "not slow" --deselect tests/test_distribution.py::test_built_mcpb_embeds_current_package_bytes
@@ -2221,7 +2221,7 @@ python -m pytest -q -m "not slow" --deselect tests/test_distribution.py::test_bu
 
 Expected: all PASS. (Last checkpoint with the stale-bundle deselect — Task 14 regenerates the bundle and runs this test for real. This is the final `neo_localmcp/` change, so the bundle rebuilt in Task 14 will be current.)
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add -A
