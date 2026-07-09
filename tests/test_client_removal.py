@@ -8,7 +8,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from neo_localmcp import client_setup
+from neo_localmcp import ai_client_config as client_setup
 
 
 def test_strip_marked_block_inverts_replace_marked_block():

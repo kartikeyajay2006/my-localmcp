@@ -35,9 +35,9 @@ and `meta` is explicitly about the project, not the codebase.
 ```
 wizard                (setup_wizard.py, neo_localmcp/wizard/)
 ├─ installer          (setup.py, neo_localmcp/installer/, + packaging/.mcpb)
-└─ client-integration (neo_localmcp/client_setup.py)
+└─ client-integration (neo_localmcp/ai_client_config.py)
 
-mcp-tools             (tools.py, cli.py, server.py, slash-command templates)
+mcp-tools             (tools.py, runtime_cli.py, server.py, slash-command templates)
 ├─ mcp-mgmt           (doctor, status, index/refresh/reindex, servers/stop, config)
 └─ mcp-toolkit        (context, file_excerpts, lookup, summarize, apply-patch, record-change)
 

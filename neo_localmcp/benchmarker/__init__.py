@@ -19,7 +19,7 @@ from typing import Any, Callable
 
 from ..retrieval import repo_memory
 from ..mcp import memory, ollama, system
-from ..utils import git_info, repo_root_or_cwd
+from ..repo_utils import git_info, repo_root_or_cwd
 
 # How many real indexed symbols to turn into mechanical synthetic queries.
 # Deterministic sample (repo_memory.sample_symbols orders by file/line), not

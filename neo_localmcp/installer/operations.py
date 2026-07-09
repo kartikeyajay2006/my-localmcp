@@ -88,7 +88,7 @@ def _real_validate_source(context: "OperationContext") -> None:
 
 
 def _real_list_registrations(paths: ManagedPaths) -> tuple[dict[str, Any], ...]:
-    from .. import lifecycle
+    from .. import mcp_server_lifecycle as lifecycle
 
     try:
         return tuple(lifecycle.list_servers())

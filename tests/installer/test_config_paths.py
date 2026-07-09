@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from neo_localmcp import config, lifecycle, ollama_client
+from neo_localmcp import config, ollama_client
+from neo_localmcp import mcp_server_lifecycle as lifecycle
 
 
 def test_default_paths_follow_app_dir_dynamically(

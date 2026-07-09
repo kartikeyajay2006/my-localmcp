@@ -136,7 +136,7 @@ def _managed_python(home: Path) -> Path:
 
 
 def _pid_alive(pid: int) -> bool:
-    from neo_localmcp import lifecycle
+    from neo_localmcp import mcp_server_lifecycle as lifecycle
 
     return lifecycle.pid_alive(pid)
 

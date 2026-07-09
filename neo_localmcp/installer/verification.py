@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Mapping, Protocol, Sequence
 
-from .. import lifecycle
+from .. import mcp_server_lifecycle as lifecycle
 from .clients import CLAUDE_DESKTOP, read_registrations, verify_registrations
 from .output import Reporter
 from .paths import ManagedPaths

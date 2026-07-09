@@ -4,7 +4,7 @@ import copy
 import json
 import re
 
-from neo_localmcp import config, utils
+from neo_localmcp import config, repo_utils as utils
 
 
 def _seed(repo, real_files, excluded_dirs):
