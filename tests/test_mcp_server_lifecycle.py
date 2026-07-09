@@ -6,7 +6,7 @@ import sys
 import time
 from pathlib import Path
 
-from neo_localmcp import lifecycle
+from neo_localmcp import mcp_server_lifecycle as lifecycle
 
 
 # --- registry + liveness units (isolated) ------------------------------------

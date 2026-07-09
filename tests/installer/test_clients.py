@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from neo_localmcp import client_setup
+from neo_localmcp import ai_client_config as client_setup
 from neo_localmcp.installer import clients
 from neo_localmcp.installer.clients import ClientRegistrationRecord
 from neo_localmcp.installer.paths import ManagedPaths

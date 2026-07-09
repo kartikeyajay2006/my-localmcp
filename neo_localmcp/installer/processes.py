@@ -304,7 +304,7 @@ def stop_owned_processes(
     graceful_request: Callable[[int], None] | None = None,
     timeout: float = 12.0,
 ) -> ShutdownResult:
-    from neo_localmcp import lifecycle
+    from neo_localmcp import mcp_server_lifecycle as lifecycle
 
     process_provider = provider or PsutilProcessProvider()
     request_stop = graceful_request or lifecycle.request_stop

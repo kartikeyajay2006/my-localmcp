@@ -7,9 +7,9 @@ from typing import Any
 
 from .mcp import editing, memory, ollama, system
 from .benchmarker import run_benchmark
-from .client_setup import client_status, remove_clients, setup_clients
+from .ai_client_config import client_status, remove_clients, setup_clients
 from .config import CONFIG_PATH, ensure_config
-from .identity import IDENTITY
+from .branding import IDENTITY
 
 
 def print_json_text(text: str) -> None:
@@ -48,13 +48,13 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
 
 def cmd_servers(args: argparse.Namespace) -> int:
-    from . import lifecycle
+    from . import mcp_server_lifecycle as lifecycle
     print(json.dumps({"servers": lifecycle.list_servers(prune=True)}, indent=2))
     return 0
 
 
 def cmd_stop(args: argparse.Namespace) -> int:
-    from . import lifecycle
+    from . import mcp_server_lifecycle as lifecycle
     targets = lifecycle.resolve_stop_targets(pid=args.pid, all_servers=args.all, match_executable=args.match_executable)
     if not targets:
         print(json.dumps({

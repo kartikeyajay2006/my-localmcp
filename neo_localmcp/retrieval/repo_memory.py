@@ -9,7 +9,7 @@ from typing import Any
 from ..config import db_path, load_config
 
 INDEXER_VERSION = "1.2.0"
-from ..utils import extract_symbols, git_info, language_for_path, read_text_file, rel, repo_id, repo_root_or_cwd, safe_path, scan_repo_files, sha256_file, simple_terms
+from ..repo_utils import extract_symbols, git_info, language_for_path, read_text_file, rel, repo_id, repo_root_or_cwd, safe_path, scan_repo_files, sha256_file, simple_terms
 
 # Retrieval-memory tuning (1.0.6, P4). Kept intentionally conservative: structural
 # evidence (heading/milestone matches in mcp/memory.py) always scores far higher than
@@ -693,7 +693,7 @@ def store_section_summary(
     P6 (1.0.6): this is enrichment only. It adds supplemental FTS-searchable text
     (kind='summary') so a query can find a section by paraphrase/keyword; it never
     supplies or overrides a heading's start_line/end_line, which stay authoritative
-    from the deterministic extractor in utils.extract_markdown_headings.
+    from the deterministic extractor in repo_utils.extract_markdown_headings.
     """
     root = repo_root_or_cwd(repo_root)
     p = safe_path(path, root)

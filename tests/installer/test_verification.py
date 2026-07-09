@@ -9,7 +9,7 @@ from typing import Sequence
 import pytest
 
 import neo_localmcp
-from neo_localmcp import lifecycle
+from neo_localmcp import mcp_server_lifecycle as lifecycle
 from neo_localmcp.installer.clients import ClientRegistrationRecord, write_registrations
 from neo_localmcp.installer.paths import ManagedPaths
 from neo_localmcp.installer.runtime import CommandResult

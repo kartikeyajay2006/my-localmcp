@@ -22,9 +22,9 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-from .. import client_setup
-from ..identity import IDENTITY
-from ..utils import hidden_subprocess_kwargs
+from .. import ai_client_config as client_setup
+from ..branding import IDENTITY
+from ..repo_utils import hidden_subprocess_kwargs
 from .paths import ManagedPaths
 
 REGISTRATIONS_SCHEMA_VERSION = 1
@@ -343,9 +343,9 @@ def apply_client_selection(
     """Reconcile live client registrations to match ``target``.
 
     Diffs ``target`` against the currently recorded clients, connects newly
-    selected surfaces via :func:`neo_localmcp.client_setup.setup_client`,
+    selected surfaces via :func:`neo_localmcp.ai_client_config.setup_client`,
     disconnects deselected ones via
-    :func:`neo_localmcp.client_setup.remove_client`, and persists the new
+    :func:`neo_localmcp.ai_client_config.remove_client`, and persists the new
     target via :func:`record_selection`. Used by both the wizard's "Manage
     connected clients" operation and ``setup.py manage-clients`` so both
     surfaces reconcile client registrations identically.
