@@ -11,9 +11,9 @@ from __future__ import annotations
 
 from ..retrieval import repo_memory
 from ..config import CONFIG_PATH, ensure_config, load_config
-from ..identity import IDENTITY
+from ..branding import IDENTITY
 from ..ollama_client import ping
-from ..utils import repo_root_or_cwd
+from ..repo_utils import repo_root_or_cwd
 from ._shared import json_out
 
 
@@ -61,7 +61,7 @@ def model_status() -> str:
 
 
 def doctor(repo_root: str = "auto") -> str:
-    from .. import lifecycle
+    from .. import mcp_server_lifecycle as lifecycle
     cfg = load_config()
     checks = {
         "config_exists": CONFIG_PATH.exists(),

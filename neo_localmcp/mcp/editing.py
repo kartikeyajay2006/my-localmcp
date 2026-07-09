@@ -16,7 +16,7 @@ from pathlib import Path
 from ..retrieval import repo_memory
 from ..config import load_config
 from ..ollama_client import chat
-from ..utils import read_text_file, rel, repo_root_or_cwd, run_command, safe_path, sha256_file
+from ..repo_utils import read_text_file, rel, repo_root_or_cwd, run_command, safe_path, sha256_file
 from ._shared import _format_model_timing, _slim_status_for_nesting, json_out
 
 
