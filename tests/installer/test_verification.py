@@ -55,7 +55,7 @@ class ScriptedCommandRunner:
             return "package-version"
         if joined.endswith("--help"):
             return "cli-startup"
-        if "import neo_localmcp.server" in joined:
+        if "import neo_localmcp.mcp.server" in joined:
             return "server-import"
         return "other"
 
@@ -79,7 +79,7 @@ class ScriptedEnvCommandRunner:
 
     def _classify(self, args: Sequence[str]) -> str:
         joined = " ".join(str(a) for a in args)
-        if "tools import doctor" in joined:
+        if "system import doctor" in joined:
             return "doctor"
         if "config.config_path" in joined:
             return "canonical-paths"
@@ -115,8 +115,8 @@ def _passing_runner(expected_version: str) -> ScriptedCommandRunner:
 
 
 def _healthy_doctor_payload() -> dict:
-    """A doctor() payload shaped like the real tools.doctor() output for a
-    healthy install: top-level ``ok`` is always True (hardcoded in tools.py), the
+    """A doctor() payload shaped like the real system.doctor() output for a
+    healthy install: top-level ``ok`` is always True (hardcoded in mcp/system.py), the
     substantive required signals ``config_exists``/``db_open`` are True, and
     Ollama is unreachable (which must NOT make the required doctor check fail)."""
     return {
@@ -401,12 +401,12 @@ def test_client_targets_failure_when_launcher_stale(tmp_path: Path, monkeypatch:
 
 def test_doctor_required_checks_failure_fails_verification(tmp_path: Path) -> None:
     """A realistic unhealthy doctor payload: config file missing. Crucially the
-    top-level ``ok`` is still True (tools.doctor() hardcodes it), so this proves
+    top-level ``ok`` is still True (system.doctor() hardcodes it), so this proves
     the check inspects the substantive signal rather than trusting ``ok``."""
     paths = _paths(tmp_path)
     _touch_runtime_files(paths)
     payload = _healthy_doctor_payload()
-    payload["ok"] = True  # tools.doctor() always reports ok: True
+    payload["ok"] = True  # system.doctor() always reports ok: True
     payload["config_exists"] = False  # ...even when config is genuinely missing
     kwargs = _base_kwargs(paths)
     kwargs["env_runner"] = ScriptedEnvCommandRunner(

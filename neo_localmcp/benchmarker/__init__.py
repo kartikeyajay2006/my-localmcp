@@ -17,8 +17,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from . import repo_memory, tools
-from .utils import git_info, repo_root_or_cwd
+from ..retrieval import repo_memory
+from ..mcp import memory, ollama, system
+from ..utils import git_info, repo_root_or_cwd
 
 # How many real indexed symbols to turn into mechanical synthetic queries.
 # Deterministic sample (repo_memory.sample_symbols orders by file/line), not
@@ -81,15 +82,15 @@ def _sys_checks(root: Path, options: dict[str, Any]) -> list[CheckResult]:
     """Group 'sys': a liveness sweep of the CLI/admin surface.
 
     No LLM, no Ollama -- always safe and effectively free to run. Reuses the
-    existing tools.py functions directly (in-process), not a subprocess
+    existing mcp/system.py functions directly (in-process), not a subprocess
     shell-out to the CLI.
     """
     root_str = str(root)
     return [
-        _run_sys_command("sys", "doctor", lambda: tools.doctor(root_str)),
-        _run_sys_command("sys", "status", lambda: tools.status(root_str)),
-        _run_sys_command("sys", "where", lambda: tools.where(root_str)),
-        _run_sys_command("sys", "model_status", lambda: tools.model_status()),
+        _run_sys_command("sys", "doctor", lambda: system.doctor(root_str)),
+        _run_sys_command("sys", "status", lambda: system.status(root_str)),
+        _run_sys_command("sys", "where", lambda: system.where(root_str)),
+        _run_sys_command("sys", "model_status", lambda: system.model_status()),
     ]
 
 
@@ -100,7 +101,7 @@ def _run_query_check(root: Path, mode: str, generation_method: str, task: str, g
     recorded as real usage (#9 design decision, not a config option).
     """
     started = time.monotonic()
-    det = json.loads(tools.test_determinism(task, str(root), runs=5, record=False))
+    det = json.loads(memory.test_determinism(task, str(root), runs=5, record=False))
     deterministic = bool(det.get("ok")) and len(det.get("unique_hashes") or []) == 1
     if not deterministic:
         return _check(
@@ -108,7 +109,7 @@ def _run_query_check(root: Path, mode: str, generation_method: str, task: str, g
             mode=mode, generation_method=generation_method, gold_file=gold_file, deterministic=False,
             error="query is non-deterministic across 5 runs; excluded from accuracy scoring",
         )
-    data = json.loads(tools.prepare_context(task, str(root), output_format="json", record=False))
+    data = json.loads(memory.prepare_context(task, str(root), output_format="json", record=False))
     read_first = data.get("read_first") or []
     rank = None
     if gold_file is not None:
@@ -136,7 +137,7 @@ def _mem_synthetic_checks(root: Path) -> list[CheckResult]:
 
 
 def _default_queries_path() -> Path:
-    return Path(__file__).resolve().parent / "benchmark_queries" / "default.jsonl"
+    return Path(__file__).resolve().parent / "queries" / "default.jsonl"
 
 
 def _load_natural_queries(path: Path | None) -> list[dict[str, Any]]:
@@ -225,7 +226,7 @@ def _ollama_checks(root: Path, options: dict[str, Any]) -> list[CheckResult]:
     results: list[CheckResult] = []
 
     started = time.monotonic()
-    status_data = json.loads(tools.ollama_status())
+    status_data = json.loads(ollama.ollama_status())
     state = status_data.get("state")
     reachable = state not in {"unreachable", "timed_out"}
     results.append(_check(
@@ -252,7 +253,7 @@ def _ollama_checks(root: Path, options: dict[str, Any]) -> list[CheckResult]:
     attempt_seconds: list[float] = []
     for _ in range(OLLAMA_RELIABILITY_ATTEMPTS):
         attempt_started = time.monotonic()
-        result = json.loads(tools.ollama_ensure())
+        result = json.loads(ollama.ollama_ensure())
         attempt_seconds.append(round(time.monotonic() - attempt_started, 3))
         if result.get("ok"):
             successes += 1
@@ -394,7 +395,7 @@ def _write_report(report: dict[str, Any], base_dir: Path) -> str:
     groups_slug = "-".join(report["groups_run"]) or "none"
     # Two runs within the same second must never collide: never overwrite an
     # existing report, add a -2/-3/... counter instead (same precedent as
-    # mcpb_build.py's _next_free_path).
+    # installer/mcpb.py's _next_free_path).
     run_dir = base_dir / "neo-localmcp_benchmarks" / ts
     suffix = ""
     counter = 2

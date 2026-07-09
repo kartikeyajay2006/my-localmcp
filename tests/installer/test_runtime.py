@@ -51,7 +51,7 @@ def _classify(args: tuple[str, ...]) -> str:
         return "package-version"
     if joined.endswith("--help"):
         return "cli-help"
-    if "import neo_localmcp.server" in joined:
+    if "import neo_localmcp.mcp.server" in joined:
         return "server-import"
     return "other"
 

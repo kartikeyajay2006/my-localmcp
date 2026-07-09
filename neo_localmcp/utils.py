@@ -293,7 +293,7 @@ def rg_search(query: str, root: Path, max_results: int = 80) -> list[dict[str, A
                 rows.append({"raw": raw})
         return rows
     # No ripgrep on PATH (e.g. a CI image without it preinstalled): fall back to a
-    # pure-Python scan. The query is always regex syntax (tools.py sends a
+    # pure-Python scan. The query is always regex syntax (mcp/memory.py sends a
     # re.escape'd alternation like "(?:worker|RareMarkerNeedle)" to mirror rg's
     # --ignore-case), so it must be compiled and searched as a regex, not matched
     # as a literal substring -- a literal match of the whole "(?:...|...)" syntax

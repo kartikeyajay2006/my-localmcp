@@ -4,7 +4,8 @@ import json
 
 import pytest
 
-from neo_localmcp import repo_memory, tools
+from neo_localmcp.retrieval import repo_memory
+from neo_localmcp.mcp import editing, memory
 
 pytestmark = pytest.mark.retrieval
 
@@ -34,7 +35,7 @@ def test_prepare_context_records_a_task_query_by_default(tmp_path, isolated_conf
     repo = tmp_path / "repo"
     repo.mkdir()
     _seed_repo(repo)
-    tools.prepare_context("m9.2 beta widget rollup", str(repo), token_budget=1000, max_files=2, output_format="json")
+    memory.prepare_context("m9.2 beta widget rollup", str(repo), token_budget=1000, max_files=2, output_format="json")
     status = repo_memory.status(repo)
     assert status["recorded_queries"] == 1
     assert status["last_query_recorded_at"] is not None
@@ -50,7 +51,7 @@ def test_query_recording_can_be_disabled_via_config(tmp_path, isolated_config):
     cfg["memory"]["record_context_queries"] = False
     config.save_config(cfg)
 
-    tools.prepare_context("m9.2 beta widget rollup", str(repo), token_budget=1000, max_files=2, output_format="json")
+    memory.prepare_context("m9.2 beta widget rollup", str(repo), token_budget=1000, max_files=2, output_format="json")
     status = repo_memory.status(repo)
     assert status["query_recording_enabled"] is False
     assert status["recorded_queries"] == 0
@@ -60,7 +61,7 @@ def test_recorded_query_payload_is_compact_not_full_response(tmp_path, isolated_
     repo = tmp_path / "repo"
     repo.mkdir()
     _seed_repo(repo)
-    tools.prepare_context("m9.2 beta widget rollup", str(repo), token_budget=1000, max_files=2, output_format="json")
+    memory.prepare_context("m9.2 beta widget rollup", str(repo), token_budget=1000, max_files=2, output_format="json")
     conn = repo_memory.connect()
     rid = repo_memory.repo_id(repo)
     row = conn.execute("SELECT result_json, retrieval_id, term_key FROM task_queries WHERE repo_id=?", (rid,)).fetchone()
@@ -84,7 +85,7 @@ def test_task_query_retention_prunes_oldest_rows(tmp_path, isolated_config):
     config.save_config(cfg)
 
     for i in range(6):
-        tools.prepare_context(f"m9.2 beta widget rollup pass {i}", str(repo), token_budget=1000, max_files=2, output_format="json")
+        memory.prepare_context(f"m9.2 beta widget rollup pass {i}", str(repo), token_budget=1000, max_files=2, output_format="json")
     status = repo_memory.status(repo)
     assert status["recorded_queries"] == 3
 
@@ -97,8 +98,8 @@ def test_first_exposure_never_boosts_ranking(tmp_path, isolated_config):
     repo = tmp_path / "repo"
     repo.mkdir()
     _seed_repo(repo)
-    raw1 = tools.prepare_context("m9.2 beta widget rollup", str(repo), token_budget=1000, max_files=2, output_format="json")
-    raw2 = tools.prepare_context("m9.2 beta widget rollup", str(repo), token_budget=1000, max_files=2, output_format="json")
+    raw1 = memory.prepare_context("m9.2 beta widget rollup", str(repo), token_budget=1000, max_files=2, output_format="json")
+    raw2 = memory.prepare_context("m9.2 beta widget rollup", str(repo), token_budget=1000, max_files=2, output_format="json")
     score1 = json.loads(raw1)["read_first"][0]["score"]
     score2 = json.loads(raw2)["read_first"][0]["score"]
     assert score1 == score2
@@ -111,17 +112,17 @@ def test_repeated_followed_range_eventually_adds_capped_memory_boost(tmp_path, i
     _seed_repo(repo)
 
     for _ in range(4):
-        raw = tools.prepare_context("m9.2 beta widget rollup", str(repo), token_budget=1000, max_files=2, output_format="json")
+        raw = memory.prepare_context("m9.2 beta widget rollup", str(repo), token_budget=1000, max_files=2, output_format="json")
         result = json.loads(raw)
         retrieval_id = result["retrieval_id"]
         excerpt = result["context_excerpts"][0]
         # Simulate Claude following the exact suggested section every time.
-        tools.file_excerpts(
+        memory.file_excerpts(
             [{"path": excerpt["path"], "start_line": excerpt["start_line"], "end_line": excerpt["end_line"]}],
             str(repo), retrieval_id=retrieval_id,
         )
 
-    raw = tools.prepare_context("m9.2 beta widget rollup", str(repo), token_budget=1000, max_files=2, output_format="json")
+    raw = memory.prepare_context("m9.2 beta widget rollup", str(repo), token_budget=1000, max_files=2, output_format="json")
     result = json.loads(raw)
     reasons = result["read_first"][0]["reasons"]
     assert any("memory boost" in r for r in reasons)
@@ -135,11 +136,11 @@ def test_memory_boost_never_exceeds_structural_milestone_score(tmp_path, isolate
     repo.mkdir()
     _seed_repo(repo)
     for _ in range(6):
-        raw = tools.prepare_context("m9.2 beta widget rollup", str(repo), token_budget=1000, max_files=2, output_format="json")
+        raw = memory.prepare_context("m9.2 beta widget rollup", str(repo), token_budget=1000, max_files=2, output_format="json")
         result = json.loads(raw)
         excerpt = result["context_excerpts"][0]
-        tools.file_excerpts([{"path": excerpt["path"], "start_line": excerpt["start_line"], "end_line": excerpt["end_line"]}], str(repo), retrieval_id=result["retrieval_id"])
-    assert repo_memory.RETRIEVAL_BOOST_CAP < 60  # structural milestone boost defined in tools.py
+        memory.file_excerpts([{"path": excerpt["path"], "start_line": excerpt["start_line"], "end_line": excerpt["end_line"]}], str(repo), retrieval_id=result["retrieval_id"])
+    assert repo_memory.RETRIEVAL_BOOST_CAP < 60  # structural milestone boost defined in mcp/memory.py
 
 
 def test_correcting_pull_elsewhere_does_not_boost(tmp_path, isolated_config):
@@ -147,11 +148,11 @@ def test_correcting_pull_elsewhere_does_not_boost(tmp_path, isolated_config):
     repo.mkdir()
     _seed_repo(repo)
     for _ in range(5):
-        raw = tools.prepare_context("m9.2 beta widget rollup", str(repo), token_budget=1000, max_files=2, output_format="json")
+        raw = memory.prepare_context("m9.2 beta widget rollup", str(repo), token_budget=1000, max_files=2, output_format="json")
         result = json.loads(raw)
         # Always pull a range far from the suggested section (a "correction").
-        tools.file_excerpts([{"path": "docs/plan.md", "start_line": 1, "end_line": 2}], str(repo), retrieval_id=result["retrieval_id"])
-    raw = tools.prepare_context("m9.2 beta widget rollup", str(repo), token_budget=1000, max_files=2, output_format="json")
+        memory.file_excerpts([{"path": "docs/plan.md", "start_line": 1, "end_line": 2}], str(repo), retrieval_id=result["retrieval_id"])
+    raw = memory.prepare_context("m9.2 beta widget rollup", str(repo), token_budget=1000, max_files=2, output_format="json")
     reasons = json.loads(raw)["read_first"][0]["reasons"]
     assert not any("memory boost" in r for r in reasons)
 
@@ -168,14 +169,14 @@ def test_follow_up_pull_on_a_secondary_hint_still_counts_as_followed(tmp_path, i
     (repo / "worker.py").write_text("\n".join(lines) + "\n", encoding="utf-8")
     secondary_line = next(i for i, line in enumerate(lines, start=1) if "def SecondaryTarget" in line)
 
-    raw = tools.prepare_context("PrimaryTarget SecondaryTarget", str(repo), token_budget=1500, max_files=1, output_format="json")
+    raw = memory.prepare_context("PrimaryTarget SecondaryTarget", str(repo), token_budget=1500, max_files=1, output_format="json")
     result = json.loads(raw)
     excerpt = next(e for e in result["context_excerpts"] if e["path"] == "worker.py")
     # The shown excerpt centers elsewhere (on the tie-break winner); confirm the
     # secondary hint genuinely falls outside it, so this is a real regression check.
     assert not (excerpt["start_line"] <= secondary_line <= excerpt["end_line"])
 
-    raw2 = tools.file_excerpts(
+    raw2 = memory.file_excerpts(
         [{"path": "worker.py", "start_line": secondary_line, "end_line": secondary_line + 1}],
         str(repo), retrieval_id=result["retrieval_id"],
     )
@@ -188,7 +189,7 @@ def test_unknown_retrieval_id_reports_failure_without_raising(tmp_path, isolated
     repo = tmp_path / "repo"
     repo.mkdir()
     _seed_repo(repo)
-    raw = tools.file_excerpts([{"path": "docs/plan.md", "start_line": 1, "end_line": 2}], str(repo), retrieval_id="not-a-real-id")
+    raw = memory.file_excerpts([{"path": "docs/plan.md", "start_line": 1, "end_line": 2}], str(repo), retrieval_id="not-a-real-id")
     result = json.loads(raw)
     assert result["retrieval_feedback"]["ok"] is False
 
@@ -264,11 +265,11 @@ def test_determinism_holds_once_a_memory_boost_is_active(tmp_path, isolated_conf
     repo.mkdir()
     _seed_repo(repo)
     for _ in range(4):
-        r = json.loads(tools.prepare_context("m9.2 beta widget rollup", str(repo), token_budget=800, max_files=2, output_format="json"))
+        r = json.loads(memory.prepare_context("m9.2 beta widget rollup", str(repo), token_budget=800, max_files=2, output_format="json"))
         excerpt = r["context_excerpts"][0]
-        tools.file_excerpts([{"path": excerpt["path"], "start_line": excerpt["start_line"], "end_line": excerpt["end_line"]}], str(repo), retrieval_id=r["retrieval_id"])
+        memory.file_excerpts([{"path": excerpt["path"], "start_line": excerpt["start_line"], "end_line": excerpt["end_line"]}], str(repo), retrieval_id=r["retrieval_id"])
 
-    raw = tools.test_determinism("m9.2 beta widget rollup", str(repo), runs=5, max_files=2, limit=2, reset_repo_first=False, reindex_first=False)
+    raw = memory.test_determinism("m9.2 beta widget rollup", str(repo), runs=5, max_files=2, limit=2, reset_repo_first=False, reindex_first=False)
     result = json.loads(raw)
     assert result["ok"] is True
     assert len(result["unique_hashes"]) == 1
@@ -278,7 +279,7 @@ def test_reset_repo_clears_retrieval_memory_tables(tmp_path, isolated_config):
     repo = tmp_path / "repo"
     repo.mkdir()
     _seed_repo(repo)
-    tools.prepare_context("m9.2 beta widget rollup", str(repo), token_budget=1000, max_files=2, output_format="json")
+    memory.prepare_context("m9.2 beta widget rollup", str(repo), token_budget=1000, max_files=2, output_format="json")
     before = repo_memory.status(repo)
     assert before["recorded_queries"] >= 1
     repo_memory.reset_repo(repo)
@@ -302,9 +303,9 @@ def test_section_summary_cache_hit_skips_ollama_call(tmp_path, isolated_config, 
     def fail_chat(*args, **kwargs):
         raise AssertionError("chat must not be called on a cache hit")
 
-    monkeypatch.setattr(tools, "chat", fail_chat)
+    monkeypatch.setattr(editing, "chat", fail_chat)
     # Patch source_hash lookup indirectly by ensuring file unchanged since cache write.
-    raw = tools.summarize_file("docs/plan.md", str(repo), model="test-model", heading="m9.2 beta widget rollup")
+    raw = editing.summarize_file("docs/plan.md", str(repo), model="test-model", heading="m9.2 beta widget rollup")
     result = json.loads(raw)
     assert result["cached"] is True
     assert result["summary"] == "covers the beta widget rollup"
@@ -321,8 +322,8 @@ def test_section_summary_cache_miss_calls_ollama_and_stores_result(tmp_path, iso
         assert "m9.2" in prompt
         return {"ok": True, "response": "summary: covers beta widget rollup mechanics.\nkeywords: beta, widget, rollup", "model": "fake-model"}
 
-    monkeypatch.setattr(tools, "chat", fake_chat)
-    raw = tools.summarize_file("docs/plan.md", str(repo), heading="m9.2 beta widget rollup")
+    monkeypatch.setattr(editing, "chat", fake_chat)
+    raw = editing.summarize_file("docs/plan.md", str(repo), heading="m9.2 beta widget rollup")
     result = json.loads(raw)
     assert result["cached"] is False
     assert "covers beta widget rollup" in result["ollama_summary"]["response"]
@@ -345,8 +346,8 @@ def test_section_summary_never_overrides_heading_boundaries(tmp_path, isolated_c
     def fake_chat(prompt, model=None, purpose="summary", num_predict=None):
         return {"ok": True, "response": "summary: x.\nkeywords: y", "model": "fake-model"}
 
-    monkeypatch.setattr(tools, "chat", fake_chat)
-    tools.summarize_file("docs/plan.md", str(repo), heading="m9.2 beta widget rollup")
+    monkeypatch.setattr(editing, "chat", fake_chat)
+    editing.summarize_file("docs/plan.md", str(repo), heading="m9.2 beta widget rollup")
     after = repo_memory.find_heading_symbol("docs/plan.md", "m9.2 beta widget rollup", repo)
     assert before["start_line"] == after["start_line"]
     assert before["end_line"] == after["end_line"]
@@ -361,8 +362,8 @@ def test_unknown_heading_returns_error_without_calling_ollama(tmp_path, isolated
     def fail_chat(*args, **kwargs):
         raise AssertionError("chat must not be called when the heading does not exist")
 
-    monkeypatch.setattr(tools, "chat", fail_chat)
-    raw = tools.summarize_file("docs/plan.md", str(repo), heading="does not exist")
+    monkeypatch.setattr(editing, "chat", fail_chat)
+    raw = editing.summarize_file("docs/plan.md", str(repo), heading="does not exist")
     result = json.loads(raw)
     assert result["ok"] is False
 
@@ -375,8 +376,8 @@ def test_whole_file_summarize_path_is_unaffected_by_heading_param(tmp_path, isol
     def fake_chat(prompt, model=None, purpose="summary", num_predict=None):
         return {"ok": True, "response": "purpose: a plan doc", "model": "fake-model"}
 
-    monkeypatch.setattr(tools, "chat", fake_chat)
-    raw = tools.summarize_file("docs/plan.md", str(repo))
+    monkeypatch.setattr(editing, "chat", fake_chat)
+    raw = editing.summarize_file("docs/plan.md", str(repo))
     result = json.loads(raw)
     assert "cached" not in result
     assert result["file"] == "docs/plan.md"
@@ -393,8 +394,8 @@ def test_ollama_unavailable_leaves_deterministic_retrieval_fully_functional(tmp_
     def down_chat(prompt, model=None, purpose="summary", num_predict=None):
         return {"ok": False, "error": "connection refused", "state": "unreachable"}
 
-    monkeypatch.setattr(tools, "chat", down_chat)
-    raw = tools.summarize_file("docs/plan.md", str(repo), heading="m9.2 beta widget rollup")
+    monkeypatch.setattr(editing, "chat", down_chat)
+    raw = editing.summarize_file("docs/plan.md", str(repo), heading="m9.2 beta widget rollup")
     result = json.loads(raw)
     assert result["cached"] is False
     assert result["ollama_summary"]["ok"] is False
@@ -417,8 +418,8 @@ def test_num_predict_is_sent_on_the_outgoing_request(tmp_path, isolated_config, 
         captured["purpose"] = purpose
         return {"ok": True, "response": "summary: x.\nkeywords: y", "model": "fake-model"}
 
-    monkeypatch.setattr(tools, "chat", fake_chat)
-    tools.summarize_file("docs/plan.md", str(repo), heading="m9.2 beta widget rollup")
+    monkeypatch.setattr(editing, "chat", fake_chat)
+    editing.summarize_file("docs/plan.md", str(repo), heading="m9.2 beta widget rollup")
     assert captured["purpose"] == "summary"
     assert isinstance(captured["num_predict"], int)
     assert captured["num_predict"] > 0
@@ -475,8 +476,8 @@ def test_runaway_response_is_flagged_truncated_and_not_cached(tmp_path, isolated
             "raw": {"eval_count": num_predict},  # Ollama stopped exactly at the cap.
         }
 
-    monkeypatch.setattr(tools, "chat", runaway_chat)
-    raw = tools.summarize_file("docs/plan.md", str(repo), heading="m9.2 beta widget rollup")
+    monkeypatch.setattr(editing, "chat", runaway_chat)
+    raw = editing.summarize_file("docs/plan.md", str(repo), heading="m9.2 beta widget rollup")
     result = json.loads(raw)
     assert result["truncated"] is True
     assert result["stored"] is None
@@ -497,8 +498,8 @@ def test_well_behaved_response_is_not_flagged_truncated(tmp_path, isolated_confi
     def fake_chat(prompt, model=None, purpose="summary", num_predict=None):
         return {"ok": True, "response": "summary: x.\nkeywords: a, b, c", "model": "fake-model", "raw": {"eval_count": 42}}
 
-    monkeypatch.setattr(tools, "chat", fake_chat)
-    raw = tools.summarize_file("docs/plan.md", str(repo), heading="m9.2 beta widget rollup")
+    monkeypatch.setattr(editing, "chat", fake_chat)
+    raw = editing.summarize_file("docs/plan.md", str(repo), heading="m9.2 beta widget rollup")
     result = json.loads(raw)
     assert result["truncated"] is False
     assert result["stored"] is not None
@@ -516,8 +517,8 @@ def test_keywords_capped_by_term_count_even_under_the_generation_cap(tmp_path, i
     def fake_chat(prompt, model=None, purpose="summary", num_predict=None):
         return {"ok": True, "response": f"summary: x.\nkeywords: {many_terms}", "model": "fake-model", "raw": {"eval_count": 60}}
 
-    monkeypatch.setattr(tools, "chat", fake_chat)
-    tools.summarize_file("docs/plan.md", str(repo), heading="m9.2 beta widget rollup")
+    monkeypatch.setattr(editing, "chat", fake_chat)
+    editing.summarize_file("docs/plan.md", str(repo), heading="m9.2 beta widget rollup")
     cached = repo_memory.get_section_summary("docs/plan.md", "m9.2 beta widget rollup", repo)
     stored_terms = [t.strip() for t in cached["keywords"].split(",") if t.strip()]
     assert len(stored_terms) <= 8
@@ -533,8 +534,8 @@ def test_ollama_status_is_not_duplicated_in_section_summary_response(tmp_path, i
     def fake_chat(prompt, model=None, purpose="summary", num_predict=None):
         return {"ok": True, "response": "summary: x.\nkeywords: y", "model": "fake-model", "raw": {"eval_count": 10}, "ollama_status": full_status}
 
-    monkeypatch.setattr(tools, "chat", fake_chat)
-    raw = tools.summarize_file("docs/plan.md", str(repo), heading="m9.2 beta widget rollup")
+    monkeypatch.setattr(editing, "chat", fake_chat)
+    raw = editing.summarize_file("docs/plan.md", str(repo), heading="m9.2 beta widget rollup")
     result = json.loads(raw)
     # Top-level ollama_status keeps the full list; the nested copy inside
     # ollama_summary must not repeat it a second time in the same response.
@@ -551,8 +552,8 @@ def test_ollama_status_is_not_duplicated_in_whole_file_summary_response(tmp_path
     def fake_chat(prompt, model=None, purpose="summary", num_predict=None):
         return {"ok": True, "response": "purpose: x", "model": "fake-model", "ollama_status": full_status}
 
-    monkeypatch.setattr(tools, "chat", fake_chat)
-    raw = tools.summarize_file("docs/plan.md", str(repo))
+    monkeypatch.setattr(editing, "chat", fake_chat)
+    raw = editing.summarize_file("docs/plan.md", str(repo))
     result = json.loads(raw)
     assert result["ollama_status"]["installed_models"] == ["a", "b", "c"]
     assert "installed_models" not in result["ollama_summary"]["ollama_status"]
@@ -567,13 +568,13 @@ def test_ollama_status_is_not_duplicated_in_context_prepare_ranking_response(tmp
     def fake_chat(prompt, model=None, purpose="ranking", num_predict=None):
         return {"ok": True, "response": "Recommended read order\n1. docs/plan.md", "model": "fake-model", "ollama_status": full_status}
 
-    monkeypatch.setattr(tools, "chat", fake_chat)
-    raw = tools.prepare_context("m9.2 beta widget rollup", str(repo), token_budget=1000, max_files=2, use_ollama=True, output_format="json")
+    monkeypatch.setattr(memory, "chat", fake_chat)
+    raw = memory.prepare_context("m9.2 beta widget rollup", str(repo), token_budget=1000, max_files=2, use_ollama=True, output_format="json")
     result = json.loads(raw)
     assert result["ollama_status"]["installed_models"] == ["a", "b"]
     assert "installed_models" not in result["ollama_ranking"]["ollama_status"]
 
     # Deterministic retrieval must still work normally, unaffected by the failure above.
-    ctx_raw = tools.prepare_context("m9.2 beta widget rollup", str(repo), token_budget=1000, max_files=2, output_format="json")
+    ctx_raw = memory.prepare_context("m9.2 beta widget rollup", str(repo), token_budget=1000, max_files=2, output_format="json")
     ctx_result = json.loads(ctx_raw)
     assert ctx_result["read_first"][0]["path"] == "docs/plan.md"

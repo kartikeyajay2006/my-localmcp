@@ -3,7 +3,7 @@
 A ``.mcpb`` is a plain zip archive that Claude Desktop reads via its root
 ``manifest.json`` -- there is no signature or hash to reproduce -- so this builds
 the bundle with the stdlib :mod:`zipfile`, keeping the wizard dependency-free (no
-Node/``npx``). The staged layout mirrors ``scripts/build-mcpb.sh``:
+Node/``npx``). The staged layout is:
 
     manifest.json      <- packages/claude-desktop/mcpb/manifest.json
     server.py          <- packages/claude-desktop/mcpb/server.py

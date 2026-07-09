@@ -1,56 +1,33 @@
+"""The deterministic context-retrieval pipeline.
+
+``prepare_context``/``context_prepare`` and everything that backs them --
+candidate scoring, heading matching, excerpt-range selection, the capped
+recency-gated retrieval-boost nudge, and the MCP/CLI renderers -- plus
+``file_context``, ``file_excerpts``, ``record_change``, and
+``test_determinism``. Ollama only ever re-ranks here; the deterministic
+result built without it is always authoritative.
+"""
+
 from __future__ import annotations
 
 import hashlib
 import json
 import re
-import tempfile
 import uuid
 from pathlib import Path
 from typing import Any
 
-from . import __version__
-from . import repo_memory
-from .config import CONFIG_PATH, ensure_config, load_config, save_config
-from .installer import configure_models as installer_configure_models
-from .identity import IDENTITY
-from .ollama_client import chat, ensure as ensure_ollama, ping, start_service, status as ollama_state, stop_service, unload as unload_ollama, warm as warm_ollama
-from .query import category_boost, classify_path, extract_file_references, normalize_query, term_key as compute_term_key
-from .utils import read_text_file, rel, repo_root_or_cwd, rg_search, safe_path, sha256_file, run_command
+from .. import __version__
+from ..retrieval import repo_memory
+from ..identity import IDENTITY
+from ..ollama_client import chat
+from ..retrieval.query import category_boost, classify_path, extract_file_references, normalize_query, term_key as compute_term_key
+from ..utils import repo_root_or_cwd, rg_search
+from ._shared import _format_model_timing, _slim_status_for_nesting, json_out
 
 
 LINE_HINT_MAX_PER_FILE = 5
 READ_FIRST_MAX = 5
-
-
-def json_out(data: Any) -> str:
-    return json.dumps(data, indent=2, ensure_ascii=False, default=str)
-
-
-def _ns_to_seconds(ns: Any) -> float | None:
-    try:
-        if ns is None:
-            return None
-        return round(float(ns) / 1_000_000_000, 3)
-    except Exception:
-        return None
-
-
-def _format_model_timing(result: dict[str, Any] | None) -> dict[str, Any] | None:
-    if not result:
-        return None
-    raw = result.get("raw") or {}
-    return {
-        "ok": result.get("ok"),
-        "model": result.get("model"),
-        "total_seconds": _ns_to_seconds(raw.get("total_duration")),
-        "eval_seconds": _ns_to_seconds(raw.get("eval_duration")),
-        "eval_count": raw.get("eval_count"),
-        "elapsed_seconds": result.get("elapsed_seconds"),
-        "timeout_seconds": result.get("timeout_seconds"),
-        "timed_out": bool(result.get("timed_out")),
-        "near_timeout": bool(result.get("near_timeout")),
-        "error": result.get("error"),
-    }
 
 
 def _hint_sort_key(hint: str) -> tuple[int, int, str]:
@@ -347,86 +324,6 @@ def _format(data: dict[str, Any], output_format: str = "json") -> str:
     return json_out(data)
 
 
-def init() -> str:
-    path = ensure_config()
-    return json_out({
-        "ok": True,
-        "product": IDENTITY.product_name,
-        "config_path": str(path),
-        "next": [
-            "Run client setup once from anywhere: neo-localmcp config clients setup --client all",
-            "Then cd into the repo you want analyzed: cd /path/to/your/repo",
-            "Index that repo: neo-localmcp index",
-            "Ask for context: neo-localmcp context \"debug feature X: KnownSymbol, FileName.cs\"",
-        ],
-    })
-
-
-def status(repo_root: str = "auto") -> str:
-    return json_out({"product": IDENTITY.as_dict(), "config_path": str(CONFIG_PATH), "repo": repo_memory.status(repo_root), "ollama": ping()})
-
-
-def where(repo_root: str = "auto") -> str:
-    cfg = load_config()
-    root = repo_root_or_cwd(repo_root)
-    return json_out({
-        "product": IDENTITY.product_name,
-        "installed_command_hint": "neo-localmcp",
-        "config_path": str(CONFIG_PATH),
-        "current_repo": str(root),
-        "repo_db": str(repo_memory.db_path()),
-        "ollama_base_url": cfg.get("ollama", {}).get("base_url"),
-        "summary_model": cfg.get("ollama", {}).get("summary_model"),
-        "note": "Run index/context from the repo you want analyzed. Client setup (neo-localmcp config clients setup) can be run once from anywhere.",
-    })
-
-
-def model_status() -> str:
-    cfg = load_config()
-    return json_out({
-        "ollama_config": cfg.get("ollama", {}),
-        "ollama_ping": ping(),
-        "note": "Context is deterministic by default in V1. Use --ollama-rank or use_ollama=true for optional Ollama ranking.",
-    })
-
-
-def doctor(repo_root: str = "auto") -> str:
-    from . import lifecycle
-    cfg = load_config()
-    checks = {
-        "config_exists": CONFIG_PATH.exists(),
-        "db_open": True,
-        "ollama": ping(),
-        "repo": repo_memory.status(repo_root),
-        "running_servers": lifecycle.list_servers(prune=True),
-        "rules": [
-            "neo-localmcp retrieves, indexes, summarizes, ranks, and applies exact approved patches.",
-            "neo-localmcp does not generate source code or make engineering decisions.",
-            "Claude/Codex reason and create exact patches.",
-            "Context lookup is deterministic by default; Ollama ranking is opt-in with --ollama-rank or MCP use_ollama=true.",
-            "Run `neo-localmcp --help` for the full, authoritative command inventory.",
-        ],
-        "config": {"ollama_base_url": cfg.get("ollama", {}).get("base_url"), "summary_model": cfg.get("ollama", {}).get("summary_model"), "db_path": cfg.get("memory", {}).get("db_path")},
-    }
-    return json_out({"ok": True, **checks})
-
-
-def repo_index(repo_root: str = "auto", max_files: int | None = None, force: bool = False) -> str:
-    return json_out(repo_memory.index_repo(repo_root, max_files=max_files, force=force))
-
-
-def repo_reindex(repo_root: str = "auto", max_files: int | None = None) -> str:
-    return json_out(repo_memory.index_repo(repo_root, max_files=max_files, force=True))
-
-
-def reset_repo(repo_root: str = "auto") -> str:
-    return json_out(repo_memory.reset_repo(repo_root))
-
-
-def reset_all() -> str:
-    return json_out(repo_memory.reset_all())
-
-
 def _stable_context_projection(data: dict[str, Any]) -> dict[str, Any]:
     """Keep the fields that must be identical for deterministic context tests."""
     repo = data.get("repo_status") or {}
@@ -496,14 +393,6 @@ def test_determinism(task: str, repo_root: str = "auto", runs: int = 5, max_file
         "stable_projection_fields": ["task", "repo_id", "git_commit", "interpreted_query", "read_first", "candidate_files", "agent_guidance"],
         "note": "Ollama is intentionally disabled for determinism tests; use context --ollama-rank separately for model behavior.",
     })
-
-
-def repo_refresh(repo_root: str = "auto", max_files: int | None = None, force: bool = False) -> str:
-    return json_out(repo_memory.refresh(repo_root, force=force, max_files=max_files))
-
-
-def repo_lookup(query: str, repo_root: str = "auto", limit: int = 20) -> str:
-    return json_out(repo_memory.lookup(query, repo_root, limit=limit))
 
 
 def file_context(path: str, repo_root: str = "auto", around_line: int | None = None, context_lines: int = 40) -> str:
@@ -992,173 +881,5 @@ def prepare_context(task: str, repo_root: str = "auto", token_budget: int = 3000
     return context_prepare(task, repo_root, max_files=None, limit=max_files, use_ollama=use_ollama, model=model, output_format=output_format, token_budget=token_budget, record=record)
 
 
-def _cap_keyword_terms(raw: str, max_terms: int = 8) -> str:
-    """Cap by comma-separated term count, not character count.
-
-    A generation-length cap (see ollama_client.chat's num_predict) is the primary
-    defense against a runaway response, but this is the belt-and-suspenders layer:
-    even a response that stays under the token cap could still cram far more than
-    the requested "at most 8" terms into a shorter space. Enforce the actual shape
-    regardless of what the model produced.
-    """
-    terms = [t.strip() for t in raw.split(",") if t.strip()]
-    return ", ".join(terms[:max_terms])
-
-
-def _split_summary_keywords(text: str) -> tuple[str, str]:
-    """Best-effort split of a 'summary: ...\\nkeywords: ...' style Ollama response."""
-    summary_match = re.search(r"summary\s*:\s*(.+?)(?:\n\s*keywords\s*:|\Z)", text, re.IGNORECASE | re.DOTALL)
-    keywords_match = re.search(r"keywords\s*:\s*(.+)", text, re.IGNORECASE | re.DOTALL)
-    summary = (summary_match.group(1).strip() if summary_match else text.strip())[:2000]
-    keywords_raw = (keywords_match.group(1).strip() if keywords_match else "")[:4000]
-    keywords = _cap_keyword_terms(keywords_raw)
-    return summary, keywords
-
-
-def _slim_status_for_nesting(status: dict[str, Any] | None) -> dict[str, Any] | None:
-    """Drop the verbose installed_models list from a second, nested copy of an Ollama
-    status dict. The top-level ollama_status key in the same response keeps the full
-    list; embedding it again inside ollama_summary/ollama_ranking is pure duplication."""
-    if not status:
-        return status
-    return {k: v for k, v in status.items() if k != "installed_models"}
-
-
-def _summarize_section(path: str, heading: str, root: Path, model: str | None) -> str:
-    sym = repo_memory.find_heading_symbol(path, heading, root)
-    if not sym:
-        return json_out({"ok": False, "error": f"heading not found: {heading}", "path": path})
-    current_hash = sha256_file(safe_path(path, root))
-    cached = repo_memory.get_section_summary(path, heading, root)
-    if cached and cached.get("source_hash") == current_hash and (not model or cached.get("model") == model):
-        return json_out({
-            "file": cached.get("file_path"), "heading": heading, "cached": True,
-            "start_line": cached.get("start_line"), "end_line": cached.get("end_line"),
-            "summary": cached.get("summary"), "keywords": cached.get("keywords"),
-            "model": cached.get("model"), "prompt_version": cached.get("prompt_version"),
-        })
-    excerpt_data = repo_memory.file_excerpts([{"path": path, "start_line": sym["start_line"], "end_line": sym["end_line"]}], root, max_chars=12_000)
-    section_text = ((excerpt_data.get("excerpts") or [{}])[0]).get("text", "")
-    prompt = f"""
-Summarize this single document section for repository working context. Do not write or suggest source code.
-Return exactly two labeled parts:
-summary: one or two factual sentences describing what this section covers
-keywords: a short comma-separated list of section-specific terms, at most 8
-
-Section heading: {sym.get('signature') or heading}
-Section text:
-{section_text}
-""".strip()
-    num_predict = int(load_config().get("ollama", {}).get("section_summary_num_predict", 400))
-    result = chat(prompt, model=model, purpose="summary", num_predict=num_predict)
-    eval_count = (result.get("raw") or {}).get("eval_count")
-    # Ollama stops generation at exactly num_predict tokens when the cap is what ended
-    # the response rather than the model choosing to stop -- a reliable runaway signal.
-    truncated = bool(result.get("ok") and eval_count is not None and int(eval_count) >= num_predict)
-    stored = None
-    if result.get("ok") and result.get("response") and not truncated:
-        summary_text, keywords_text = _split_summary_keywords(str(result["response"]))
-        stored = repo_memory.store_section_summary(path, heading, int(sym["start_line"]), int(sym["end_line"]), summary_text, keywords_text, str(result.get("model") or model or ""), "section-summary-v1", root)
-    full_status = result.get("ollama_status")
-    result_for_nesting = {**result, "ollama_status": _slim_status_for_nesting(full_status)}
-    return json_out({
-        "file": stored.get("path") if stored else path, "heading": heading, "cached": False, "truncated": truncated,
-        "start_line": sym["start_line"], "end_line": sym["end_line"],
-        "ollama_summary": result_for_nesting, "ollama_timing": _format_model_timing(result), "ollama_status": full_status,
-        "stored": stored,
-    })
-
-
-def summarize_file(path: str, repo_root: str = "auto", model: str | None = None, heading: str | None = None) -> str:
-    root = repo_root_or_cwd(repo_root)
-    if heading:
-        # P6 (1.0.6): section-scoped enrichment. This never determines a heading's
-        # line boundaries -- those stay authoritative from the deterministic
-        # extractor -- it only adds cached, keyword-searchable summary text.
-        return _summarize_section(path, heading, root, model)
-    p = safe_path(path, root)
-    ctx = repo_memory.file_context(rel(p, root), root)
-    text = read_text_file(p, int(load_config().get("repo", {}).get("summary_max_chars", 80_000)))
-    prompt = f"""
-Summarize this file for repository working context. Do not write or suggest source code.
-Return:
-- purpose
-- important symbols
-- external dependencies
-- likely related files
-- risk areas
-- confidence
-
-File context:
-{json.dumps(ctx, indent=2, default=str)[:20000]}
-
-Current source file:
-{text}
-""".strip()
-    result = chat(prompt, model=model, purpose="summary")
-    if result.get("ok") and result.get("response"):
-        repo_memory.store_summary(rel(p, root), result["response"], str(result.get("model") or model or ""), "file-summary-v1", root)
-    full_status = result.get("ollama_status")
-    result_for_nesting = {**result, "ollama_status": _slim_status_for_nesting(full_status)}
-    return json_out({"file": rel(p, root), "context": ctx, "ollama_summary": result_for_nesting, "ollama_timing": _format_model_timing(result), "ollama_status": full_status})
-
-
-def apply_unified_patch(patch_text: str, repo_root: str = "auto", check_only: bool = False) -> str:
-    root = repo_root_or_cwd(repo_root)
-    if not patch_text.strip():
-        return json_out({"ok": False, "error": "patch_text is empty"})
-    with tempfile.NamedTemporaryFile("w", delete=False, suffix=".patch", encoding="utf-8", newline="") as tmp:
-        tmp.write(patch_text)
-        patch_path = Path(tmp.name)
-    try:
-        check = run_command(["git", "apply", "--check", str(patch_path)], cwd=root, timeout=30)
-        if check["returncode"] != 0:
-            return json_out({"ok": False, "stage": "check", "stdout": check["stdout"], "stderr": check["stderr"]})
-        if check_only:
-            return json_out({"ok": True, "check_only": True, "message": "Patch applies cleanly. No files changed."})
-        apply_result = run_command(["git", "apply", str(patch_path)], cwd=root, timeout=30)
-        if apply_result["returncode"] != 0:
-            return json_out({"ok": False, "stage": "apply", "stdout": apply_result["stdout"], "stderr": apply_result["stderr"]})
-        changed = run_command(["git", "diff", "--name-only"], cwd=root, timeout=20)
-        paths = [p.strip() for p in changed["stdout"].splitlines() if p.strip()]
-        update = repo_memory.record_change("Applied exact approved unified patch", paths, root)
-        return json_out({"ok": True, "changed_paths": paths, "memory_update": update})
-    finally:
-        try:
-            patch_path.unlink(missing_ok=True)
-        except Exception:
-            pass
-
-
 def record_change(summary: str, paths: list[str], repo_root: str = "auto") -> str:
     return json_out(repo_memory.record_change(summary, paths, repo_root))
-
-
-def set_ollama(base_url: str | None = None, summary_model: str | None = None, fast_model: str | None = None, num_ctx: int | None = None) -> str:
-    ollama_cfg = installer_configure_models(
-        base_url=base_url, fast_model=fast_model, summary_model=summary_model, num_ctx=num_ctx,
-    )
-    return json_out({"ok": True, "ollama": ollama_cfg, "status": ollama_state()})
-
-
-def ollama_status(model: str | None = None, purpose: str = "ranking") -> str:
-    return json_out(ollama_state(model, purpose))
-
-
-def ollama_ensure(model: str | None = None, purpose: str = "ranking") -> str:
-    return json_out(ensure_ollama(model, purpose))
-
-
-def ollama_control(action: str, model: str | None = None, purpose: str = "ranking") -> str:
-    actions = {
-        "status": lambda: ollama_state(model, purpose),
-        "ensure": lambda: ensure_ollama(model, purpose),
-        "start": start_service,
-        "warm": lambda: warm_ollama(model, purpose),
-        "unload": lambda: unload_ollama(model, purpose),
-        "stop": stop_service,
-        "test": lambda: chat("Reply with exactly: ok", model=model, purpose=purpose),
-    }
-    if action not in actions:
-        return json_out({"ok": False, "error": f"unknown Ollama action: {action}"})
-    return json_out(actions[action]())

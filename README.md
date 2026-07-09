@@ -194,9 +194,9 @@ python setup_wizard.py
 
 The wizard is plain-stdlib — there is no UI toolkit to install. If you run
 `python setup_wizard.py` on a bare clone and `psutil` is missing, the wizard
-detects it and offers to install it for you before starting. Add `--fake` to walk
+detects it and offers to install it for you before starting. Add `--preview` to walk
 the entire flow as a safe simulation that touches nothing on disk
-(`NEO_LOCALMCP_WIZARD_FAKE_STATE=healthy` simulates a returning, already-installed
+(`NEO_LOCALMCP_WIZARD_PREVIEW_STATE=healthy` simulates a returning, already-installed
 user).
 
 Returning users: run `python setup_wizard.py` again any time to reinstall/update,
@@ -232,8 +232,7 @@ destructive (they delete the entire managed root) and require interactive
 confirmation or the explicit `--yes` flag; running one non-interactively
 without `--yes` is a safety refusal (exit code 2) before anything is touched.
 Omit `--client` to register no client surfaces. Repeat it for any combination of
-`claude-code`, `codex`, and `claude-desktop`. Legacy platform installers are
-preserved for reference under `_LegacyInstallers/`, but are not supported entrypoints.
+`claude-code`, `codex`, and `claude-desktop`.
 
 ## Quickstart: fresh repo (little or no code yet)
 
@@ -283,7 +282,7 @@ instruction persists across sessions instead of being repeated by hand.
 ## Client integration
 
 - Claude Code is configured using `claude mcp add` and receives `/neo-localmcp:*` command templates.
-- Claude Desktop uses the versioned package generated at `packages/claude-desktop/neo-localmcp-v<version>.mcpb`. Build it with `scripts/build-mcpb.ps1` or `scripts/build-mcpb.sh`, then install it through Settings > Extensions > Advanced settings.
+- Claude Desktop uses the versioned package generated at `packages/claude-desktop/neo-localmcp-v<version>.mcpb`. Running `setup.py install`/`reinstall` from a source checkout rebuilds it automatically; install it through Settings > Extensions > Advanced settings.
 - Codex app, CLI, and IDE share `~/.codex/config.toml`; setup writes one marked, replaceable block there.
 - MCP calls use a client workspace root when available. If none or several are exposed, pass `repo_root` explicitly or set `NEO_LOCALMCP_REPO`; the server refuses ambiguous automatic scope.
 

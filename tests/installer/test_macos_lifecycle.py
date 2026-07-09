@@ -175,7 +175,7 @@ async def _start_session_get_pid(home: Path):
     assert python_executable.exists(), f"managed python missing: {python_executable}"
 
     env = {**os.environ, "NEO_LOCALMCP_HOME": str(home)}
-    params = StdioServerParameters(command=str(python_executable), args=["-m", "neo_localmcp.server"], env=env)
+    params = StdioServerParameters(command=str(python_executable), args=["-m", "neo_localmcp.mcp.server"], env=env)
 
     context = stdio_client(params)
     read, write = await context.__aenter__()

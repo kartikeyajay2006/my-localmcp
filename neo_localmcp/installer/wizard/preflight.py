@@ -94,7 +94,7 @@ def ensure_dependencies(repo_root: Path, argv: list[str]) -> None:
         raise SystemExit(1)
 
     # Re-exec so the freshly-installed packages load in a clean process. Preserve
-    # the original arguments (e.g. --fake) across the restart.
+    # the original arguments (e.g. --preview) across the restart.
     print("\nDependencies installed. Starting the wizard...\n")
     entry = str(Path(argv[0]).resolve()) if argv else "setup_wizard.py"
     os.execv(sys.executable, [sys.executable, entry, *argv[1:]])
