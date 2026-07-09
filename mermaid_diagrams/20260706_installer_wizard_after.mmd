@@ -1,0 +1,65 @@
+%% Target-state dependency graph: installer + wizard subsystem
+%% installer/ becomes the complete "install/configure/build" domain, with both of its
+%% frontends (cli.py, wizard/) nested inside it. Cross-cutting modules stay at top level.
+graph TD
+    subgraph ROOT["repo root (packaging entrypoints, unchanged location)"]
+        setup_py["setup.py"]
+        setup_wizard_py["setup_wizard.py"]
+    end
+
+    subgraph INSTALLER["neo_localmcp/installer/"]
+        cli_mod["cli.py<br/>(renamed from setup_cli.py)"]
+        mcpb_mod["mcpb.py<br/>(moved from mcpb_build.py)"]
+        operations["operations.py"]
+        installer_ollama["ollama.py"]
+        installer_clients["clients.py"]
+        runtime_mod["runtime.py"]
+        verification_mod["verification.py"]
+        processes_mod["processes.py"]
+        migration_mod["migration.py"]
+
+        subgraph WIZARD["installer/wizard/"]
+            backend["backend.py"]
+            console["console.py<br/>('preview' terminology, 'dummy' purged"]
+            live_backend["live_backend.py<br/>(was real_backend.py; RealBackend -> LiveBackend)"]
+            preview_backend["preview_backend.py<br/>(was fake_backend.py; FakeBackend -> PreviewBackend)"]
+            preflight["preflight.py"]
+        end
+    end
+
+    lifecycle["lifecycle.py<br/>(unchanged, cross-cutting)"]
+    client_setup["client_setup.py<br/>(unchanged, cross-cutting)"]
+    ollama_client["ollama_client.py<br/>(unchanged, cross-cutting)"]
+    config["config.py<br/>(unchanged, cross-cutting)"]
+
+    setup_py -->|"calls main()"| cli_mod
+    setup_wizard_py -->|"calls ensure_dependencies()"| preflight
+    setup_wizard_py -->|"calls run()"| console
+
+    console -->|"instantiates on --preview"| preview_backend
+    console -->|"instantiates by default"| live_backend
+    preview_backend -->|"implements"| backend
+    live_backend -->|"implements"| backend
+
+    cli_mod -->|"needs install()/reinstall()/uninstall()"| operations
+    cli_mod -->|"needs configure_models()"| installer_ollama
+    cli_mod -->|"needs apply_client_selection()"| installer_clients
+
+    live_backend -->|"needs install()/reinstall()/uninstall()"| operations
+    live_backend -->|"needs configure_models()"| installer_ollama
+    live_backend -->|"needs apply_client_selection()"| installer_clients
+    live_backend -->|"needs build_mcpb()"| mcpb_mod
+    live_backend -->|"needs status(), model_sizes()"| ollama_client
+    live_backend -->|"needs client_status()"| client_setup
+    live_backend -->|"needs load_config()"| config
+
+    operations --> processes_mod
+    operations --> migration_mod
+    operations --> runtime_mod
+    operations --> verification_mod
+    operations --> installer_ollama
+    operations --> installer_clients
+    operations -.->|"needs list_servers()"| lifecycle
+
+    installer_ollama -->|"needs unload_model()"| ollama_client
+    installer_clients -->|"needs setup_*()/remove_*()"| client_setup

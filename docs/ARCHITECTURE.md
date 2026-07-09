@@ -18,8 +18,7 @@ The product/MCP name is always `neo-localmcp` unless explicitly changed later.
 It builds and validates a candidate virtual environment before promotion, stops
 only processes with verified Neo ownership, unloads only Neo-configured Ollama
 models, preserves durable data by default, and restores recorded client targets.
-Legacy platform scripts are archived under `_LegacyInstallers/`; Linux support is
-deferred beyond 1.0.10.
+Linux support is deferred beyond 1.0.10.
 
 ### Claude / Codex
 

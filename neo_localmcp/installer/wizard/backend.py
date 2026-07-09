@@ -2,9 +2,10 @@
 
 Screens depend only on :class:`WizardBackend` and the plain dataclasses here --
 never on ``neo_localmcp.installer`` directly. Two implementations satisfy this
-contract: :mod:`neo_localmcp.wizard.fake_backend` (in-memory, side-effect free,
-for walking the flow) and :mod:`neo_localmcp.wizard.real_backend` (drives the
-actual install lifecycle). Swapping them is a one-line change in ``app.py``.
+contract: :mod:`neo_localmcp.installer.wizard.preview_backend` (in-memory,
+side-effect free, for walking the flow) and
+:mod:`neo_localmcp.installer.wizard.live_backend` (drives the actual install
+lifecycle). Swapping them is a one-line change in ``app.py``.
 
 This module is stdlib-only on purpose so it stays importable everywhere.
 """

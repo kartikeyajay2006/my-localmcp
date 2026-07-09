@@ -1,0 +1,42 @@
+%% Target-state dependency graph: MCP tool/command layer
+%% tools.py splits into 4 category files by responsibility; no category imports another
+%% category directly -- shared pieces are promoted to _shared.py instead.
+graph TD
+    server_py["server.py"]
+    cli_py["cli.py (general CLI, now unambiguous vs installer/cli.py)"]
+
+    subgraph MCPCMDS["neo_localmcp/mcp_commands/"]
+        shared["_shared.py<br/>(json_out, output formatting -- cross-category only)"]
+        system_mod["system.py<br/>(init, status, where, doctor, model_status,<br/>repo_index/reindex/refresh, repo_lookup,<br/>reset_repo, reset_all)"]
+        memory_mod["memory.py<br/>(prepare_context, context_prepare, file_context,<br/>file_excerpts, record_change, test_determinism)"]
+        ollama_mod["ollama.py<br/>(ollama_status, ollama_ensure,<br/>ollama_control, set_ollama)"]
+        editing_mod["editing.py<br/>(summarize_file, apply_unified_patch)"]
+    end
+
+    subgraph BENCH["neo_localmcp/benchmarker/"]
+        bench_runner["__init__.py (run_benchmark and helpers)"]
+        bench_queries["queries/*.jsonl<br/>(moved from benchmark_queries/)"]
+    end
+
+    server_py -->|"prepare_context, file_excerpts, record_change"| memory_mod
+    server_py -->|"status, doctor, repo_refresh"| system_mod
+    server_py -->|"summarize_file, apply_unified_patch"| editing_mod
+    server_py -->|"ollama_status, ollama_ensure"| ollama_mod
+
+    cli_py -->|"~11 functions"| system_mod
+    cli_py -->|"~6 functions"| memory_mod
+    cli_py -->|"set_ollama, ollama_control"| ollama_mod
+    cli_py -->|"summarize_file, apply_unified_patch"| editing_mod
+    cli_py -->|"run_benchmark()"| bench_runner
+
+    system_mod --> shared
+    memory_mod --> shared
+    ollama_mod --> shared
+    editing_mod --> shared
+
+    memory_mod --> repo_memory["repo_memory.py"]
+    system_mod --> repo_memory
+    ollama_mod -->|"daemon control"| ollama_client3["ollama_client.py"]
+    bench_runner -->|"needs prepare_context etc."| memory_mod
+    bench_runner -->|"needs status, doctor etc."| system_mod
+    bench_runner --> bench_queries

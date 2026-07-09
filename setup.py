@@ -41,6 +41,6 @@ if __name__ == "__main__":
 
         setup()
     else:
-        from neo_localmcp.setup_cli import main
+        from neo_localmcp.installer.cli import main
 
         raise SystemExit(main())

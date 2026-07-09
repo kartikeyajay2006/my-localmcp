@@ -20,10 +20,10 @@ is not. Nothing that needs it may be imported until ``ensure_dependencies`` has
 returned.
 
 Flags:
-    --fake   Run against an in-memory simulation. No processes, venvs, network,
-             or files are touched -- a safe way to walk the whole flow. Set
-             NEO_LOCALMCP_WIZARD_FAKE_STATE=healthy to simulate a returning user
-             (already-installed) instead of a first-time clone.
+    --preview   Run against an in-memory simulation. No processes, venvs, network,
+                or files are touched -- a safe way to walk the whole flow. Set
+                NEO_LOCALMCP_WIZARD_PREVIEW_STATE=healthy to simulate a returning user
+                (already-installed) instead of a first-time clone.
 """
 
 from __future__ import annotations
@@ -51,12 +51,12 @@ if str(REPO_ROOT) not in sys.path:
 
 def main() -> int:
     # Stdlib-only preflight -- may print, prompt, pip-install, and re-exec.
-    from neo_localmcp.wizard.preflight import ensure_dependencies
+    from neo_localmcp.installer.wizard.preflight import ensure_dependencies
 
     ensure_dependencies(REPO_ROOT, sys.argv)
 
     # Dependencies are guaranteed present past this point.
-    from neo_localmcp.wizard.console import run
+    from neo_localmcp.installer.wizard.console import run
 
     return run(sys.argv[1:])
 

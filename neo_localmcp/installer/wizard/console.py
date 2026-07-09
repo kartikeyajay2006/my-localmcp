@@ -71,8 +71,8 @@ class _Abort(Exception):
     """Raised when the user explicitly declines to proceed at a final confirm."""
 
 
-class _ToggleDummy(Exception):
-    """Raised by the main-menu prompt when the user types 'd'/'dummy'."""
+class _TogglePreview(Exception):
+    """Raised by the main-menu prompt when the user types 'p'/'preview'."""
 
 
 def _is_back(raw: str) -> bool:
@@ -104,7 +104,7 @@ class ConsoleWizard:
         print(_ansi.cyan_bold("=" * _WIDTH))
         title = _ansi.cyan_bold(" neo-localmcp setup wizard")
         if self.fake:
-            title += "   " + _ansi.yellow("[Preview Dummy]")
+            title += "   " + _ansi.yellow("[Preview Mode]")
         print(title)
         print(_ansi.cyan_bold("=" * _WIDTH))
         
@@ -163,15 +163,15 @@ class ConsoleWizard:
 
     def _ask_int(
         self, low: int, high: int, default: int | None = None,
-        allow_dummy_toggle: bool = False,
+        allow_preview_toggle: bool = False,
     ) -> int:
         hint = f" [Default: {default}]" if default is not None else ""
-        toggle_hint = " (or d for preview dummy mode)" if allow_dummy_toggle else ""
+        toggle_hint = " (or p for preview mode)" if allow_preview_toggle else ""
         while True:
             raw = self._input(
                 f"\n Enter a number {low}-{high}{hint} (or b to go back){toggle_hint}: ")
-            if allow_dummy_toggle and raw.strip().lower() in {"d", "dummy"}:
-                raise _ToggleDummy
+            if allow_preview_toggle and raw.strip().lower() in {"p", "preview"}:
+                raise _TogglePreview
             if _is_back(raw):
                 raise _GoBack
             if not raw and default is not None:
@@ -286,17 +286,17 @@ class ConsoleWizard:
             )
             self._print_options([(title, desc) for _, title, desc in rows])
             try:
-                choice = self._ask_int(1, len(rows), allow_dummy_toggle=not self.fake)
-            except _ToggleDummy:
-                self._enter_preview_dummy()
+                choice = self._ask_int(1, len(rows), allow_preview_toggle=not self.fake)
+            except _TogglePreview:
+                self._enter_preview()
                 continue
             return rows[choice - 1][0]
 
-    def _enter_preview_dummy(self) -> None:
-        """One-way switch to the FakeBackend for the rest of this process."""
-        from .fake_backend import FakeBackend
+    def _enter_preview(self) -> None:
+        """One-way switch to the PreviewBackend for the rest of this process."""
+        from .preview_backend import PreviewBackend
 
-        self.backend = FakeBackend()
+        self.backend = PreviewBackend()
         self.fake = True
         self.detected = self.backend.detect()
         self.prefs = self.backend.load_prefs()
@@ -498,7 +498,7 @@ class ConsoleWizard:
         )
         if self.fake:
             for line in _wrap(
-                "** Preview Dummy is active -- choosing Yes will show a demo output. "
+                "** Preview mode is active -- choosing Yes will show a demo output. "
                 "No changes will be made at all.", indent=" ",
             ):
                 print(_ansi.yellow(line))
@@ -642,13 +642,13 @@ class ConsoleWizard:
 
 def run(argv: list[str] | None = None) -> int:
     argv = list(argv or [])
-    fake = "--fake" in argv
+    fake = "--preview" in argv
     if fake:
-        from .fake_backend import FakeBackend
+        from .preview_backend import PreviewBackend
 
-        backend: WizardBackend = FakeBackend()
+        backend: WizardBackend = PreviewBackend()
     else:
-        from .real_backend import RealBackend
+        from .live_backend import LiveBackend
 
-        backend = RealBackend()
+        backend = LiveBackend()
     return ConsoleWizard(backend=backend, fake=fake).run()

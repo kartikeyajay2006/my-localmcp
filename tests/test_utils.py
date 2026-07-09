@@ -33,7 +33,7 @@ def test_exact_configured_dir_names_are_still_excluded(tmp_path, isolated_config
 
 def test_claude_worktree_dir_is_excluded(tmp_path, isolated_config):
     """Regression: `.claude/worktrees/` holds full sibling repo copies for parallel
-    agent sessions -- without this exclusion, each duplicate tools.py/repo_memory.py
+    agent sessions -- without this exclusion, each duplicate repo_memory.py/utils.py
     outranks the real working-tree file (issue #28, same class of bug as the
     .venv* case above; reproduced live 2026-07-04, see docs/CODE_QUALITY_AUDIT.md
     finding C.1)."""
@@ -42,7 +42,7 @@ def test_claude_worktree_dir_is_excluded(tmp_path, isolated_config):
     _seed(
         repo,
         ["real.py"],
-        [(".claude", "worktrees/agent-abc123/neo_localmcp/tools.py")],
+        [(".claude", "worktrees/agent-abc123/neo_localmcp/repo_memory.py")],
     )
 
     found, eligible, complete = utils.scan_repo_files(repo)
@@ -72,7 +72,7 @@ def test_stale_persisted_exclude_dirs_cannot_defeat_code_owned_excludes(tmp_path
 
     repo = tmp_path / "repo"
     repo.mkdir()
-    _seed(repo, ["real.py"], [(".claude", "worktrees/agent-abc123/neo_localmcp/tools.py")])
+    _seed(repo, ["real.py"], [(".claude", "worktrees/agent-abc123/neo_localmcp/repo_memory.py")])
 
     found, eligible, complete = utils.scan_repo_files(repo)
     rels = {utils.rel(p, repo) for p in found}
@@ -166,7 +166,7 @@ def test_rg_search_fallback_interprets_the_query_as_a_regex(tmp_path, isolated_c
     CI runner has no rg preinstalled, unlike the windows-latest runner used
     during local development), the pure-Python fallback path did a literal
     substring match of the *entire* regex-syntax query string -- including the
-    '(?:...|...)' alternation syntax tools.py always sends it -- against each
+    '(?:...|...)' alternation syntax mcp/memory.py always sends it -- against each
     line, so it silently matched nothing at all, for single or multi-term
     batches alike. Surfaced live by CI on 2026-07-03; see PROJECT_NOTES.md."""
     monkeypatch.setattr(utils, "which", lambda name: None)

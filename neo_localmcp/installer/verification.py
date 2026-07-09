@@ -39,8 +39,8 @@ from .runtime import (
 
 _INTERPRETER_SNIPPET = "import sys; print('%d.%d.%d' % sys.version_info[:3])"
 _PACKAGE_VERSION_SNIPPET = "import neo_localmcp; print(neo_localmcp.__version__)"
-_SERVER_IMPORT_SNIPPET = "import neo_localmcp.server"
-_DOCTOR_SNIPPET = "import sys; from neo_localmcp.tools import doctor; sys.stdout.write(doctor())"
+_SERVER_IMPORT_SNIPPET = "import neo_localmcp.mcp.server"
+_DOCTOR_SNIPPET = "import sys; from neo_localmcp.mcp.system import doctor; sys.stdout.write(doctor())"
 _CANONICAL_PATHS_SNIPPET = (
     "import json; from neo_localmcp import config;"
     " print(json.dumps({'config_path': str(config.config_path()),"
@@ -185,7 +185,7 @@ async def _probe_mcp_handshake_async(paths: ManagedPaths, *, timeout: float) -> 
     env = {**os.environ, "NEO_LOCALMCP_HOME": str(paths.root)}
     params = StdioServerParameters(
         command=str(python_executable),
-        args=["-m", "neo_localmcp.server"],
+        args=["-m", "neo_localmcp.mcp.server"],
         env=env,
     )
     registry_dir = paths.process_registry / "servers"
@@ -480,7 +480,7 @@ def _check_doctor(paths: ManagedPaths, *, env_runner: EnvCommandRunner) -> Verif
         )
     # Inspect the substantive, Ollama-independent health signals doctor actually
     # returns rather than trusting its top-level ``ok`` (which is hardcoded True
-    # in tools.doctor() regardless of sub-check health, so it would make this a
+    # in system.doctor() regardless of sub-check health, so it would make this a
     # no-op required check). Ollama reachability is deliberately NOT required
     # here: deterministic retrieval must never depend on Ollama, so an
     # unreachable/cold model surfaces only through the separate warning-only

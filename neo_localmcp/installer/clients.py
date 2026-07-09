@@ -355,7 +355,7 @@ def apply_client_selection(
     passes its ``CLIENT_LABELS`` lookup so its console shows "Connecting
     Claude Code ..." instead of the raw key). This module intentionally has
     no ``CLIENT_LABELS`` of its own -- that mapping lives in
-    ``neo_localmcp.wizard.backend`` and this module must not import
+    ``neo_localmcp.installer.wizard.backend`` and this module must not import
     ``wizard/``, so callers that want labels supply the mapping themselves.
     Defaults to the identity function (raw client keys), which is what
     ``setup.py manage-clients`` wants for its CLI output.

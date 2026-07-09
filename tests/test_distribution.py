@@ -14,10 +14,10 @@ from mcp.client.stdio import stdio_client
 import pytest
 
 from neo_localmcp import client_setup
-from neo_localmcp import context_worker
+from neo_localmcp.mcp import context_worker
 from neo_localmcp import __version__
 from neo_localmcp import utils
-from neo_localmcp.server import mcp
+from neo_localmcp.mcp.server import mcp
 
 
 def test_codex_app_and_cli_share_config():
@@ -72,7 +72,7 @@ def test_repo_tools_respond_over_real_stdio(tmp_path):
 async def _assert_repo_tools_respond(repo: Path, app_home: Path) -> None:
     root = Path(__file__).parents[1]
     env = {**os.environ, "NEO_LOCALMCP_HOME": str(app_home), "PYTHONPATH": str(root)}
-    params = StdioServerParameters(command=sys.executable, args=["-m", "neo_localmcp.server"], env=env)
+    params = StdioServerParameters(command=sys.executable, args=["-m", "neo_localmcp.mcp.server"], env=env)
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
@@ -96,7 +96,7 @@ def test_built_mcpb_contains_valid_manifest():
     assert manifest["version"] == __version__
     assert manifest["server"]["type"] == "uv"
     assert "server.py" in names
-    assert "neo_localmcp/server.py" in {name.replace("\\", "/") for name in names}
+    assert "neo_localmcp/mcp/server.py" in {name.replace("\\", "/") for name in names}
 
 
 def test_built_mcpb_embeds_current_package_bytes():
