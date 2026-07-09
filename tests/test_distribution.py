@@ -13,10 +13,10 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 import pytest
 
-from neo_localmcp import client_setup
+from neo_localmcp import ai_client_config as client_setup
 from neo_localmcp.mcp import context_worker
 from neo_localmcp import __version__
-from neo_localmcp import utils
+from neo_localmcp import repo_utils as utils
 from neo_localmcp.mcp.server import mcp
 
 

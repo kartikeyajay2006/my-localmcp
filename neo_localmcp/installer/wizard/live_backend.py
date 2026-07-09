@@ -2,7 +2,7 @@
 
 Every side effect here is delegated to code ``setup.py`` already uses -- the
 ``neo_localmcp.installer`` operations, ``neo_localmcp.config``,
-``neo_localmcp.ollama_client``, and ``neo_localmcp.client_setup``. This module
+``neo_localmcp.ollama_client``, and ``neo_localmcp.ai_client_config``. This module
 adds no path, deletion, or process policy of its own; it adapts those existing
 primitives to the wizard's :class:`WizardBackend` contract and streams their
 Reporter output back to the UI as :class:`StepEvent` lines.
@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 import neo_localmcp
-from ... import client_setup, config, ollama_client
+from ... import ai_client_config as client_setup, config, ollama_client
 from .. import (
     ManagedPaths,
     Operation,

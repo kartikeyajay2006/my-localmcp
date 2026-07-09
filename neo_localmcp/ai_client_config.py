@@ -11,8 +11,8 @@ from pathlib import Path
 from typing import Any
 
 from .config import APP_DIR, CONFIG_PATH, ensure_config
-from .identity import IDENTITY
-from .utils import hidden_subprocess_kwargs
+from .branding import IDENTITY
+from .repo_utils import hidden_subprocess_kwargs
 
 
 def _command_templates() -> list[tuple[str, str]]:

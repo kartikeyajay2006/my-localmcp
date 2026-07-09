@@ -14,8 +14,8 @@ from mcp.server.fastmcp import Context, FastMCP
 
 from . import editing, memory, ollama, system
 from ..config import load_config
-from ..identity import IDENTITY
-from ..utils import hidden_subprocess_kwargs
+from ..branding import IDENTITY
+from ..repo_utils import hidden_subprocess_kwargs
 
 
 def _tool_guard(func):
@@ -211,7 +211,7 @@ def main() -> None:
     # blocking mcp.run() loop, so `neo-localmcp stop` (and the upgrade flow) can
     # ask it to exit gracefully instead of relying on an external force-kill.
     from .. import __version__
-    from .. import lifecycle
+    from .. import mcp_server_lifecycle as lifecycle
     from ..config import ensure_config
 
     ensure_config()

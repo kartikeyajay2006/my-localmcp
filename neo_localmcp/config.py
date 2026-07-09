@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from .identity import IDENTITY
+from .branding import IDENTITY
 
 APP_DIR = Path(os.environ.get("NEO_LOCALMCP_HOME", Path.home() / ".neo-localmcp")).expanduser()
 CONFIG_DIR = APP_DIR / "config"
@@ -111,7 +111,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
             ".next", ".svelte-kit", ".turbo", "target", "out", "DerivedData", ".gradle",
             ".neo-localmcp", ".pytest_cache",
             # ".claude/worktrees/" holds full sibling copies of the repo for parallel
-            # agent sessions -- without this, each duplicate repo_memory.py/utils.py
+            # agent sessions -- without this, each duplicate repo_memory.py/repo_utils.py
             # outranks the real working-tree file (issue #28, same class of bug as
             # the .venv* case above).
             ".claude",
