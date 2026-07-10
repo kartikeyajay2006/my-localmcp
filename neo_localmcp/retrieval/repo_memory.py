@@ -9,7 +9,7 @@ from typing import Any
 from ..config import db_path, load_config
 
 INDEXER_VERSION = "1.2.0"
-from ..repo_utils import extract_symbols, git_info, language_for_path, read_text_file, rel, repo_id, repo_root_or_cwd, safe_path, scan_repo_files, sha256_file, simple_terms
+from ..repo_utils import extract_symbols, git_info, language_for_path, read_text_file, rel, repo_id, repo_root_or_cwd, run_command, safe_path, scan_repo_files, sha256_file, simple_terms
 
 # defaults for the config-overridable memory.retrieval_boost_cap / retrieval_boost_min_shown (get_boost_map reads config, falls back here)
 # kept conservative: structural evidence (heading/milestone matches in mcp/memory.py) always scores far higher, so memory can only nudge near-ties
@@ -294,10 +294,12 @@ def index_repo(repo_root: str | Path | None = None, max_files: int | None = None
         conn.commit()
     indexed_at = now_iso()
     if errors == 0:
+        git = git_info(root)  # one probe for both branch and commit stamps
         set_repo_meta(conn, rid, "indexer_version", INDEXER_VERSION)
         set_repo_meta(conn, rid, "eligible_files", str(eligible_files))
         set_repo_meta(conn, rid, "index_complete", "true" if index_complete else "false")
-        set_repo_meta(conn, rid, "indexed_branch", str(git_info(root).get("branch") or ""))
+        set_repo_meta(conn, rid, "indexed_branch", str(git.get("branch") or ""))
+        set_repo_meta(conn, rid, "indexed_commit", str(git.get("commit") or ""))
         set_repo_meta(conn, rid, "last_indexed_at", indexed_at)
     return {
         "ok": errors == 0,
@@ -368,6 +370,30 @@ def status(repo_root: str | Path | None = None) -> dict[str, Any]:
 def refresh(repo_root: str | Path | None = None, force: bool = False, max_files: int | None = None) -> dict[str, Any]:
     # Fresh-install baseline: deterministic refresh is just hash-aware re-index.
     return index_repo(repo_root, max_files=max_files, force=force)
+
+
+def index_freshness(repo_root: str | Path | None = None, head_commit: str | None = None) -> dict[str, Any] | None:
+    # stored indexed_commit vs HEAD -> {indexed_commit, head_commit, commits_behind, fresh}
+    # None means "can't say" (pre-12a index, non-git repo, or indexed_commit unresolvable): caller degrades to no freshness line
+    root = repo_root_or_cwd(repo_root)
+    conn = connect()
+    indexed_commit = get_repo_meta(conn, repo_id(root), "indexed_commit")
+    if not indexed_commit:
+        return None
+    head = head_commit or git_info(root).get("commit")
+    if not head:
+        return None
+    if head == indexed_commit:
+        behind = 0
+    else:
+        counted = run_command(["git", "rev-list", "--count", f"{indexed_commit}..HEAD"], cwd=root, timeout=10)
+        if counted["returncode"] != 0:
+            return None
+        try:
+            behind = int(counted["stdout"].strip())
+        except ValueError:
+            return None
+    return {"indexed_commit": indexed_commit, "head_commit": head, "commits_behind": behind, "fresh": behind == 0}
 
 
 def lookup(query: str, repo_root: str | Path | None = None, limit: int = 20) -> dict[str, Any]:
