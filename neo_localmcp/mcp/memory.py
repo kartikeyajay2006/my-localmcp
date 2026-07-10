@@ -80,6 +80,17 @@ def _git_summary(git: dict[str, Any]) -> str:
     return f"branch={git.get('branch')} commit={str(git.get('commit') or '')[:12]} dirty={git.get('dirty_files')}"
 
 
+def _freshness_line(data: dict[str, Any]) -> str | None:
+    # index_freshness -> one-line staleness verdict; None (pre-12a index / non-git repo) -> no line, old output shape
+    fresh = data.get("index_freshness")
+    if not fresh:
+        return None
+    if fresh.get("fresh"):
+        return "index: fresh, at HEAD"
+    behind = int(fresh.get("commits_behind") or 0)
+    return f"index: {behind} commit{'s' if behind != 1 else ''} behind HEAD; run refresh_index for current results"
+
+
 def _render_context_text(data: dict[str, Any]) -> str:
     # full human-readable CLI text: repo/git/query header -> read first -> other candidates -> guidance -> ollama
     lines: list[str] = []
@@ -98,6 +109,9 @@ def _render_context_text(data: dict[str, Any]) -> str:
     git = repo.get("git") or {}
     if git:
         lines.append(f"Git: {_git_summary(git)}")
+    freshness = _freshness_line(data)
+    if freshness:
+        lines.append(freshness)
     if repo.get("indexer_rebuild_recommended"):
         lines.append("Index note: indexer version changed; run `neo-localmcp reindex` for a clean rebuild.")
     lines.append("")
@@ -231,6 +245,9 @@ def _mcp_tiny_context_text(data: dict[str, Any]) -> str:
         lines.append(f"retrieval_id: {data.get('retrieval_id')} (pass to file_excerpts to record whether you used the suggested section)")
     if git:
         lines.append(f"git: {_git_summary(git)}")
+    freshness = _freshness_line(data)
+    if freshness:
+        lines.append(freshness)
     lines.append(f"intent: {interp.get('intent')} policy: {interp.get('ranking_policy')}")
     strong = interp.get("strong_terms") or []
     weak = interp.get("weak_terms") or []
@@ -722,6 +739,8 @@ def context_prepare(task: str, repo_root: str = "auto", max_files: int | None = 
         refreshed = True
     if refreshed:
         status_data = repo_memory.status(root)
+    # status already probed HEAD; reuse it so freshness costs one rev-list at most
+    index_freshness = repo_memory.index_freshness(root, head_commit=(status_data.get("git") or {}).get("commit"))
 
     interpreted = normalize_query(task)
     terms: list[str] = interpreted.get("search_terms") or []
@@ -773,6 +792,7 @@ def context_prepare(task: str, repo_root: str = "auto", max_files: int | None = 
         "mode": "agent_ready_natural_context",
         "retrieval_id": retrieval_id,
         "repo_status": status_data,
+        "index_freshness": index_freshness,
         "interpreted_query": interpreted,
         "candidate_files": ranked,
         "read_first": read_first,
