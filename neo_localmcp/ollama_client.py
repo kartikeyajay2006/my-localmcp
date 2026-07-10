@@ -63,10 +63,12 @@ def _cfg() -> dict[str, Any]:
 
 
 def _model_for(purpose: str, override: str | None = None) -> str:
-    # override wins; else purpose "ranking"/"query" -> fast_model, else -> summary_model (fallback fast_model, then a hardcoded default)
+    # override wins; else purpose "ranking"/"query" -> fast_model, "embed" -> embed_model (may be ""), else -> summary_model (fallback fast_model, then a hardcoded default)
     cfg = _cfg()
     if override:
         return override
+    if purpose == "embed":
+        return str(cfg.get("embed_model") or "")
     return str(cfg.get("fast_model") if purpose in {"ranking", "query"} else cfg.get("summary_model") or cfg.get("fast_model") or "qwen3:8b")
 
 
@@ -371,3 +373,35 @@ def chat(prompt: str, model: str | None = None, purpose: str = "summary", num_pr
     except Exception as exc:
         elapsed = _elapsed(started)
         return _result(False, model=chosen, purpose=purpose, state="failed", error=str(exc), elapsed_seconds=elapsed, timeout_seconds=timeout_seconds, timed_out=False, ollama_status=readiness)
+
+
+def embed(text: str, model: str | None = None) -> dict[str, Any]:
+    # bounded, non-blocking embedding for the optional semantic-rerank layer.
+    # embed_model unset -> disabled, zero network. Service down/timed_out/model-not-installed -> skip (never auto-starts, never pulls, never raises).
+    # config unset -> down -> generate: any non-ready gate short-circuits before the embed POST
+    cfg = _cfg()
+    chosen = _model_for("embed", model)
+    if not chosen:
+        return _result(False, model=None, purpose="embed", state="disabled", error="embed_model not configured")
+    readiness = status(chosen, purpose="embed")  # bounded connect+health probe; no auto-start, no warm
+    if readiness.get("state") not in {"ready", "model_cold"}:
+        # unreachable / timed_out / model_missing / disabled -> skip this pass
+        return _result(False, model=chosen, purpose="embed", state=readiness.get("state"), error=readiness.get("error") or readiness.get("state"), timed_out=readiness.get("state") == "timed_out", ollama_status=readiness)
+    timeout_seconds = int(cfg.get("fast_timeout_seconds", 60))
+    started = time.monotonic()
+    try:
+        code, payload = _request_json("/api/embed", method="POST", body={"model": chosen, "input": text, "keep_alive": str(cfg.get("keep_alive", "30m"))}, timeout=timeout_seconds)
+        elapsed = _elapsed(started)
+        if code != 200:
+            state = "busy" if code == 503 else ("model_missing" if code == 404 else "failed")
+            return _result(False, model=chosen, purpose="embed", state=state, error=payload.get("error") or f"HTTP {code}", elapsed_seconds=elapsed, timed_out=False)
+        # /api/embed returns embeddings: [[...]]; tolerate the older /api/embeddings embedding: [...] shape too
+        rows = payload.get("embeddings")
+        vector = (rows[0] if rows else None) if isinstance(rows, list) else payload.get("embedding")
+        if not vector:
+            return _result(False, model=chosen, purpose="embed", state="failed", error="no embedding returned", elapsed_seconds=elapsed, timed_out=False)
+        return _result(True, model=chosen, purpose="embed", vector=[float(x) for x in vector], elapsed_seconds=elapsed, timed_out=False)
+    except (TimeoutError, socket.timeout) as exc:
+        return _result(False, model=chosen, purpose="embed", state="timed_out", error=str(exc) or f"timed out after {timeout_seconds}s", elapsed_seconds=_elapsed(started), timed_out=True)
+    except Exception as exc:
+        return _result(False, model=chosen, purpose="embed", state="failed", error=str(exc), elapsed_seconds=_elapsed(started), timed_out=False)

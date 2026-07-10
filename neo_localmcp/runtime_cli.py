@@ -109,7 +109,7 @@ def cmd_clients(args: argparse.Namespace) -> int:
 
 
 def cmd_set_ollama(args: argparse.Namespace) -> int:
-    print_json_text(ollama.set_ollama(args.base_url, args.summary_model, args.fast_model, args.num_ctx))
+    print_json_text(ollama.set_ollama(args.base_url, args.summary_model, args.fast_model, args.embed_model, args.num_ctx))
     return 0
 
 
@@ -261,7 +261,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_remove_client)
 
     p = sub.add_parser("set-ollama", help="Set Ollama URL/model defaults.")
-    p.add_argument("--base-url"); p.add_argument("--summary-model"); p.add_argument("--fast-model"); p.add_argument("--num-ctx", type=int)
+    p.add_argument("--base-url"); p.add_argument("--summary-model"); p.add_argument("--fast-model"); p.add_argument("--embed-model", help="Optional embedding model for the semantic-rerank layer (disabled if unset)."); p.add_argument("--num-ctx", type=int)
     p.set_defaults(func=cmd_set_ollama)
 
     p = sub.add_parser("index", help="Hash-aware repository index of files and symbols.")

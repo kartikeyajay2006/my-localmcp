@@ -12,12 +12,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 import uuid
 from pathlib import Path
 from typing import Any
 
 from .. import __version__
+from .. import ollama_client
 from ..retrieval import repo_memory
 from ..branding import IDENTITY
 from ..ollama_client import chat
@@ -629,6 +631,49 @@ def _apply_retrieval_boost(candidates: dict[str, dict[str, Any]], root: Path, in
     return term_key
 
 
+# semantic re-rank weight: cosine (~[0,1] for related text) * this -> score bump. Sized like retrieval boost:
+# below any single structural signal (heading match +60, coverage +20/term), so it re-orders near-ties, never overrides structure.
+SEMANTIC_RERANK_WEIGHT = 18
+
+
+def _cosine(a: list[float], b: list[float]) -> float:
+    # 0.0 on any degenerate input (length mismatch / zero vector) so a bad embedding can't perturb ranking
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(y * y for y in b))
+    if na == 0.0 or nb == 0.0:
+        return 0.0
+    return dot / (na * nb)
+
+
+def _apply_semantic_rerank(candidates: dict[str, dict[str, Any]], root: Path, task: str) -> None:
+    # optional pipeline step: re-rank ONLY the already-FTS-selected candidates by cosine(task, stored file vector).
+    # gated on embeddings existing (repo_has_embeddings) so embed_model-unset repos are byte-identical to pre-12b, no embed() call.
+    # additive only: no new candidates, no result-set expansion; task-embed failure -> leave FTS order untouched.
+    if not candidates:
+        return
+    conn = repo_memory.connect()
+    rid = repo_memory.repo_id(root)
+    if not repo_memory.repo_has_embeddings(conn, rid):
+        return
+    task_result = ollama_client.embed(task)
+    if not task_result.get("ok"):
+        return
+    task_vector = task_result.get("vector") or []
+    stored = repo_memory.get_file_embeddings(conn, rid, list(candidates.keys()))
+    for path, item in candidates.items():
+        entry = stored.get(path)
+        if not entry:
+            continue
+        cos = _cosine(task_vector, entry.get("vector") or [])
+        bump = round(SEMANTIC_RERANK_WEIGHT * cos)
+        if bump:
+            item["score"] += bump
+            item["reasons"].append(f"semantic match (+{bump}) to task embedding")
+
+
 def _select_read_first(candidates: dict[str, dict[str, Any]], explicit_paths: set[str], intent: str, limit: int, max_files: int | None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     # pipeline step 5/7: candidates -> sorted ranked list -> read_first fill order:
     # explicit user paths (always first) -> source/test/config for dev intents -> remaining ranked order
@@ -765,6 +810,7 @@ def context_prepare(task: str, repo_root: str = "auto", max_files: int | None = 
         _add_candidate(candidates, resolved, "explicit path in task", 120, intent, allow_reason_line_hint=False)
 
     term_key = _apply_retrieval_boost(candidates, root, interpreted, symbol_hits)
+    _apply_semantic_rerank(candidates, root, task)  # optional; no-op unless embeddings exist for this repo
     ranked, read_first = _select_read_first(candidates, explicit_paths, intent, limit, max_files)
 
     symbol_map = repo_memory.symbols_for_files([item["path"] for item in read_first], root, max_per_file=8)
