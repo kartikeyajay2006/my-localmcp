@@ -60,4 +60,7 @@ touched `neo_localmcp/` or `tests/` → run `pytest -q -m "not slow"` locally;
 docs/meta-only changes need neither. CI (not this checklist) is what's actually
 required before merging — branch protection enforces it. The `.mcpb` bundle is
 rebuilt automatically by `setup.py install`/`reinstall` from a source checkout
-(`neo_localmcp/installer/mcpb.py`), not a manual step.
+(`neo_localmcp/installer/mcpb.py`), not a manual step. On a version bump,
+`git rm` the previous version's `packages/claude-desktop/neo-localmcp-v*.mcpb`
+before committing the new one — only the current version's bundle should stay
+tracked.

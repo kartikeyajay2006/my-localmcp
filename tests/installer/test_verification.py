@@ -156,6 +156,7 @@ def _base_kwargs(paths: ManagedPaths, expected_version: str = "9.9.9") -> dict:
         runner=_passing_runner(expected_version),
         env_runner=_passing_env_runner(paths),
         handshake=_passing_handshake,
+        ollama_status_fn=lambda: {"state": "unreachable", "model": None},
     )
 
 
