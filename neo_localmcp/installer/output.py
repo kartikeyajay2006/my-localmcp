@@ -49,6 +49,7 @@ class ReportEvent:
 
 
 class Reporter:
+    # prints each message via output_fn and also records it as a ReportEvent, so tests can assert on structured output instead of parsing printed strings
     def __init__(self, output_fn: OutputFn = print):
         self._output_fn = output_fn
         self._events: list[ReportEvent] = []
@@ -102,6 +103,7 @@ def confirm_full_wipe(
     output_fn: OutputFn = print,
     assume_yes: bool = False,
 ) -> bool:
+    # --yes -> auto-confirm; else requires typing the exact FULL_WIPE_CONFIRMATION phrase, any other input cancels
     resolved_root = paths.validate_destructive_root()
     output_fn("FULL WIPE REQUESTED")
     output_fn("This permanently deletes the entire managed neo-localmcp root.")

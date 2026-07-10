@@ -51,6 +51,7 @@ class MigrationResult:
 
 
 def _move_path(source: Path, destination: Path) -> None:
+    # os.replace -> same-filesystem atomic rename; used for both forward moves and rollback (called in reverse)
     destination.parent.mkdir(parents=True, exist_ok=True)
     os.replace(source, destination)
 
@@ -64,6 +65,7 @@ def _add_action(
     source: Path,
     destination: Path,
 ) -> None:
+    # source doesn't exist -> no-op, nothing to plan; else -> mark recognized (excludes it from unknown_paths) and queue the action
     if not source.exists():
         return
     recognized.add(source)
@@ -78,6 +80,8 @@ def _add_action(
 
 
 def plan_migration(paths: ManagedPaths) -> MigrationPlan:
+    # legacy flat files/dirs -> move actions into the managed layout; old runtime artifacts (venvs, bin, current-venv.txt) -> discard actions into a trash dir
+    # also computes destination-exists conflicts, unrecognized leftover paths, and whether any queued action needs processes stopped first
     if not paths.root.exists():
         return MigrationPlan(paths, (), (), (), (), False)
 
@@ -198,6 +202,8 @@ def plan_migration(paths: ManagedPaths) -> MigrationPlan:
 
 
 def _normalize_migrated_config(paths: ManagedPaths) -> tuple[bytes | None, str | None]:
+    # a moved config.yaml may still point memory.db_path at the old root-level sqlite path -- rewrite it to the new managed location if so
+    # returns (original bytes for rollback, warning) -- original is None when nothing needed rewriting, not on success
     destination = paths.config / "config.yaml"
     if not destination.exists():
         return None, None
@@ -226,6 +232,8 @@ def apply_migration(
     *,
     processes_stopped: bool = False,
 ) -> MigrationResult:
+    # conflicts present, or a required process-stop hasn't happened yet -> refuse without touching disk
+    # else: move/discard each action, journaling as it goes; any exception -> restore original config bytes + reverse-replay the journal, reporting rolled_back=True
     if plan.conflicts:
         return MigrationResult(
             applied=False,
