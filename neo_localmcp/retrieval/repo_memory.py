@@ -11,22 +11,19 @@ from ..config import db_path, load_config
 INDEXER_VERSION = "1.2.0"
 from ..repo_utils import extract_symbols, git_info, language_for_path, read_text_file, rel, repo_id, repo_root_or_cwd, safe_path, scan_repo_files, sha256_file, simple_terms
 
-# Retrieval-memory tuning (1.0.6, P4). Kept intentionally conservative: structural
-# evidence (heading/milestone matches in mcp/memory.py) always scores far higher than
-# these caps, so memory can only nudge near-ties, never override a real match.
-# 1.0.9 (P9g): these are now the *defaults* for the config-overridable
-# memory.retrieval_boost_cap / memory.retrieval_boost_min_shown; get_boost_map reads
-# config and falls back to these. Kept as named constants so tests and callers have
-# a stable default reference.
+# defaults for the config-overridable memory.retrieval_boost_cap / retrieval_boost_min_shown (get_boost_map reads config, falls back here)
+# kept conservative: structural evidence (heading/milestone matches in mcp/memory.py) always scores far higher, so memory can only nudge near-ties
 RETRIEVAL_BOOST_CAP = 8
 RETRIEVAL_BOOST_MIN_SHOWN = 3
 
 
 def now_iso() -> str:
+    # UTC timestamp string used for every created_at/updated_at column
     return datetime.now(timezone.utc).isoformat()
 
 
 def connect() -> sqlite3.Connection:
+    # opens (creating parent dir if needed) and runs schema/migrations on every connect
     path = db_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path)
@@ -36,14 +33,9 @@ def connect() -> sqlite3.Connection:
 
 
 def init_db(conn: sqlite3.Connection) -> None:
-    # Migration (#24): repo_fts used to index repo_id/kind/target as searchable text
-    # alongside body. Since target embeds the file path (e.g. "installer/migration.py:
-    # MigrationAction"), an unqualified MATCH query for an overloaded word that happens
-    # to be a filename substring (e.g. "migration") matched every symbol row in that
-    # file via target, not because body actually related to each symbol -- inflating
-    # scores in proportion to a file's symbol count. Rebuilding with repo_id/kind/target
-    # UNINDEXED restricts MATCH to body only; they remain usable in plain WHERE filters.
-    # Existing repos repopulate repo_fts automatically via the INDEXER_VERSION bump below.
+    # creates schema on first connect, additively migrates it on every connect after
+    # old repo_fts (repo_id/kind/target indexed) -> dropped if found -> rebuilt UNINDEXED below
+    # target embeds the file path, so indexing it let an overloaded filename substring (e.g. "migration") match every symbol row in that file via target, not real body relevance
     row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='repo_fts'").fetchone()
     if row and row[0] and "UNINDEXED" not in row[0]:
         conn.execute("DROP TABLE repo_fts")
@@ -183,6 +175,7 @@ def repo_indexer_needs_rebuild(conn: sqlite3.Connection, rid: str) -> bool:
 
 
 def upsert_repo(conn: sqlite3.Connection, root: Path) -> str:
+    # root path -> repo_id row, insert or refresh remote/branch/commit on every call
     info = git_info(root)
     rid = repo_id(root)
     ts = now_iso()
@@ -204,6 +197,7 @@ def upsert_repo(conn: sqlite3.Connection, root: Path) -> str:
 
 
 def index_file(conn: sqlite3.Connection, root: Path, path: Path, rid: str | None = None, force: bool = False) -> dict[str, Any]:
+    # size+mtime match -> skip entirely; hash match (mtime touched but content same) -> refresh stat only; else -> full re-extract of symbols/fts
     rid = rid or upsert_repo(conn, root)
     relative = rel(path, root)
     stat = path.stat()
@@ -253,30 +247,24 @@ def index_file(conn: sqlite3.Connection, root: Path, path: Path, rid: str | None
             """,
             (rid, relative, sym["kind"], sym["name"], sym.get("signature"), sym.get("start_line"), sym.get("end_line"), ts),
         )
-    # Body includes the actual file content (already bounded by the read above), not
-    # just path+language, so a term that only ever appears as a string literal / SQL
-    # identifier / config key -- never as a def/class symbol name -- is still findable
-    # the same way a plain grep would find it (#22).
+    # body includes full file content -> a term appearing only as a string literal/SQL identifier/config key is still findable like a plain grep would
     conn.execute("INSERT INTO repo_fts(repo_id, kind, target, body) VALUES(?, 'file', ?, ?)", (rid, relative, f"{relative} {lang}\n{text}"))
     for sym in symbols[:120]:
-        # Body deliberately excludes `relative`: appending the file path here made an
-        # overloaded filename token (e.g. "migration" in installer/migration.py) match
-        # every symbol in the file as a separate "hit", one per symbol, regardless of
-        # whether the term had anything to do with that symbol -- inflating the file's
-        # score in proportion to its symbol count instead of real relevance (#24).
-        # Path-token matching already happens once per file via the 'file' kind row above.
+        # symbol body deliberately excludes `relative` -- path-token matching already happens once via the 'file' row above; repeating it here inflated overloaded filenames' scores per-symbol
         conn.execute("INSERT INTO repo_fts(repo_id, kind, target, body) VALUES(?, 'symbol', ?, ?)", (rid, f"{relative}:{sym['name']}", f"{sym['kind']} {sym['name']} {sym.get('signature','')}"))
     conn.commit()
     return {"path": relative, "changed": True, "indexed": True, "symbols": len(symbols)}
 
 
 def _delete_indexed_path(conn: sqlite3.Connection, rid: str, relative: str) -> None:
+    # removes a path's symbols/fts/files rows together, for a deleted or no-longer-selected file
     conn.execute("DELETE FROM symbols WHERE repo_id=? AND file_path=?", (rid, relative))
     conn.execute("DELETE FROM repo_fts WHERE repo_id=? AND (target=? OR target LIKE ?)", (rid, relative, relative + ":%"))
     conn.execute("DELETE FROM files WHERE repo_id=? AND path=?", (rid, relative))
 
 
 def index_repo(repo_root: str | Path | None = None, max_files: int | None = None, force: bool = False) -> dict[str, Any]:
+    # scan eligible files -> index_file each (hash-aware unless force/indexer-version bump) -> prune stored paths no longer selected -> record repo metadata
     root = repo_root_or_cwd(repo_root)
     conn = connect()
     rid = upsert_repo(conn, root)
@@ -335,6 +323,7 @@ def index_repo(repo_root: str | Path | None = None, max_files: int | None = None
 
 
 def status(repo_root: str | Path | None = None) -> dict[str, Any]:
+    # counts + staleness/missing scan + git/indexer-version drift -> single health snapshot for this repo_id
     root = repo_root_or_cwd(repo_root)
     conn = connect()
     rid = upsert_repo(conn, root)
@@ -384,9 +373,7 @@ def refresh(repo_root: str | Path | None = None, force: bool = False, max_files:
 def lookup(query: str, repo_root: str | Path | None = None, limit: int = 20) -> dict[str, Any]:
     root = repo_root_or_cwd(repo_root)
     conn = connect()
-    # Lookup is a hot, read-only path. The indexer owns repository metadata;
-    # probing branch/remote/status here can turn a millisecond FTS query into a
-    # client timeout on a large or network-backed worktree.
+    # hot read-only path -- no branch/remote/status probing here, that's the indexer's job; avoids turning a millisecond FTS query into a client timeout on a large/network worktree
     rid = repo_id(root)
     q = query.strip().replace('"', " ")
     rows: list[dict[str, Any]] = []
@@ -411,14 +398,13 @@ def lookup(query: str, repo_root: str | Path | None = None, limit: int = 20) -> 
                 rows.append(dict(row))
     like = f"%{query}%"
     symbols = [dict(row) for row in conn.execute("SELECT file_path, kind, name, signature, start_line, end_line FROM symbols WHERE repo_id=? AND (name LIKE ? OR signature LIKE ?) ORDER BY file_path, start_line, name LIMIT ?", (rid, like, like, limit)).fetchall()]
-    # A single stored-metadata read (#64) -- not a per-file rehash -- so a caller
-    # can judge staleness risk itself without the hot read-only path above
-    # paying any git/filesystem probing cost.
+    # single stored-metadata read, not a per-file rehash -- lets the caller judge staleness risk without this hot path paying any git/filesystem probing cost
     last_indexed_at = get_repo_meta(conn, rid, "last_indexed_at")
     return {"repo_root": str(root), "repo_id": rid, "query": query, "hits": rows, "symbols": symbols, "last_indexed_at": last_indexed_at}
 
 
 def file_context(path: str, repo_root: str | Path | None = None, around_line: int | None = None, context_lines: int = 40, symbol_limit: int = 25) -> dict[str, Any]:
+    # hash mismatch or unindexed -> force re-index this one file first, then read symbols/freshness/optional excerpt
     root = repo_root_or_cwd(repo_root)
     p = safe_path(path, root)
     conn = connect()
@@ -448,6 +434,7 @@ def file_context(path: str, repo_root: str | Path | None = None, around_line: in
 
 
 def file_excerpts(ranges: list[dict[str, Any]], repo_root: str | Path | None = None, max_chars: int = 20_000) -> dict[str, Any]:
+    # requested ranges, in order, consuming a shared max_chars budget -> stops early once the budget runs out
     root = repo_root_or_cwd(repo_root)
     remaining = max(256, int(max_chars))
     excerpts: list[dict[str, Any]] = []
@@ -478,6 +465,7 @@ def file_excerpts(ranges: list[dict[str, Any]], repo_root: str | Path | None = N
 
 
 def store_summary(path: str, summary: str, model: str, prompt_version: str, repo_root: str | Path | None = None) -> dict[str, Any]:
+    # unconditional overwrite -- no cache/hash check here, caller (summarize_file) decides whether to regenerate
     root = repo_root_or_cwd(repo_root)
     p = safe_path(path, root)
     conn = connect()
@@ -495,6 +483,7 @@ def store_summary(path: str, summary: str, model: str, prompt_version: str, repo
 
 
 def _prune_task_queries(conn: sqlite3.Connection, rid: str, keep: int) -> None:
+    # keeps only the most recent `keep` rows per repo; keep<=0 -> no-op (retention disabled)
     if keep <= 0:
         return
     conn.execute(
@@ -504,6 +493,7 @@ def _prune_task_queries(conn: sqlite3.Connection, rid: str, keep: int) -> None:
 
 
 def _bump_shown(conn: sqlite3.Connection, rid: str, term_key: str, path: str, heading_name: str | None) -> None:
+    # +1 shown_count for (term_key, path, heading) -- the baseline record_retrieval_feedback later compares follow-up pulls against
     conn.execute(
         """
         INSERT INTO retrieval_boost(repo_id, term_key, path, heading_name, shown_count, followed_count, corrected_count, last_updated_at)
@@ -517,6 +507,7 @@ def _bump_shown(conn: sqlite3.Connection, rid: str, term_key: str, path: str, he
 
 
 def _bump_feedback(conn: sqlite3.Connection, rid: str, term_key: str, path: str, heading_name: str | None, *, followed: bool) -> None:
+    # followed -> +1 followed_count, else -> +1 corrected_count, for this (term_key, path, heading)
     conn.execute(
         """
         INSERT INTO retrieval_boost(repo_id, term_key, path, heading_name, shown_count, followed_count, corrected_count, last_updated_at)
@@ -539,15 +530,8 @@ def record_task_query(
     sections: list[dict[str, Any]],
     tool_version: str,
 ) -> None:
-    """Observationally record one context_prepare call and its shown sections.
-
-    This is P4 (1.0.6): recording is config-gated (memory.record_context_queries,
-    default on) rather than the old hidden env var, and only compact metadata is
-    stored (terms/sections/version), not the full response payload. Each shown
-    section also bumps its retrieval_boost 'shown' count, which is the baseline
-    that record_retrieval_feedback later compares follow-up file_excerpts pulls
-    against. This function only records; it never changes ranking by itself.
-    """
+    # config-gated (memory.record_context_queries, default on) -> compact metadata insert + bump each shown section's retrieval_boost baseline
+    # observational only; this function never changes ranking by itself
     root = repo_root_or_cwd(repo_root)
     cfg = load_config().get("memory", {})
     if not bool(cfg.get("record_context_queries", True)):
@@ -568,14 +552,8 @@ def record_task_query(
 
 
 def record_retrieval_feedback(retrieval_id: str, repo_root: str | Path | None, requested_ranges: list[dict[str, Any]]) -> dict[str, Any]:
-    """Associate a follow-up file_excerpts pull with an earlier prepare_context call.
-
-    P5 (1.0.6) implicit success signal: if the requested range overlaps the section
-    that was suggested for that path, that's positive evidence (followed); a pull
-    elsewhere in the same file is weak correction evidence. A path the agent never
-    asked about again is not scored either way (silence is not treated as negative,
-    since token budgets and task flow make that ambiguous).
-    """
+    # retrieval_id -> earlier prepare_context's suggested sections -> requested range overlaps suggestion -> followed, else -> corrected
+    # a path never asked about again is scored neither way (silence isn't negative -- token budgets make that ambiguous)
     root = repo_root_or_cwd(repo_root)
     conn = connect()
     rid = repo_id(root)
@@ -600,9 +578,7 @@ def record_retrieval_feedback(retrieval_id: str, repo_root: str | Path | None, r
         s_end = int(suggestion.get("end_line") or s_start)
         overlap = not (end < s_start or start > s_end)
         if not overlap:
-            # A file can have more than one legitimate hit location; a file with a
-            # secondary hint listed alongside the primary excerpt (but too far away
-            # to share its window) still counts as followed if the pull lands on it.
+            # secondary hint line outside the primary excerpt's window still counts as followed if the pull lands on it
             overlap = any(start <= int(line) <= end for line in suggestion.get("hint_lines") or [])
         _bump_feedback(conn, rid, term_key, path, suggestion.get("matched_name"), followed=overlap)
         updates.append({"path": path, "overlap": overlap})
@@ -611,16 +587,8 @@ def record_retrieval_feedback(retrieval_id: str, repo_root: str | Path | None, r
 
 
 def get_boost_map(repo_root: str | Path | None, term_key: str, paths: list[str]) -> dict[tuple[str, str], int]:
-    """Batched, capped, recency-gated memory boost lookup for a set of candidate paths.
-
-    Returns {(path, heading_name_or_empty): boost}. A row only contributes once it
-    has been shown at least RETRIEVAL_BOOST_MIN_SHOWN times (avoids single-sample
-    noise) and only if it was last touched within the configured retention window
-    (a simple recency gate standing in for true time-decay: stale signals go cold
-    rather than being weighted down gradually). The result is additive net
-    evidence (followed - corrected), capped at RETRIEVAL_BOOST_CAP so memory can
-    only ever nudge ranking among near-ties, never outrank structural evidence.
-    """
+    # candidate paths -> {(path, heading): net boost}, only for rows shown >= min_shown times and touched within the retention window (recency gate, not gradual decay)
+    # net evidence (followed - corrected), capped at RETRIEVAL_BOOST_CAP -- can only nudge near-ties, never outrank structural evidence
     if not paths or not term_key:
         return {}
     root = repo_root_or_cwd(repo_root)
@@ -652,6 +620,7 @@ def get_boost_map(repo_root: str | Path | None, term_key: str, paths: list[str])
 
 
 def find_heading_symbol(path: str, heading: str, repo_root: str | Path | None = None) -> dict[str, Any] | None:
+    # exact heading name lookup in the already-indexed symbols table; None if not found/not indexed
     root = repo_root_or_cwd(repo_root)
     p = safe_path(path, root)
     conn = connect()
@@ -665,6 +634,7 @@ def find_heading_symbol(path: str, heading: str, repo_root: str | Path | None = 
 
 
 def get_section_summary(path: str, heading_name: str, repo_root: str | Path | None = None) -> dict[str, Any] | None:
+    # read-only cache lookup; caller compares source_hash to decide reuse vs regenerate
     root = repo_root_or_cwd(repo_root)
     p = safe_path(path, root)
     conn = connect()
@@ -688,13 +658,8 @@ def store_section_summary(
     prompt_version: str,
     repo_root: str | Path | None = None,
 ) -> dict[str, Any]:
-    """Cache one Ollama-generated section summary, keyed by whole-file content hash.
-
-    P6 (1.0.6): this is enrichment only. It adds supplemental FTS-searchable text
-    (kind='summary') so a query can find a section by paraphrase/keyword; it never
-    supplies or overrides a heading's start_line/end_line, which stay authoritative
-    from the deterministic extractor in repo_utils.extract_markdown_headings.
-    """
+    # caches one section summary keyed by whole-file content hash; adds FTS-searchable text only
+    # never overrides a heading's start_line/end_line -- those stay authoritative from repo_utils.extract_markdown_headings
     root = repo_root_or_cwd(repo_root)
     p = safe_path(path, root)
     conn = connect()
@@ -723,6 +688,7 @@ def store_section_summary(
 
 
 def record_change(summary: str, paths: list[str], repo_root: str | Path | None = None) -> dict[str, Any]:
+    # per path: exists -> force re-index, else -> delete stale indexed rows; then log the change event
     root = repo_root_or_cwd(repo_root)
     conn = connect()
     rid = upsert_repo(conn, root)
@@ -743,6 +709,7 @@ def record_change(summary: str, paths: list[str], repo_root: str | Path | None =
 
 
 def list_indexed_files(repo_root: str | Path | None = None) -> list[str]:
+    # all currently-indexed paths for this repo, sorted
     root = repo_root_or_cwd(repo_root)
     conn = connect()
     rid = repo_id(root)
@@ -750,17 +717,8 @@ def list_indexed_files(repo_root: str | Path | None = None) -> list[str]:
 
 
 def sample_symbols(repo_root: str | Path | None = None, *, kinds: tuple[str, ...] = ("function", "class", "method", "type"), limit: int = 20) -> list[dict[str, Any]]:
-    """Real indexed symbols, restricted to kinds that make sense as the
-    subject of a query (functions/classes/methods/types -- not headings or
-    other markup symbols).
-
-    Spreads the sample round-robin across distinct files rather than taking
-    the first `limit` rows by (file, line) order -- otherwise a repo with one
-    large or alphabetically-early file (e.g. a "_Legacy*"-prefixed directory)
-    would dominate the entire sample instead of representing the repo as a
-    whole. Still fully deterministic -- same repeated benchmark run (#9)
-    samples the same symbols every time, just not clustered in one file.
-    """
+    # real symbols of the given kinds -> round-robin sampled across distinct files, not just the first `limit` rows by (file, line)
+    # avoids one large/alphabetically-early file dominating the sample; still fully deterministic across repeated runs
     root = repo_root_or_cwd(repo_root)
     conn = connect()
     rid = repo_id(root)
@@ -785,6 +743,7 @@ def sample_symbols(repo_root: str | Path | None = None, *, kinds: tuple[str, ...
 
 
 def symbols_for_files(paths: list[str], repo_root: str | Path | None = None, max_per_file: int = 12) -> dict[str, list[dict[str, Any]]]:
+    # path -> up to max_per_file symbols, for read_first line-hint enrichment in mcp/memory.py
     root = repo_root_or_cwd(repo_root)
     conn = connect()
     rid = repo_id(root)
@@ -798,7 +757,7 @@ def symbols_for_files(paths: list[str], repo_root: str | Path | None = None, max
 
 
 def reset_repo(repo_root: str | Path | None = None) -> dict[str, Any]:
-    """Delete only the current repo's indexed context from the shared DB."""
+    # deletes only this repo_id's rows from the shared db; other indexed repos untouched
     root = repo_root_or_cwd(repo_root)
     conn = connect()
     rid = repo_id(root)
@@ -823,7 +782,7 @@ def reset_repo(repo_root: str | Path | None = None) -> dict[str, Any]:
 
 
 def reset_all() -> dict[str, Any]:
-    """Delete the whole repo context database; keep config and installed client setup."""
+    # deletes the shared sqlite db (+ wal/shm) entirely -- affects every indexed repo, not just the current one; config/client setup untouched
     path = db_path()
     deleted: list[str] = []
     errors: list[str] = []
