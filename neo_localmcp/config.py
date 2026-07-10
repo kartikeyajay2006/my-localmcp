@@ -69,6 +69,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "base_url": "http://127.0.0.1:11434",
         "summary_model": "qwen3-coder:30b",
         "fast_model": "qwen3:8b",
+        # optional semantic-rerank embedding model; None -> disabled (deterministic FTS ranking unchanged). Set via set-ollama to enable.
+        "embed_model": None,
         "connect_timeout_seconds": 3,
         "health_timeout_seconds": 5,
         "startup_timeout_seconds": 20,

@@ -13,11 +13,11 @@ from ..ollama_client import chat, ensure as ensure_ollama, start_service, status
 from ._shared import json_out
 
 
-def set_ollama(base_url: str | None = None, summary_model: str | None = None, fast_model: str | None = None, num_ctx: int | None = None) -> str:
+def set_ollama(base_url: str | None = None, summary_model: str | None = None, fast_model: str | None = None, embed_model: str | None = None, num_ctx: int | None = None) -> str:
     # writes model config to disk, then reports live daemon status
     # does NOT invalidate/regenerate existing summaries on a model swap (see CLAUDE.md known gaps, issue #8)
     ollama_cfg = installer_configure_models(
-        base_url=base_url, fast_model=fast_model, summary_model=summary_model, num_ctx=num_ctx,
+        base_url=base_url, fast_model=fast_model, summary_model=summary_model, embed_model=embed_model, num_ctx=num_ctx,
     )
     return json_out({"ok": True, "ollama": ollama_cfg, "status": ollama_state()})
 
