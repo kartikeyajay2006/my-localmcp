@@ -42,18 +42,21 @@ def cmd_model_status(args: argparse.Namespace) -> int:
 
 
 def cmd_serve(args: argparse.Namespace) -> int:
+    # local import: only `serve` needs the stdio MCP server, not every CLI subcommand
     from .mcp.server import main as server_main
     server_main()
     return 0
 
 
 def cmd_servers(args: argparse.Namespace) -> int:
+    # local import: only servers/stop need psutil's process-listing cost, same reasoning as mcp.system.doctor
     from . import mcp_server_lifecycle as lifecycle
     print(json.dumps({"servers": lifecycle.list_servers(prune=True)}, indent=2))
     return 0
 
 
 def cmd_stop(args: argparse.Namespace) -> int:
+    # pid/--all/--match-executable -> resolved target list -> graceful stop-file signal, force only as last resort
     from . import mcp_server_lifecycle as lifecycle
     targets = lifecycle.resolve_stop_targets(pid=args.pid, all_servers=args.all, match_executable=args.match_executable)
     if not targets:
@@ -87,7 +90,7 @@ def cmd_config_clients_status(args: argparse.Namespace) -> int:
 
 
 def cmd_remove_client(args: argparse.Namespace) -> int:
-    # Deprecated one-release compatibility alias for `config clients remove`.
+    # deprecated one-release alias -> print deprecation notice -> delegate to the real command
     print(json.dumps({
         "deprecated": True,
         "note": "`remove-client` is deprecated and will be removed in a future release; use `neo-localmcp config clients remove` instead.",
@@ -126,6 +129,7 @@ def cmd_reindex(args: argparse.Namespace) -> int:
 
 
 def cmd_reset_repo(args: argparse.Namespace) -> int:
+    # safety gate: no --yes -> refuse with a hint, never a silent no-op
     if not args.yes:
         print_json_text(json.dumps({"ok": False, "error": "Refusing to reset without --yes", "hint": "Run: neo-localmcp reset-repo --yes"}, indent=2))
         return 2
@@ -134,6 +138,7 @@ def cmd_reset_repo(args: argparse.Namespace) -> int:
 
 
 def cmd_reset_all(args: argparse.Namespace) -> int:
+    # same --yes safety gate as reset-repo, but destructive across every indexed repo in the shared db
     if not args.yes:
         print_json_text(json.dumps({"ok": False, "error": "Refusing to reset all repo context without --yes", "hint": "Run: neo-localmcp reset-all --yes"}, indent=2))
         return 2
@@ -147,6 +152,7 @@ def cmd_test_determinism(args: argparse.Namespace) -> int:
 
 
 def cmd_benchmark(args: argparse.Namespace) -> int:
+    # invalid group name -> caught ValueError -> error payload + exit 2, instead of a raw traceback
     try:
         report = run_benchmark(args.group, repo_root=args.repo_root, out_dir=args.out, queries_path=args.queries)
     except ValueError as exc:
@@ -167,6 +173,7 @@ def cmd_file(args: argparse.Namespace) -> int:
 
 
 def cmd_context(args: argparse.Namespace) -> int:
+    # --ollama-rank opts in, --no-ollama always wins -> deterministic by default in V1
     use_ollama = bool(args.ollama_rank) and not bool(args.no_ollama)
     print_json_text(memory.prepare_context(args.task, args.repo_root, token_budget=args.token_budget, max_files=args.max_files, use_ollama=use_ollama, model=args.model, output_format=args.format))
     return 0
@@ -183,6 +190,7 @@ def cmd_summarize(args: argparse.Namespace) -> int:
 
 
 def cmd_apply_patch(args: argparse.Namespace) -> int:
+    # "-" -> read patch from stdin, else -> read from the given file path
     patch_text = sys.stdin.read() if args.patch_file == "-" else open(args.patch_file, "r", encoding="utf-8").read()
     print_json_text(editing.apply_unified_patch(patch_text, args.repo_root, check_only=args.check_only))
     return 0
@@ -194,6 +202,7 @@ def cmd_record_change(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    # one subparser per command -> cmd_* handler; --client choices list is repeated across setup/remove/remove-client, keep them in sync if it ever changes
     parser = argparse.ArgumentParser(prog=IDENTITY.cli_name, description="neo-localmcp: deterministic repository context for Claude/Codex. Context lookup is fast/deterministic by default; Ollama ranking is opt-in.")
     sub = parser.add_subparsers(dest="command", required=True)
 
