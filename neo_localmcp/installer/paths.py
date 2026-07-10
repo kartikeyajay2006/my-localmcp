@@ -38,6 +38,7 @@ class ManagedPaths:
         environ: Mapping[str, str] | None = None,
         allow_test_root: bool = False,
     ) -> "ManagedPaths":
+        # NEO_LOCALMCP_HOME env override wins, else default to ~/.neo-localmcp; platform auto-detected unless given
         environment = os.environ if environ is None else environ
         resolved_home = Path.home() if home is None else Path(home)
         configured = environment.get("NEO_LOCALMCP_HOME")
@@ -112,6 +113,7 @@ class ManagedPaths:
 
     @property
     def durable_directories(self) -> tuple[Path, ...]:
+        # user data dirs, distinct from cache (which is safe to wipe/regenerate)
         return (self.memory, self.sqlite, self.config, self.clients, self.logs)
 
     def ensure_directories(self) -> None:
@@ -120,6 +122,7 @@ class ManagedPaths:
             directory.mkdir(parents=True, exist_ok=True)
 
     def validate_destructive_root(self) -> Path:
+        # guards before any rm-style operation: root must resolve, not be a filesystem root, not be $HOME, and (unless allow_test_root) must be literally named .neo-localmcp
         try:
             resolved = self.root.resolve(strict=False)
             resolved_home = self.home.resolve(strict=False)

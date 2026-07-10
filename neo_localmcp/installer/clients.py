@@ -90,14 +90,13 @@ def registrations_path(paths: ManagedPaths) -> Path:
 
 
 def read_registrations(paths: ManagedPaths) -> tuple[ClientRegistrationRecord, ...]:
+    # missing/corrupt/wrong-schema file -> empty tuple, never raises; a lifecycle op must not crash on bad registration records
     path = registrations_path(paths)
     if not path.exists():
         return ()
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        # Corrupt records must never crash a lifecycle operation; treat them as
-        # "no known registrations" rather than overwriting evidence blindly.
         return ()
     if not isinstance(payload, dict):
         return ()
@@ -116,6 +115,7 @@ def read_registrations(paths: ManagedPaths) -> tuple[ClientRegistrationRecord, .
 def write_registrations(
     paths: ManagedPaths, records: tuple[ClientRegistrationRecord, ...]
 ) -> None:
+    # tmp-write + os.replace -> atomic; full overwrite of the records list, not a merge
     path = registrations_path(paths)
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -128,7 +128,7 @@ def write_registrations(
 
 
 def delete_registrations(paths: ManagedPaths) -> None:
-    """Drop the records entirely (clean install / full wipe)."""
+    # drops the records file entirely -- clean install / full wipe only
     registrations_path(paths).unlink(missing_ok=True)
 
 
@@ -142,12 +142,14 @@ def _unescape_toml(value: str) -> str:
 
 
 def _codex_marked_region(text: str) -> str | None:
+    # text between the BEGIN/END markers, or None if either marker is missing
     if _BEGIN not in text or _END not in text:
         return None
     return text.split(_BEGIN, 1)[1].split(_END, 1)[0]
 
 
 def _detect_codex(paths: ManagedPaths) -> ClientRegistrationRecord | None:
+    # config.toml marked block present -> active registration record; absent -> None
     path = client_setup._codex_cli_config_path()
     if not path.exists():
         return None
@@ -172,6 +174,7 @@ def _claude_commands_dir() -> Path:
 
 
 def _detect_claude_code(paths: ManagedPaths) -> ClientRegistrationRecord | None:
+    # claude CLI available -> confirm via `claude mcp get`; else fall back to slash-commands-dir presence alone
     commands_dir = _claude_commands_dir()
     claude = client_setup.shutil.which("claude")
     if claude:
@@ -224,12 +227,7 @@ def _parse_claude_command(combined: str) -> str | None:
 
 
 def snapshot_clients(paths: ManagedPaths) -> tuple[ClientRegistrationRecord, ...]:
-    """Record which client surfaces are currently registered.
-
-    Codex and Claude Code are detected from disk / the ``claude`` CLI. Claude
-    Desktop cannot be probed (it is a manual extension install), so a prior
-    desktop record is carried forward rather than dropped.
-    """
+    # detects Codex/Claude Code from disk/CLI; Claude Desktop can't be probed (manual extension install), so a prior desktop record is carried forward instead of dropped
     prior = {record.client: record for record in read_registrations(paths)}
     detected: list[ClientRegistrationRecord] = []
     for detector in (_detect_claude_code, _detect_codex):
@@ -247,12 +245,7 @@ def snapshot_clients(paths: ManagedPaths) -> tuple[ClientRegistrationRecord, ...
 def record_selection(
     paths: ManagedPaths, clients: list[str]
 ) -> tuple[ClientRegistrationRecord, ...]:
-    """Persist an explicit surface selection (fresh install / clean install).
-
-    Unlike :func:`snapshot_clients`, this trusts the caller's chosen surfaces
-    rather than probing disk, so a brand-new install can record intent before any
-    registration exists.
-    """
+    # trusts the caller's chosen surfaces rather than probing disk (unlike snapshot_clients), so a fresh install can record intent before any registration exists
     records: list[ClientRegistrationRecord] = []
     for client in clients:
         key = client.lower().replace("_", "-")
@@ -272,7 +265,7 @@ def record_selection(
 def remove_active_registrations(
     paths: ManagedPaths, *, apply: bool = True
 ) -> tuple[dict[str, Any], ...]:
-    """Remove live client registrations while retaining the records."""
+    # removes only the live registrations; the records themselves stay on disk so a later reinstall can reconnect the same surfaces
     results: list[dict[str, Any]] = []
     for record in read_registrations(paths):
         if record.client == CLAUDE_DESKTOP:
@@ -291,7 +284,7 @@ def restore_recorded_registrations(
     neo_config_path: Path,
     apply: bool = True,
 ) -> tuple[dict[str, Any], ...]:
-    """Re-apply recorded registrations pointing at the promoted launcher."""
+    # re-applies each recorded registration pointing at the newly promoted launcher, then persists the updated (active, server_command) back to the records
     records = read_registrations(paths)
     results: list[dict[str, Any]] = []
     updated: list[ClientRegistrationRecord] = []
@@ -340,27 +333,9 @@ def apply_client_selection(
     on_event: Callable[[str, str], None] | None = None,
     label_fn: Callable[[str], str] | None = None,
 ) -> ClientChangeOutcome:
-    """Reconcile live client registrations to match ``target``.
-
-    Diffs ``target`` against the currently recorded clients, connects newly
-    selected surfaces via :func:`neo_localmcp.ai_client_config.setup_client`,
-    disconnects deselected ones via
-    :func:`neo_localmcp.ai_client_config.remove_client`, and persists the new
-    target via :func:`record_selection`. Used by both the wizard's "Manage
-    connected clients" operation and ``setup.py manage-clients`` so both
-    surfaces reconcile client registrations identically.
-
-    ``label_fn``, when given, maps a client key to a human-readable label for
-    the "Connecting"/"Disconnecting" event messages only (e.g. the wizard
-    passes its ``CLIENT_LABELS`` lookup so its console shows "Connecting
-    Claude Code ..." instead of the raw key). This module intentionally has
-    no ``CLIENT_LABELS`` of its own -- that mapping lives in
-    ``neo_localmcp.installer.wizard.backend`` and this module must not import
-    ``wizard/``, so callers that want labels supply the mapping themselves.
-    Defaults to the identity function (raw client keys), which is what
-    ``setup.py manage-clients`` wants for its CLI output.
-    """
-
+    # target vs currently recorded clients -> diff -> connect newcomers (setup_client), disconnect dropped ones (remove_client), persist the new target
+    # shared by the wizard's "Manage connected clients" and setup.py manage-clients, so both reconcile identically
+    # label_fn maps a client key to a display label for event messages only; this module can't import wizard/ (where CLIENT_LABELS lives), so callers supply their own mapping -- defaults to raw keys
     def emit(level: str, message: str) -> None:
         if on_event is not None:
             on_event(level, message)
@@ -415,7 +390,7 @@ def apply_client_selection(
 def verify_registrations(
     paths: ManagedPaths, *, expected_server_command: Path
 ) -> tuple[RegistrationCheck, ...]:
-    """Confirm each active registration names the managed launcher."""
+    # per recorded client, confirms its live config actually names the managed launcher path; Claude Desktop is always ok (not machine-verifiable)
     expected = str(expected_server_command)
     checks: list[RegistrationCheck] = []
     for record in read_registrations(paths):

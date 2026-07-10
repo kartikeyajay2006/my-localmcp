@@ -102,6 +102,7 @@ class SubprocessEnvCommandRunner:
 
 
 def _parse_version(text: str) -> tuple[int, ...]:
+    # "3.12.1\n" -> (3, 12, 1); stops at the first non-numeric chunk
     parts: list[int] = []
     for chunk in text.strip().split("."):
         digits = "".join(ch for ch in chunk if ch.isdigit())
@@ -166,15 +167,8 @@ class HandshakeProbe(Protocol):
 
 
 async def _probe_mcp_handshake_async(paths: ManagedPaths, *, timeout: float) -> tuple[bool, str]:
-    """Launch the managed server over real stdio and complete one MCP initialize.
-
-    Mirrors the proven pattern in tests/test_distribution.py /
-    tests/test_lifecycle.py: an isolated ``NEO_LOCALMCP_HOME`` so the probe never
-    touches the real managed registry, a hard ``asyncio.wait_for`` timeout around
-    the whole handshake, and cleanup in ``finally`` so a probe failure never
-    leaves a registered server PID behind.
-    """
-
+    # launches the managed server over real stdio and completes one MCP initialize, bounded by a hard asyncio timeout
+    # isolated NEO_LOCALMCP_HOME so the probe never touches the real managed registry; finally-block cleanup so a failed probe never leaves a stray registered PID
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
 
@@ -206,10 +200,7 @@ async def _probe_mcp_handshake_async(paths: ManagedPaths, *, timeout: float) -> 
     except Exception as exc:  # noqa: BLE001 - any handshake failure is a verification failure
         return False, f"MCP initialize handshake failed: {exc}"
     finally:
-        # The probed server self-unregisters on clean stdio teardown, but a
-        # probe that failed mid-handshake could leave an entry behind; sweep any
-        # new registry files introduced by this probe so verification never
-        # leaves a stray PID in the managed registry.
+        # server self-unregisters on clean teardown; sweep any new registry file this probe introduced in case a mid-handshake failure left one behind
         if registry_dir.exists():
             for entry in registry_dir.glob("*.json"):
                 if entry.name in before_pids:
@@ -240,6 +231,7 @@ def _check_python_floor(
     runner: CommandRunner,
     python_floor: tuple[int, int],
 ) -> VerificationCheck:
+    # installed interpreter's own reported version >= the required floor
     result = runner.run(
         (str(location_python), "-c", _INTERPRETER_SNIPPET),
         timeout=VALIDATION_COMMAND_TIMEOUT,
@@ -265,6 +257,7 @@ def _check_package_version(
     *,
     runner: CommandRunner,
 ) -> tuple[VerificationCheck, str | None]:
+    # installed package actually imports and (if expected_version given) matches it; no expected_version -> any reported version passes
     result = runner.run(
         (str(location_python), "-c", _PACKAGE_VERSION_SNIPPET),
         timeout=VALIDATION_COMMAND_TIMEOUT,
@@ -286,6 +279,7 @@ def _check_package_version(
 
 
 def _check_cli_resolution(paths: ManagedPaths) -> VerificationCheck:
+    # CLI launcher file exists at the expected managed path
     exists = paths.cli_executable.exists()
     return VerificationCheck(
         name="cli-resolution",
@@ -297,6 +291,7 @@ def _check_cli_resolution(paths: ManagedPaths) -> VerificationCheck:
 
 
 def _check_cli_startup(paths: ManagedPaths, *, runner: CommandRunner) -> VerificationCheck:
+    # `neo-localmcp --help` actually runs to completion
     result = runner.run(
         (str(paths.cli_executable), "--help"),
         timeout=VALIDATION_COMMAND_TIMEOUT,
@@ -312,6 +307,7 @@ def _check_cli_startup(paths: ManagedPaths, *, runner: CommandRunner) -> Verific
 
 
 def _check_server_import(location_python: Path, *, runner: CommandRunner) -> VerificationCheck:
+    # `import neo_localmcp.mcp.server` succeeds under the managed interpreter
     result = runner.run(
         (str(location_python), "-c", _SERVER_IMPORT_SNIPPET),
         timeout=VALIDATION_COMMAND_TIMEOUT,
@@ -332,6 +328,7 @@ def _check_mcp_handshake(
     handshake: HandshakeProbe,
     timeout: float,
 ) -> VerificationCheck:
+    # a real MCP client can complete initialize against the managed server; a raising probe counts as a failed handshake, not a crash
     try:
         ok, details = handshake(paths, timeout=timeout)
     except Exception as exc:  # noqa: BLE001 - a raising probe is a failed handshake, not a crash
@@ -348,6 +345,7 @@ def _check_mcp_handshake(
 def _resolve_canonical_paths(
     paths: ManagedPaths, *, env_runner: EnvCommandRunner
 ) -> tuple[CommandResult, dict[str, str] | None]:
+    # runs config.config_path()/default_db_path() under the managed env, returning (raw result, parsed {config_path, db_path} or None on any failure)
     env = {**os.environ, "NEO_LOCALMCP_HOME": str(paths.root)}
     result = env_runner.run(
         (str(paths.python_executable), "-c", _CANONICAL_PATHS_SNIPPET),
@@ -368,6 +366,7 @@ def _resolve_canonical_paths(
 def _check_canonical_config_path(
     paths: ManagedPaths, *, env_runner: EnvCommandRunner
 ) -> VerificationCheck:
+    # config.config_path() under managed env resolves to exactly paths.config/config.yaml -- catches NEO_LOCALMCP_HOME drift
     result, payload = _resolve_canonical_paths(paths, env_runner=env_runner)
     expected = str(paths.config / "config.yaml")
     if payload is None:
@@ -394,6 +393,7 @@ def _check_canonical_config_path(
 def _check_canonical_database_path(
     paths: ManagedPaths, *, env_runner: EnvCommandRunner
 ) -> VerificationCheck:
+    # same drift check as canonical-config-path, for the sqlite db path
     result, payload = _resolve_canonical_paths(paths, env_runner=env_runner)
     expected = str(paths.sqlite / "repo-context.sqlite")
     if payload is None:
@@ -418,6 +418,7 @@ def _check_canonical_database_path(
 
 
 def _check_client_targets(paths: ManagedPaths, expected_clients: frozenset[str]) -> VerificationCheck:
+    # every expected client is both registered and pointing at the promoted launcher (not a stale one)
     if not expected_clients:
         return VerificationCheck(
             name="client-targets",
@@ -453,6 +454,7 @@ def _check_client_targets(paths: ManagedPaths, expected_clients: frozenset[str])
 
 
 def _check_doctor(paths: ManagedPaths, *, env_runner: EnvCommandRunner) -> VerificationCheck:
+    # runs `neo-localmcp doctor` under the managed env and inspects its output
     env = {**os.environ, "NEO_LOCALMCP_HOME": str(paths.root)}
     result = env_runner.run(
         (str(paths.python_executable), "-c", _DOCTOR_SNIPPET),
@@ -478,13 +480,8 @@ def _check_doctor(paths: ManagedPaths, *, env_runner: EnvCommandRunner) -> Verif
             details=f"doctor output was not valid JSON: {result.stdout[:200]!r}",
             recovery="Run `neo-localmcp doctor` directly to inspect the failure.",
         )
-    # Inspect the substantive, Ollama-independent health signals doctor actually
-    # returns rather than trusting its top-level ``ok`` (which is hardcoded True
-    # in system.doctor() regardless of sub-check health, so it would make this a
-    # no-op required check). Ollama reachability is deliberately NOT required
-    # here: deterministic retrieval must never depend on Ollama, so an
-    # unreachable/cold model surfaces only through the separate warning-only
-    # ``ollama-optional`` check, never as an installation failure.
+    # inspects specific Ollama-independent signals, not doctor's top-level `ok` (hardcoded True regardless of sub-check health, which would make this a no-op check)
+    # Ollama reachability deliberately excluded here -- deterministic retrieval must never depend on Ollama; that's the separate warning-only ollama-optional check
     required_signals = {
         "config_exists": payload.get("config_exists"),
         "db_open": payload.get("db_open"),
@@ -511,6 +508,7 @@ def _check_doctor(paths: ManagedPaths, *, env_runner: EnvCommandRunner) -> Verif
 
 
 def _check_ollama_optional(*, status_fn: Callable[[], dict] | None = None) -> VerificationCheck:
+    # warning-only: ready/model_cold/disabled all count as ok; never fails the overall install
     from .. import ollama_client
 
     fn = status_fn or ollama_client.status
@@ -537,6 +535,7 @@ def _check_ollama_optional(*, status_fn: Callable[[], dict] | None = None) -> Ve
 
 
 def _check_claude_desktop_manual(paths: ManagedPaths) -> VerificationCheck:
+    # warning-only reminder: Desktop was selected but always needs its manual .mcpb install step
     records = read_registrations(paths)
     desktop = next((record for record in records if record.client == CLAUDE_DESKTOP), None)
     if desktop is None:
@@ -576,14 +575,8 @@ def verify_installation(
     python_floor: tuple[int, int] = PYTHON_FLOOR,
     ollama_status_fn: Callable[[], dict] | None = None,
 ) -> VerificationReport:
-    """Verify the installed CLI, MCP endpoint, paths, clients, and doctor.
-
-    Re-probes the artifacts at ``paths`` directly rather than trusting a prior
-    build/promote result, using bounded subprocess calls against the managed
-    interpreter/executables. Required checks failing makes the report unsuccessful;
-    warning-only checks (optional Ollama, manual Claude Desktop) never do.
-    """
-
+    # runs every required + warning-only check in sequence -> report.ok is true iff all required checks passed (warnings never affect it)
+    # re-probes the installed artifacts directly via bounded subprocess calls, never trusts that a prior build/promote step succeeded
     command_runner = runner or SubprocessCommandRunner()
     env_command_runner = env_runner or SubprocessEnvCommandRunner()
     handshake_probe = handshake or real_mcp_handshake_probe

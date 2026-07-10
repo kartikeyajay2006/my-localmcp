@@ -87,6 +87,7 @@ class PsutilProcessProvider:
 
     @staticmethod
     def _process(identity: ProcessIdentity) -> psutil.Process | None:
+        # PID-reuse guard: only resolves if the live process's create_time still matches the identity's recorded one
         try:
             process = psutil.Process(identity.pid)
             if abs(process.create_time() - identity.create_time) > CREATE_TIME_TOLERANCE_SECONDS:
@@ -98,6 +99,7 @@ class PsutilProcessProvider:
             return None
 
     def snapshots(self) -> tuple[ProcessSnapshot, ...]:
+        # every running process on the system -> ProcessSnapshot; inaccessible (permission-denied) processes are still included, just flagged accessible=False
         snapshots: list[ProcessSnapshot] = []
         for process in psutil.process_iter(attrs=("pid", "ppid", "create_time", "name")):
             info = process.info
@@ -183,10 +185,12 @@ class PsutilProcessProvider:
 
 
 def _normalized(value: str | Path) -> str:
+    # forward-slash, no trailing slash, casefolded -- for cross-platform path/command-line string comparison
     return str(value).replace("\\", "/").rstrip("/").casefold()
 
 
 def _is_below(executable: str, root: Path) -> bool:
+    # executable path == root, or nested under it
     executable_value = _normalized(executable)
     root_value = _normalized(root.resolve(strict=False))
     return executable_value == root_value or executable_value.startswith(root_value + "/")
@@ -195,6 +199,7 @@ def _is_below(executable: str, root: Path) -> bool:
 def _registered_identities(
     registrations: Iterable[Mapping[str, Any]],
 ) -> dict[ProcessIdentity, str]:
+    # registration records -> {identity: source}, skipping any record missing a valid pid/create_time
     identities: dict[ProcessIdentity, str] = {}
     for registration in registrations:
         try:
@@ -211,6 +216,7 @@ def _registered_identities(
 def _registered_command_roots(
     registrations: Iterable[Mapping[str, Any]],
 ) -> tuple[tuple[str, str], ...]:
+    # registration command_root (absolute, containing "neo-localmcp") -> (normalized_root, source) pairs, for matching a live process's command line
     roots: list[tuple[str, str]] = []
     for registration in registrations:
         raw_root = registration.get("command_root")
@@ -234,6 +240,8 @@ def discover_owned_processes(
     *,
     provider: ProcessProvider | None = None,
 ) -> tuple[OwnedProcess, ...]:
+    # every live process -> ownership evidence, checked in priority order: registered identity -> executable under paths.venv -> command line matching a registered command_root
+    # then a breadth-first descendant pass: any child of an already-owned process is owned too (same source, incrementing depth), repeated until no new owner is found
     process_provider = provider or PsutilProcessProvider()
     registration_list = tuple(registrations)
     registered = _registered_identities(registration_list)
@@ -304,6 +312,7 @@ def stop_owned_processes(
     graceful_request: Callable[[int], None] | None = None,
     timeout: float = 12.0,
 ) -> ShutdownResult:
+    # escalation ladder: already-stopped -> graceful stop-file request (registered processes only) + wait -> terminate() survivors (deepest descendants first) + wait -> kill() any still alive + wait
     from neo_localmcp import mcp_server_lifecycle as lifecycle
 
     process_provider = provider or PsutilProcessProvider()
