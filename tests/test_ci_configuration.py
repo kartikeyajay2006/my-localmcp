@@ -45,6 +45,17 @@ def test_installer_bucket_and_lifecycle_job_skip_on_non_installer_changes() -> N
     still runs. Any change to installer code -- or to this workflow file
     itself, so the skip logic can't silently go unverified by its own future
     edits -- must still run everything, same as before this optimization.
+
+    Also regression for a live bug caught during manual verification: the
+    `installer` filter must live in its OWN dorny/paths-filter step, separate
+    from `code`'s. predicate-quantifier is step-wide, not per-filter -- `code`
+    needs 'every' (AND of negatives, to mean "not any of these"), but
+    `installer`'s OR-style alternatives need the default 'some'. Combined in
+    one step under 'every', a file would have to match all 5 installer
+    patterns simultaneously (impossible), silently making `installer` always
+    false -- confirmed live: the very first merge of this mechanism skipped
+    the installer bucket even on a commit that touched the workflow file
+    itself, one of the filter's own literal patterns.
     """
     workflow = (ROOT / ".github" / "workflows" / "setup-v2.yml").read_text(encoding="utf-8")
 
@@ -57,13 +68,24 @@ def test_installer_bucket_and_lifecycle_job_skip_on_non_installer_changes() -> N
     ):
         assert path in workflow, f"installer filter should list {path}"
 
+    # The `installer` filter must not share a paths-filter step with `code`:
+    # each `id: changes` step (fast + slow) must have its own
+    # `predicate-quantifier: 'every'` scoped only to `code`, immediately
+    # followed by a separate `id: installer_changes` step with no
+    # predicate-quantifier override (default 'some') for `installer`.
+    assert workflow.count("id: changes") == 2, "expected one 'changes' filter step per job (fast, slow)"
+    assert workflow.count("id: installer_changes") == 2, "expected one 'installer_changes' filter step per job (fast, slow)"
+    assert workflow.count("predicate-quantifier: 'every'") == 2, (
+        "'every' must apply only to the code-only 'changes' steps, not to installer_changes"
+    )
+
     # Fast job: only the installer-area matrix combo is gated by the extra
     # clause; retrieval/ollama/other are untouched by it.
-    fast_gate = "matrix.area != 'installer' || steps.changes.outputs.installer == 'true'"
+    fast_gate = "matrix.area != 'installer' || steps.installer_changes.outputs.installer == 'true'"
     assert workflow.count(fast_gate) == 2, "expected the fast job's Install + Fast-tests steps to share this gate"
 
     # Slow job: the whole job is installer-only, so all 3 steps share the same gate.
-    slow_gate = "steps.changes.outputs.code == 'true' && steps.changes.outputs.installer == 'true'"
+    slow_gate = "steps.changes.outputs.code == 'true' && steps.installer_changes.outputs.installer == 'true'"
     assert workflow.count(slow_gate) == 3, "expected all 3 slow-job steps to share this gate"
 
 
