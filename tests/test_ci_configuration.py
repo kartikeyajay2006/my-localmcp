@@ -38,6 +38,35 @@ def test_real_stdio_integration_is_isolated_from_xdist() -> None:
     assert "pytest.mark.serial" in decorators
 
 
+def test_installer_bucket_and_lifecycle_job_skip_on_non_installer_changes() -> None:
+    """Regression for #48 phase 1: a PR touching only non-installer code should
+    skip the fast job's `installer` bucket and the entire `slow`/lifecycle job
+    (every test in it is an installer lifecycle test), while every other area
+    still runs. Any change to installer code -- or to this workflow file
+    itself, so the skip logic can't silently go unverified by its own future
+    edits -- must still run everything, same as before this optimization.
+    """
+    workflow = (ROOT / ".github" / "workflows" / "setup-v2.yml").read_text(encoding="utf-8")
+
+    for path in (
+        "'setup.py'",
+        "'neo_localmcp/installer/**'",
+        "'packaging/claude-desktop/**'",
+        "'tests/installer/**'",
+        "'.github/workflows/setup-v2.yml'",
+    ):
+        assert path in workflow, f"installer filter should list {path}"
+
+    # Fast job: only the installer-area matrix combo is gated by the extra
+    # clause; retrieval/ollama/other are untouched by it.
+    fast_gate = "matrix.area != 'installer' || steps.changes.outputs.installer == 'true'"
+    assert workflow.count(fast_gate) == 2, "expected the fast job's Install + Fast-tests steps to share this gate"
+
+    # Slow job: the whole job is installer-only, so all 3 steps share the same gate.
+    slow_gate = "steps.changes.outputs.code == 'true' && steps.changes.outputs.installer == 'true'"
+    assert workflow.count(slow_gate) == 3, "expected all 3 slow-job steps to share this gate"
+
+
 def _collect_node_ids(*args: str) -> set[str]:
     result = subprocess.run(
         [sys.executable, "-m", "pytest", "--collect-only", "-q", *args],
