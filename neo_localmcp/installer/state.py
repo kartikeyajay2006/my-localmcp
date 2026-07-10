@@ -29,6 +29,7 @@ class MetadataMissingError(MetadataError):
 
 
 def _read_metadata(paths: ManagedPaths) -> dict[str, Any] | None:
+    # no file -> None (not an error); unparseable/wrong-schema/bad-status -> MetadataCorruptError, never silently trusted
     if not paths.install_metadata.exists():
         return None
     try:
@@ -49,6 +50,7 @@ def _read_metadata(paths: ManagedPaths) -> dict[str, Any] | None:
 
 
 def _write_metadata(paths: ManagedPaths, payload: dict[str, Any]) -> dict[str, Any]:
+    # tmp-write + os.replace -> atomic; a crash mid-write can never leave half-written metadata
     paths.install_metadata.parent.mkdir(parents=True, exist_ok=True)
     temporary = paths.install_metadata.with_suffix(".json.tmp")
     temporary.write_text(
@@ -68,6 +70,7 @@ def begin_operation(
     clients: tuple[str, ...] = (),
     now: float | None = None,
 ) -> dict[str, Any]:
+    # writes a fresh "in_progress" record; validates any existing metadata first (raises if corrupt) before overwriting it
     if paths.install_metadata.exists():
         _read_metadata(paths)
     started_at = time.time() if now is None else float(now)
@@ -92,6 +95,7 @@ def complete_operation(
     clients: tuple[str, ...] | None = None,
     now: float | None = None,
 ) -> dict[str, Any]:
+    # in_progress -> succeeded; requires an existing begin_operation record, raises MetadataMissingError otherwise
     payload = _read_metadata(paths)
     if payload is None:
         raise MetadataMissingError("No install operation metadata exists")
@@ -111,6 +115,7 @@ def fail_operation(
     error: str,
     now: float | None = None,
 ) -> dict[str, Any]:
+    # in_progress -> failed, with the error recorded; same missing-record guard as complete_operation
     payload = _read_metadata(paths)
     if payload is None:
         raise MetadataMissingError("No install operation metadata exists")
@@ -121,6 +126,7 @@ def fail_operation(
 
 
 def _legacy_paths(paths: ManagedPaths) -> tuple[str, ...]:
+    # any pre-managed-root layout artifacts (old flat files/dirs, versioned venv dirs) still present under root
     candidates = (
         "config.yaml",
         "repo-context.sqlite",
@@ -144,6 +150,7 @@ def _legacy_paths(paths: ManagedPaths) -> tuple[str, ...]:
 
 
 def _runtime_imports(paths: ManagedPaths) -> bool:
+    # spawns the managed venv's python and tries `import neo_localmcp`; any failure (missing binary, bad venv, timeout) -> False, never raises
     try:
         result = subprocess.run(
             [
@@ -164,6 +171,8 @@ def _runtime_imports(paths: ManagedPaths) -> bool:
 
 
 def detect_state(paths: ManagedPaths) -> DetectedState:
+    # root missing -> ABSENT; corrupt/in-progress metadata -> PARTIAL_OPERATION; legacy artifacts -> LEGACY_LAYOUT
+    # venv present -> probe python+import -> BROKEN_RUNTIME or HEALTHY; else durable dirs present -> DATA_ONLY; else -> ABSENT (empty root)
     if not paths.root.exists():
         return DetectedState(
             kind=InstallStateKind.ABSENT,

@@ -21,20 +21,14 @@ from ._shared import _format_model_timing, _slim_status_for_nesting, json_out
 
 
 def _cap_keyword_terms(raw: str, max_terms: int = 8) -> str:
-    """Cap by comma-separated term count, not character count.
-
-    A generation-length cap (see ollama_client.chat's num_predict) is the primary
-    defense against a runaway response, but this is the belt-and-suspenders layer:
-    even a response that stays under the token cap could still cram far more than
-    the requested "at most 8" terms into a shorter space. Enforce the actual shape
-    regardless of what the model produced.
-    """
+    # caps by term count, not char count -- belt-and-suspenders on top of chat()'s num_predict cap
+    # a response can still cram >8 terms into a short string even under the token cap
     terms = [t.strip() for t in raw.split(",") if t.strip()]
     return ", ".join(terms[:max_terms])
 
 
 def _split_summary_keywords(text: str) -> tuple[str, str]:
-    """Best-effort split of a 'summary: ...\\nkeywords: ...' style Ollama response."""
+    # best-effort split of "summary: ...\nkeywords: ..." style model response
     summary_match = re.search(r"summary\s*:\s*(.+?)(?:\n\s*keywords\s*:|\Z)", text, re.IGNORECASE | re.DOTALL)
     keywords_match = re.search(r"keywords\s*:\s*(.+)", text, re.IGNORECASE | re.DOTALL)
     summary = (summary_match.group(1).strip() if summary_match else text.strip())[:2000]
@@ -44,6 +38,8 @@ def _split_summary_keywords(text: str) -> tuple[str, str]:
 
 
 def _summarize_section(path: str, heading: str, root: Path, model: str | None) -> str:
+    # heading -> hash-checked cache lookup -> (miss) excerpt + summarize + store
+    # cache never determines heading line boundaries; those stay authoritative from the deterministic extractor, this only adds searchable summary text
     sym = repo_memory.find_heading_symbol(path, heading, root)
     if not sym:
         return json_out({"ok": False, "error": f"heading not found: {heading}", "path": path})
@@ -89,11 +85,10 @@ Section text:
 
 
 def summarize_file(path: str, repo_root: str = "auto", model: str | None = None, heading: str | None = None) -> str:
+    # heading present -> delegate to section-scoped path (cached); otherwise whole-file summary below
+    # unlike _summarize_section, this whole-file path has no cache check -- always regenerates on call
     root = repo_root_or_cwd(repo_root)
     if heading:
-        # P6 (1.0.6): section-scoped enrichment. This never determines a heading's
-        # line boundaries -- those stay authoritative from the deterministic
-        # extractor -- it only adds cached, keyword-searchable summary text.
         return _summarize_section(path, heading, root, model)
     p = safe_path(path, root)
     ctx = repo_memory.file_context(rel(p, root), root)
@@ -123,6 +118,8 @@ Current source file:
 
 
 def apply_unified_patch(patch_text: str, repo_root: str = "auto", check_only: bool = False) -> str:
+    # the only writer in the whole tool surface: patch text -> git apply --check -> (only if check_only=False) actually apply -> record_change
+    # check runs unconditionally, even when check_only=True, so callers always know if the patch is valid before deciding to apply
     root = repo_root_or_cwd(repo_root)
     if not patch_text.strip():
         return json_out({"ok": False, "error": "patch_text is empty"})

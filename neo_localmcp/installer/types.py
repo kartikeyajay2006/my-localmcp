@@ -43,4 +43,5 @@ class DetectedState:
     details: Mapping[str, Any]
 
     def __post_init__(self) -> None:
+        # object.__setattr__ bypasses frozen=True to make `details` itself immutable (MappingProxyType), not just the dataclass's own fields
         object.__setattr__(self, "details", MappingProxyType(dict(self.details)))

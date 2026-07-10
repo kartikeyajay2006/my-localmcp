@@ -132,6 +132,7 @@ _DRY_RUN_PLANS: dict[str, tuple[str, ...]] = {
 
 
 def _plan_key(operation: str, *, clean: bool = False, delete_memory: bool = False) -> str:
+    # operation + destructive flag -> the matching _DRY_RUN_PLANS key
     if operation == "install" and clean:
         return "install --clean"
     if operation == "uninstall" and delete_memory:
@@ -140,13 +141,7 @@ def _plan_key(operation: str, *, clean: bool = False, delete_memory: bool = Fals
 
 
 def dry_run_plan(operation: str, *, clean: bool = False, delete_memory: bool = False) -> tuple[str, tuple[str, ...]]:
-    """The resolved plan key and its ordered preview steps for a `--dry-run`.
-
-    Public entry point over `_plan_key`/`_DRY_RUN_PLANS` (#36) -- the wizard
-    used to reach into both directly, with no stability contract. Both this
-    module's own `_render_dry_run` and the wizard's dry-run path call this
-    instead of touching the private tables themselves.
-    """
+    # stable public entry point over _plan_key/_DRY_RUN_PLANS -- both this module's _render_dry_run and the wizard's dry-run path call this instead of touching the private tables directly
     key = _plan_key(operation, clean=clean, delete_memory=delete_memory)
     return key, _DRY_RUN_PLANS[key]
 
@@ -157,6 +152,8 @@ def dry_run_plan(operation: str, *, clean: bool = False, delete_memory: bool = F
 
 
 def build_parser() -> argparse.ArgumentParser:
+    # one subparser per lifecycle op: install / reinstall / uninstall / config-ollama / manage-clients.
+    # per-flag help strings carry the details; args.operation is dispatched via if-chains below.
     parser = argparse.ArgumentParser(
         prog="setup.py",
         description=(
@@ -257,6 +254,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _is_noninteractive() -> bool:
+    # no real TTY on stdin (or can't tell) -> treat as non-interactive, the safer default
     try:
         return not sys.stdin.isatty()
     except (AttributeError, ValueError):
@@ -264,9 +262,7 @@ def _is_noninteractive() -> bool:
 
 
 def _destructive_refusal(args: argparse.Namespace) -> str | None:
-    """Return a refusal message if a destructive flag needs --yes but lacks it
-    while running non-interactively, else None. Runs before any mutation."""
-
+    # --clean/--delete-memory + no --yes + non-interactive -> refusal message; runs before any mutation, else None
     if args.operation == "install" and getattr(args, "clean", False):
         if not args.yes and _is_noninteractive():
             return (
@@ -290,6 +286,7 @@ def _destructive_refusal(args: argparse.Namespace) -> str | None:
 
 
 def _render_dry_run(paths: ManagedPaths, args: argparse.Namespace, reporter: Reporter) -> None:
+    # presentation only: detect_state + the static dry_run_plan steps, printed via reporter; makes no changes
     state = detect_state(paths)
     reporter.info(f"DRY RUN: no changes will be made for '{args.operation}'.")
     reporter.info(f"Managed root: {paths.root}")
@@ -326,13 +323,7 @@ def _source_version() -> str:
 
 
 def build_context(reporter: Reporter | None = None) -> OperationContext:
-    """Construct a real OperationContext from real sources.
-
-    ``source_root`` is this checkout (the directory containing setup.py),
-    ``python_executable`` is the interpreter currently running this script, and
-    ``confirm`` is the real interactive/--yes confirmation gate.
-    """
-
+    # real sources for every field: this checkout as source_root, the running interpreter, real confirm_full_wipe gate -- no fakes/seams overridden
     return OperationContext(
         paths=ManagedPaths.from_environment(),
         source_root=_source_root(),
@@ -396,6 +387,7 @@ def _run_manage_clients(
 
 
 def main(argv: list[str] | None = None) -> int:
+    # parse -> destructive-flag refusal check (before any mutation) -> build context -> dry-run short-circuit -> dispatch to the matching operation
     parser = build_parser()
     args = parser.parse_args(argv)
 

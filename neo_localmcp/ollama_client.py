@@ -30,8 +30,7 @@ class SupervisorLockTimeout(RuntimeError):
 
 
 class _SupervisorLock:
-    """Small cross-process lock using atomic directory creation."""
-
+    # cross-process lock via atomic mkdir; a lock dir older than 2x timeout (min 120s) is presumed abandoned and reclaimed
     def __init__(self, timeout: float):
         self.timeout = timeout
 
@@ -64,6 +63,7 @@ def _cfg() -> dict[str, Any]:
 
 
 def _model_for(purpose: str, override: str | None = None) -> str:
+    # override wins; else purpose "ranking"/"query" -> fast_model, else -> summary_model (fallback fast_model, then a hardcoded default)
     cfg = _cfg()
     if override:
         return override
@@ -71,7 +71,7 @@ def _model_for(purpose: str, override: str | None = None) -> str:
 
 
 def _resolve_installed_model(requested: str, installed: list[str]) -> str:
-    """Resolve Ollama's conventional omitted ``:latest`` tag without guessing tags."""
+    # requested has no tag -> try exact match, then "requested:latest", then a single unambiguous tag match; never guesses among multiple tags
     if requested in installed or ":" in requested:
         return requested
     latest = f"{requested}:latest"
@@ -106,6 +106,7 @@ def _request_json(
     body: dict[str, Any] | None = None,
     timeout: float | None = None,
 ) -> tuple[int, dict[str, Any]]:
+    # thin sync HTTP wrapper over Ollama's API; HTTPError is caught and returned as (status, payload) same as a success, so callers only branch on the status code
     base = ollama_base_url()
     data = json.dumps(body).encode("utf-8") if body is not None else None
     req = urllib.request.Request(
@@ -126,13 +127,7 @@ def _request_json(
 
 
 def model_sizes(timeout: float = 5) -> dict[str, int]:
-    """Best-effort per-model size in bytes from `/api/tags`.
-
-    Public, narrow-purpose wrapper over `_request_json` (#36) -- the wizard
-    used to call `_request_json` directly for this, reaching past this
-    module's intended API with no stability contract. Never raises: an empty
-    result just means sizes aren't shown, not that the caller should fail.
-    """
+    # best-effort per-model size in bytes from /api/tags; never raises -- an empty result just means sizes aren't shown
     try:
         code, tags = _request_json("/api/tags", timeout=timeout)
         if code != 200:
@@ -153,18 +148,14 @@ def _elapsed(started: float) -> float:
 
 
 def _result(ok: bool, base: dict[str, Any] | None = None, **fields: Any) -> dict[str, Any]:
-    """{"ok": ok} merged with an optional base status dict, then per-call
-    overrides -- removes the repeated `{"ok": ..., **current, "state": ...}`
-    dict literal across ping/start_service/warm/ensure/unload_model (#30,
-    6.1). Purely mechanical: every call site keeps exactly the field set it
-    had before, just built through one path instead of ad hoc dict literals.
-    """
+    # {"ok": ok} + optional base status dict + per-call field overrides -- shared payload builder used by every ollama op below
     result: dict[str, Any] = {"ok": ok, **(base or {})}
     result.update(fields)
     return result
 
 
 def status(model: str | None = None, purpose: str = "ranking") -> dict[str, Any]:
+    # disabled in config -> short-circuit; else version+tags+ps calls -> resolve requested model's :latest tag -> state: ready/model_cold/model_missing/unreachable/timed_out
     cfg = _cfg()
     base = ollama_base_url()
     chosen = _model_for(purpose, model)
@@ -214,11 +205,13 @@ def status(model: str | None = None, purpose: str = "ranking") -> dict[str, Any]
 
 
 def ping() -> dict[str, Any]:
+    # cheap reachability check: any state other than disabled/unreachable/timed_out/failed counts as ok
     current = status()
     return _result(current.get("state") not in {"disabled", "unreachable", "timed_out", "failed"}, current)
 
 
 def start_service() -> dict[str, Any]:
+    # remote base_url -> refuse (can't start someone else's service); local + already reachable -> no-op; else spawn `ollama serve` detached and poll until reachable or timeout
     base = ollama_base_url()
     if not _is_local(base):
         return {"ok": False, "state": "unreachable", "base_url": base, "error": "remote Ollama services cannot be started by neo-localmcp"}
@@ -247,6 +240,7 @@ def start_service() -> dict[str, Any]:
 
 
 def stop_service() -> dict[str, Any]:
+    # ownership check: only stops a process this module itself started (recorded owned_pid + matching base_url), never someone else's Ollama
     state = _read_state()
     pid = int(state.get("owned_pid") or 0)
     if not pid or state.get("base_url") != ollama_base_url():
@@ -260,6 +254,7 @@ def stop_service() -> dict[str, Any]:
 
 
 def warm(model: str | None = None, purpose: str = "ranking") -> dict[str, Any]:
+    # already ready -> no-op; not model_cold (e.g. missing/unreachable) -> skip, nothing to warm; else -> empty-prompt generate call to force the model into memory
     chosen = _model_for(purpose, model)
     cfg = _cfg()
     current = status(chosen, purpose)
@@ -287,6 +282,7 @@ def warm(model: str | None = None, purpose: str = "ranking") -> dict[str, Any]:
 
 
 def ensure(model: str | None = None, purpose: str = "ranking", auto_start: bool = True) -> dict[str, Any]:
+    # recent failure -> circuit breaker open, refuse fast instead of retrying; else under lock: status -> auto-start if unreachable -> warm if cold -> record ready/failed state for next call's circuit check
     cfg = _cfg()
     cooldown = float(cfg.get("failure_cooldown_seconds", 30))
     state = _read_state()
@@ -317,12 +313,7 @@ def ensure(model: str | None = None, purpose: str = "ranking", auto_start: bool 
 
 
 def unload_model(model: str, timeout: float | None = None) -> dict[str, Any]:
-    """Request Ollama unload a named model via ``keep_alive: 0``. Never raises.
-
-    Connection refused, timeout, missing model, and HTTP error all degrade to a
-    non-``ok`` result instead of propagating, so lifecycle operations (reinstall/
-    uninstall) can treat unload as best-effort and never block on it.
-    """
+    # keep_alive: 0 -> Ollama drops the model from memory; never raises, so reinstall/uninstall lifecycle can treat this as best-effort and never block on it
     bounded = float(timeout) if timeout is not None else float(_cfg().get("health_timeout_seconds", 5))
     started = time.monotonic()
     try:
@@ -340,11 +331,13 @@ def unload_model(model: str, timeout: float | None = None) -> dict[str, Any]:
 
 
 def unload(model: str | None = None, purpose: str = "ranking") -> dict[str, Any]:
+    # purpose -> resolved model name -> unload_model
     chosen = _model_for(purpose, model)
     return unload_model(chosen)
 
 
 def chat(prompt: str, model: str | None = None, purpose: str = "summary", num_predict: int | None = None) -> dict[str, Any]:
+    # ensure model ready -> not ready -> fail fast with readiness's own error/state; else -> /api/generate, retrying once on a 503
     cfg = _cfg()
     chosen = _model_for(purpose, model)
     readiness = ensure(chosen, purpose)
@@ -354,9 +347,7 @@ def chat(prompt: str, model: str | None = None, purpose: str = "summary", num_pr
         return _result(False, model=chosen, purpose=purpose, error=readiness.get("error") or readiness.get("state"), timed_out=readiness.get("state") == "timed_out", timeout_seconds=timeout_seconds, ollama_status=readiness)
     options: dict[str, Any] = {"temperature": float(cfg.get("temperature", 0.1)), "num_ctx": int(cfg.get("fast_num_ctx", 8192) if purpose in {"ranking", "query"} else cfg.get("num_ctx", 32768))}
     if num_predict is not None:
-        # Bounds worst-case generation length/latency. Without this a model that
-        # ignores a length instruction in the prompt (e.g. "keywords: at most 8")
-        # can run to the model's own max output before returning at all.
+        # bounds worst-case generation length/latency if the model ignores a prompt length instruction (e.g. "at most 8 keywords")
         options["num_predict"] = int(num_predict)
     body = {
         "model": chosen, "prompt": prompt, "stream": False,

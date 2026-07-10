@@ -16,6 +16,7 @@ from .repo_utils import hidden_subprocess_kwargs
 
 
 def _command_templates() -> list[tuple[str, str]]:
+    # packaged slash-command markdown -> (filename, text) pairs, for installing into ~/.claude/commands
     base = files("neo_localmcp") / "templates" / "claude-code" / "commands" / IDENTITY.slash_prefix
     out: list[tuple[str, str]] = []
     for item in sorted(base.iterdir(), key=lambda p: p.name):
@@ -34,9 +35,7 @@ def _default_server_command() -> str:
 
 
 def _server_command(server_command: str | Path | None = None) -> str:
-    # An explicit launcher (the installer passes the managed venv's
-    # neo-localmcp-server executable) always wins; only the legacy CLI path with
-    # no injected value falls back to the old side-by-side ``bin/`` shim.
+    # explicit launcher (installer passes the managed venv's executable) wins; only the legacy no-injected-value CLI path falls back to the old bin/ shim
     if server_command is not None:
         return str(server_command)
     return _default_server_command()
@@ -47,12 +46,12 @@ def _config_value(config_path: str | Path | None = None) -> str:
 
 
 def _toml_string(value: str | Path) -> str:
+    # escapes a value for embedding in a TOML double-quoted string
     return str(value).replace("\\", "\\\\").replace('"', '\\"')
 
 
 def _read_config_for_edit(path: Path) -> tuple[str, str]:
-    # Return (LF-normalized text, detected newline style). Detection reads raw
-    # bytes because text-mode reads translate CRLF to LF before we can see it.
+    # (LF-normalized text, detected newline style); reads raw bytes since text-mode would translate CRLF to LF before we could detect it
     if not path.exists():
         return "", "\n"
     raw = path.read_bytes()
@@ -62,9 +61,7 @@ def _read_config_for_edit(path: Path) -> tuple[str, str]:
 
 
 def _atomic_write_text(path: Path, text: str, newline: str = "\n") -> None:
-    # Write user-owned config transactionally so a crash mid-write cannot leave a
-    # half-written registration, and re-expand to the file's own newline style so
-    # editing a CRLF config on POSIX (or vice versa) does not rewrite every line.
+    # tmp-write + os.replace so a crash mid-write can't leave a half-written registration; re-expands to the file's own newline style to avoid rewriting every line on a CRLF/LF mismatch
     path.parent.mkdir(parents=True, exist_ok=True)
     data = text.replace("\n", newline) if newline != "\n" else text
     temporary = path.with_name(path.name + ".tmp")
@@ -81,6 +78,7 @@ def _mcp_server_block(
     server_command: str | Path | None = None,
     config_path: str | Path | None = None,
 ) -> dict[str, Any]:
+    # the JSON MCP server entry shape Claude Code/Desktop expect
     return {
         IDENTITY.mcp_server_name: {
             "command": _server_command(server_command),
@@ -94,6 +92,7 @@ def _codex_block(
     server_command: str | Path | None = None,
     config_path: str | Path | None = None,
 ) -> str:
+    # same server registration as _mcp_server_block, but as a marked TOML block for config.toml
     return f"""
 # BEGIN neo-localmcp
 [mcp_servers.{IDENTITY.mcp_server_name}]
@@ -107,6 +106,7 @@ NEO_LOCALMCP_CONFIG = "{_toml_string(_config_value(config_path))}"
 
 
 def _replace_marked_block(old: str, block: str, start: str = "# BEGIN neo-localmcp", end: str = "# END neo-localmcp") -> str:
+    # markers found -> replace only the marked region, preserving surrounding user config; else -> append the block to the end
     if start in old and end in old:
         before = old.split(start, 1)[0].rstrip()
         after = old.split(end, 1)[1].lstrip()
@@ -117,8 +117,7 @@ def _replace_marked_block(old: str, block: str, start: str = "# BEGIN neo-localm
 
 
 def _strip_marked_block(old: str, start: str = "# BEGIN neo-localmcp", end: str = "# END neo-localmcp") -> str:
-    # Inverse of _replace_marked_block: remove our marked region entirely, preserving
-    # whatever the user had around it and collapsing the gap to a single blank line.
+    # inverse of _replace_marked_block: removes the marked region entirely, collapsing the gap to a single blank line, preserving the rest of the user's config
     if start not in old or end not in old:
         return old
     before = old.split(start, 1)[0].rstrip()
@@ -133,11 +132,7 @@ def _strip_marked_block(old: str, start: str = "# BEGIN neo-localmcp", end: str 
 
 
 def _detect_registered_scope(combined: str) -> str | None:
-    """Which scope `claude mcp get` reported the server registered under, if any.
-
-    Shared by setup_claude_code's migration path and remove_claude_code's removal
-    path -- both need to detect the same way (#33, finding 8.3).
-    """
+    # `claude mcp get` output -> reported scope, or None; shared by setup_claude_code's migration and remove_claude_code's removal so both detect the same way
     if "scope: local" in combined:
         return "local"
     if "scope: user" in combined:
@@ -154,6 +149,7 @@ def _write_codex_config(
     server_command: str | Path | None = None,
     config_path: str | Path | None = None,
 ) -> dict[str, Any]:
+    # builds the codex block, writes it via the marked-block replace only if apply=True (dry-run just previews)
     block = _codex_block(server_command, config_path)
     if apply:
         old, newline = _read_config_for_edit(path)
@@ -162,18 +158,10 @@ def _write_codex_config(
 
 
 def _migrate_claude_code_registration(claude: str, launcher: str) -> list[str]:
-    """Register neo-localmcp under Claude Code's user scope, migrating away from any
-    other scope it might already be registered under.
-
-    Bounded retry (3): each iteration removes one stale-scope registration and
-    re-checks, so a registration under an unexpected scope still converges instead
-    of needing a second manual run. Extracted from setup_claude_code, which used to
-    inline this as one dense `for _ in range(3)` block with nested breaks (#33,
-    finding 8.2).
-    """
+    # registers under user scope, migrating away from any other scope already registered
+    # bounded retry (3): each pass removes one stale-scope registration and re-checks, so an unexpected scope still converges without a second manual run
     actions: list[str] = []
-    # User scope is best for repeatable Claude Code sessions. If the CLI is older and does not support
-    # --scope, fall back to the classic command.
+    # user scope is best for repeatable sessions; falls back to the classic command if the CLI is too old for --scope
     cmd = [claude, "mcp", "add", "--scope", "user", IDENTITY.mcp_server_name, "--", launcher]
     configured = False
     existing = None
@@ -210,6 +198,7 @@ def setup_claude_code(
     *,
     server_command: str | Path | None = None,
 ) -> dict[str, Any]:
+    # installs slash-command templates -> if the claude CLI is present, also migrates the MCP registration to user scope
     ensure_config()
     launcher = _server_command(server_command)
     target = Path.home() / ".claude" / "commands" / IDENTITY.slash_prefix
@@ -236,6 +225,7 @@ def setup_claude_code(
 
 
 def _claude_desktop_config_path() -> Path:
+    # OS -> Claude Desktop's config.json location (Windows/macOS/Linux)
     system = platform.system().lower()
     if system == "windows":
         base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
@@ -246,6 +236,7 @@ def _claude_desktop_config_path() -> Path:
 
 
 def setup_claude_desktop(apply: bool = True) -> dict[str, Any]:
+    # always manual: never writes claude_desktop_config.json, just reports the .mcpb path and install instructions
     ensure_config()
     package_path = APP_DIR / "neo-localmcp.mcpb"
     return {
@@ -264,7 +255,7 @@ def _codex_cli_config_path() -> Path:
 
 
 def _codex_desktop_config_path() -> Path:
-    # Codex app, CLI, and IDE share CODEX_HOME/config.toml.
+    # codex app, CLI, and IDE all share the same CODEX_HOME/config.toml
     return _codex_cli_config_path()
 
 
@@ -274,6 +265,7 @@ def setup_codex_cli(
     server_command: str | Path | None = None,
     config_path: str | Path | None = None,
 ) -> dict[str, Any]:
+    # writes the shared codex config.toml marked block
     ensure_config()
     path = _codex_cli_config_path()
     return {
@@ -289,6 +281,7 @@ def setup_codex_desktop(
     server_command: str | Path | None = None,
     config_path: str | Path | None = None,
 ) -> dict[str, Any]:
+    # same write as setup_codex_cli -- shared config file, just a different reported client label
     result = setup_codex_cli(apply, server_command=server_command, config_path=config_path)
     return {**result, "client": "codex-desktop", "shared_with_cli": True, "restart_required": True}
 
@@ -299,6 +292,7 @@ def setup_codex(
     server_command: str | Path | None = None,
     config_path: str | Path | None = None,
 ) -> dict[str, Any]:
+    # umbrella label over setup_codex_cli, since CLI/Desktop share one config
     return {
         "client": "codex",
         "applied": apply,
@@ -308,9 +302,7 @@ def setup_codex(
 
 
 def remove_claude_code(apply: bool = True) -> dict[str, Any]:
-    # Inverse of setup_claude_code: deregister the MCP server from whatever scope
-    # it is actually registered in (detected the same way the migration path in
-    # setup_claude_code does) and delete the slash-command directory.
+    # inverse of setup_claude_code: detect the actual registered scope, deregister from it, delete the slash-command directory
     target = Path.home() / ".claude" / "commands" / IDENTITY.slash_prefix
     actions: list[str] = []
     ok = True
@@ -364,26 +356,21 @@ def remove_claude_code(apply: bool = True) -> dict[str, Any]:
 
 
 def remove_codex(apply: bool = True) -> dict[str, Any]:
-    # Inverse of setup_codex*: strip our marked block from the shared config.toml,
-    # leaving any of the user's own config intact.
+    # inverse of setup_codex*: strips the marked block from the shared config.toml, leaving the rest of the user's config intact
     path = _codex_cli_config_path()
     existed = path.exists()
     block_present = existed and "# BEGIN neo-localmcp" in path.read_text(encoding="utf-8")
-    # block_present_after and ok are derived from `new` (already in memory from the
-    # write below), not a fresh disk read -- the post-write content is exactly what
-    # was just written, so re-reading the file twice more to ask the same question
-    # was redundant disk I/O, not a distinct check (#33).
     empty_after = False
     if apply and block_present:
         old, newline = _read_config_for_edit(path)
         new = _strip_marked_block(old)
         _atomic_write_text(path, new, newline)
+        # checked against `new` (already in memory), not a fresh disk re-read -- it's exactly what was just written
         block_present_after = "# BEGIN neo-localmcp" in new
         empty_after = new.strip() == ""
         ok = not block_present_after
     else:
-        # Nothing was attempted (dry run, or there was no block to remove), so the
-        # file is unchanged and there is nothing to fail.
+        # dry run, or nothing to remove -> file unchanged, nothing can fail
         block_present_after = block_present
         ok = True
     return {
@@ -399,8 +386,7 @@ def remove_codex(apply: bool = True) -> dict[str, Any]:
 
 
 def remove_claude_desktop(apply: bool = True) -> dict[str, Any]:
-    # By design Claude Desktop cannot be automated (see setup_claude_desktop's note):
-    # removal is a manual action in Claude Desktop's own Extensions UI.
+    # by design, cannot be automated (mirrors setup_claude_desktop) -- removal is a manual action in Claude Desktop's own Extensions UI
     return {
         "client": "claude-desktop",
         "ok": False,
@@ -412,6 +398,7 @@ def remove_claude_desktop(apply: bool = True) -> dict[str, Any]:
 
 
 def remove_client(client: str, apply: bool = True) -> dict[str, Any]:
+    # client name -> matching remove_* fn; unrecognized name -> raises (caller decides how to report)
     key = client.lower().replace("_", "-")
     if key in {"claude-code", "claude"}:
         return remove_claude_code(apply=apply)
@@ -423,6 +410,7 @@ def remove_client(client: str, apply: bool = True) -> dict[str, Any]:
 
 
 def remove_clients(clients: list[str] | None = None, apply: bool = True) -> list[dict[str, Any]]:
+    # per-client remove_client call; one client's exception -> per-result error entry, not a failure of the whole batch
     selected = clients or ["claude-code", "codex", "claude-desktop"]
     if any(str(client).lower().replace("_", "-") == "all" for client in selected):
         selected = ["claude-code", "codex", "claude-desktop"]
@@ -439,6 +427,7 @@ def client_status(
     server_command: str | Path | None = None,
     config_path: str | Path | None = None,
 ) -> dict[str, Any]:
+    # read-only snapshot: which CLIs are found, what each client's config path/existence is, and the exact blocks that would be written
     claude_cli = shutil.which("claude")
     codex_cli = shutil.which("codex")
     paths = {
@@ -466,6 +455,7 @@ def setup_client(
     server_command: str | Path | None = None,
     config_path: str | Path | None = None,
 ) -> dict[str, Any]:
+    # client name -> matching setup_* fn; "all" -> recurse into setup_clients
     key = client.lower().replace("_", "-")
     if key == "all":
         return {"client": "all", "applied": apply, "results": setup_clients(None, apply=apply, server_command=server_command, config_path=config_path)}
@@ -489,6 +479,7 @@ def setup_clients(
     server_command: str | Path | None = None,
     config_path: str | Path | None = None,
 ) -> list[dict[str, Any]]:
+    # per-client setup_client call; one client's exception -> per-result error entry, not a failure of the whole batch
     selected = clients or ["claude-code", "claude-desktop", "codex"]
     if any(str(client).lower().replace("_", "-") == "all" for client in selected):
         selected = ["claude-code", "claude-desktop", "codex"]

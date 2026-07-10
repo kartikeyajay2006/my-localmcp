@@ -73,6 +73,7 @@ _BLANK_STATE: dict[str, Any] = {
 
 
 def _seed_state() -> dict[str, Any]:
+    # NEO_LOCALMCP_WIZARD_PREVIEW_STATE "healthy"/"installed"/"returning" -> seeds an already-installed simulated state; default "absent" -> fresh clone
     start = os.environ.get("NEO_LOCALMCP_WIZARD_PREVIEW_STATE", "absent").strip().lower()
     installed = start in {"healthy", "installed", "returning"}
     state = dict(_BLANK_STATE)
@@ -89,6 +90,7 @@ def _seed_state() -> dict[str, Any]:
 
 
 def _load_state() -> dict[str, Any]:
+    # persisted state.json present and valid -> merged onto _BLANK_STATE (fills any new fields); else -> freshly seeded and saved
     try:
         with open(_STATE_PATH, encoding="utf-8") as fh:
             loaded = json.load(fh)
@@ -143,7 +145,7 @@ def _fake_root() -> str:
 
 
 def _fake_client_meta(key: str) -> tuple[str, str, bool]:
-    """Return (path, detail, manual) mirroring what client_setup.py really does."""
+    # (path, detail, manual) mirroring what ai_client_config.py really does, on a fake OS-appropriate path
     if key == "claude-code":
         return (_join(".claude", "commands", "neo-localmcp"),
                 "Slash commands installed here; the MCP server is registered via "
@@ -175,6 +177,7 @@ class PreviewBackend:
         self._prefs: dict[str, Any] = dict(state["prefs"])
 
     def _persist(self) -> None:
+        # writes current in-memory simulated state to disk so the next --preview run continues from here
         _save_state({
             "installed": self._installed,
             "installed_version": self._installed_version,
@@ -234,11 +237,13 @@ class PreviewBackend:
     # -- operations ------------------------------------------------------- #
 
     def run_operation(self, state: WizardState, emit: EmitFn) -> OperationOutcome:
+        # uninstall -> _simulate_uninstall; else -> _simulate_install_like (install/reinstall)
         if state.operation == OP_UNINSTALL:
             return self._simulate_uninstall(state, emit)
         return self._simulate_install_like(state, emit)
 
     def _simulate_install_like(self, state: WizardState, emit: EmitFn) -> OperationOutcome:
+        # dry_run -> preview steps only, no state change; else emits each _PLAN step with a delay, then mutates simulated state to match
         op = state.operation
         if state.dry_run:
             emit(StepEvent("info", f"DRY RUN: no changes will be made for '{op}'."))
@@ -281,6 +286,7 @@ class PreviewBackend:
         )
 
     def _simulate_uninstall(self, state: WizardState, emit: EmitFn) -> OperationOutcome:
+        # emits the uninstall (or full-wipe) plan steps, then resets simulated install state; full_wipe additionally resets Ollama config/prefs
         steps = (
             _PLAN["uninstall-wipe"] if state.full_wipe else _PLAN[OP_UNINSTALL]
         )
