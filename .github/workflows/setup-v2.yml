@@ -44,6 +44,10 @@ jobs:
         # See Phase 0: in-job filter keeps required checks reporting on docs-only
         # PRs. Duplicated in the slow job because each job runs on a fresh runner;
         # de-duping two jobs via a composite action is more machinery than warranted.
+        # `installer` (#48) is the one area whose bucket gets skipped on a PR that
+        # doesn't touch it -- every other area always runs when any code changes,
+        # since installer is the one area with a much wider blast radius (process
+        # lifecycle, packaging) that the others don't reach into.
         uses: dorny/paths-filter@v3
         id: changes
         with:
@@ -54,15 +58,21 @@ jobs:
               - '!LICENSE'
               - '!.gitignore'
               - '!.github/ISSUE_TEMPLATE/**'
+            installer:
+              - 'setup.py'
+              - 'neo_localmcp/installer/**'
+              - 'packaging/claude-desktop/**'
+              - 'tests/installer/**'
+              - '.github/workflows/setup-v2.yml'
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
       - name: Install test dependencies
-        if: github.event_name == 'push' || steps.changes.outputs.code == 'true'
+        if: github.event_name == 'push' || (steps.changes.outputs.code == 'true' && (matrix.area != 'installer' || steps.changes.outputs.installer == 'true'))
         run: python -m pip install -e ".[test]"
       - name: Fast tests
-        if: github.event_name == 'push' || steps.changes.outputs.code == 'true'
+        if: github.event_name == 'push' || (steps.changes.outputs.code == 'true' && (matrix.area != 'installer' || steps.changes.outputs.installer == 'true'))
         # -n auto parallelizes across the runner's CPU cores (~5x faster on
         # Windows). Only the fast suite is parallelized; the native-lifecycle
         # tests in the slow job build real venvs and manipulate real process
@@ -93,6 +103,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Detect non-docs changes
+        # Every test in this job is an installer lifecycle test (setup.py
+        # install/reinstall/uninstall), so unlike the fast job's per-area split,
+        # this whole job is gated on the `installer` filter, not just one bucket.
         uses: dorny/paths-filter@v3
         id: changes
         with:
@@ -103,12 +116,18 @@ jobs:
               - '!LICENSE'
               - '!.gitignore'
               - '!.github/ISSUE_TEMPLATE/**'
+            installer:
+              - 'setup.py'
+              - 'neo_localmcp/installer/**'
+              - 'packaging/claude-desktop/**'
+              - 'tests/installer/**'
+              - '.github/workflows/setup-v2.yml'
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
       - name: Install test dependencies
-        if: github.event_name == 'push' || steps.changes.outputs.code == 'true'
+        if: github.event_name == 'push' || (steps.changes.outputs.code == 'true' && steps.changes.outputs.installer == 'true')
         run: python -m pip install -e ".[test]"
       - name: Build offline wheelhouse for lifecycle installs
         # The lifecycle tests run setup.py install/reinstall ~6x, each doing a real
@@ -120,11 +139,11 @@ jobs:
         # PyPI round-trip). The installer's subprocesses inherit the env vars; no
         # production code changes. Verified locally: 41 wheels, no sdists, offline
         # source-install of neo-localmcp succeeds (deps + build backend + pip-upgrade).
-        if: github.event_name == 'push' || steps.changes.outputs.code == 'true'
+        if: github.event_name == 'push' || (steps.changes.outputs.code == 'true' && steps.changes.outputs.installer == 'true')
         shell: bash
         run: python -m pip download -d "${{ runner.temp }}/wheelhouse" pip setuptools wheel "mcp[cli]" psutil
       - name: Native lifecycle
-        if: github.event_name == 'push' || steps.changes.outputs.code == 'true'
+        if: github.event_name == 'push' || (steps.changes.outputs.code == 'true' && steps.changes.outputs.installer == 'true')
         env:
           PIP_NO_INDEX: '1'
           PIP_FIND_LINKS: ${{ runner.temp }}/wheelhouse
