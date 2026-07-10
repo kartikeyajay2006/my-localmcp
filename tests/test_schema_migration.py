@@ -36,7 +36,7 @@ pytestmark = pytest.mark.retrieval
 # keeps proving the upgrade preserves data.
 _EXPECTED_FILES_ADDED_COLUMNS = {"summary_source_hash", "summary_model", "summary_prompt_version"}
 _EXPECTED_TASK_QUERIES_ADDED_COLUMNS = {"retrieval_id", "term_key"}
-_EXPECTED_ADDED_TABLES = {"retrieval_boost", "section_summaries"}
+_EXPECTED_ADDED_TABLES = {"retrieval_boost", "section_summaries", "file_embeddings"}
 
 
 def _seed_pre_migration_db(db_file) -> None:
