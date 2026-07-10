@@ -152,6 +152,8 @@ def dry_run_plan(operation: str, *, clean: bool = False, delete_memory: bool = F
 
 
 def build_parser() -> argparse.ArgumentParser:
+    # one subparser per lifecycle op: install / reinstall / uninstall / config-ollama / manage-clients.
+    # per-flag help strings carry the details; args.operation is dispatched via if-chains below.
     parser = argparse.ArgumentParser(
         prog="setup.py",
         description=(

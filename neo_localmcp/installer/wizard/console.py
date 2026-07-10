@@ -101,6 +101,7 @@ class ConsoleWizard:
     # -- rendering -------------------------------------------------------- #
 
     def _header(self, question: str = "") -> None:
+        # full-screen redraw before every prompt: clear -> title bar -> os/state -> running choices -> optional question
         _clear()
         d = self.detected
 
@@ -248,6 +249,8 @@ class ConsoleWizard:
     # -- menu ------------------------------------------------------------- #
 
     def _menu_rows(self) -> list[tuple[str, str, str]]:
+        # detected install state -> the (op_key, title, description) rows the main menu offers
+        # not installed -> install-only; installed -> reinstall/repair + manage-clients + uninstall
         ollama = (OP_CONFIG_OLLAMA, "Configure Ollama models",
                   "Pick the fast + summary models, from those installed (ollama list).")
         quit_row = ("quit", "Quit", "Exit. Nothing is changed.")
@@ -493,6 +496,7 @@ class ConsoleWizard:
     }
 
     def _confirm(self, *, allow_dry_run: bool, default_proceed: bool = True) -> None:
+        # final gate before any change: show chosen actions -> optional dry-run toggle -> yes/no; no -> _Abort
         self._header("Review and confirm")
         self._explain(
             "No changes have been made yet. Your current choices are shown above",

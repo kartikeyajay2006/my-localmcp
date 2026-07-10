@@ -371,6 +371,8 @@ def refresh(repo_root: str | Path | None = None, force: bool = False, max_files:
 
 
 def lookup(query: str, repo_root: str | Path | None = None, limit: int = 20) -> dict[str, Any]:
+    # query -> {hits: FTS rows over file/symbol/summary, symbols: name/signature LIKE matches}
+    # the deterministic retrieval primitive mcp/memory.py step 1 scores against; FTS unavailable -> path-LIKE fallback
     root = repo_root_or_cwd(repo_root)
     conn = connect()
     # hot read-only path -- no branch/remote/status probing here, that's the indexer's job; avoids turning a millisecond FTS query into a client timeout on a large/network worktree
