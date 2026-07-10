@@ -13,17 +13,16 @@ from .config import load_config
 
 
 def hidden_subprocess_kwargs() -> dict[str, int]:
-    """Keep short-lived helpers from allocating console hosts on Windows."""
+    # Windows-only flag to stop short-lived helper processes from allocating console hosts
     if os.name == "nt":
         return {"creationflags": int(subprocess.CREATE_NO_WINDOW)}
     return {}
 
 
 def run_command(args: list[str], cwd: Path | None = None, timeout: int = 30) -> dict[str, Any]:
+    # runs a subprocess, normalizing not-found/timeout into the same {returncode, stdout, stderr, cmd} shape as a real exit -- callers never need to catch
     try:
-        # Never let Git or another helper inherit the MCP server's protocol stdin.
-        # On stdio transports an inherited handle can consume or retain JSON-RPC
-        # traffic, making a completed tool handler appear to hang forever.
+        # stdin=DEVNULL: never let a subprocess inherit the MCP server's stdio-transport stdin, or an inherited handle can make a completed tool call appear to hang forever
         proc = subprocess.run(
             args, cwd=str(cwd) if cwd else None, stdin=subprocess.DEVNULL,
             capture_output=True, text=True, errors="replace", timeout=timeout,
@@ -41,6 +40,7 @@ def which(name: str) -> str | None:
 
 
 def git_root(start: Path | None = None) -> Path | None:
+    # `git rev-parse --show-toplevel` first; falls back to walking parents for a .git dir if git itself isn't available
     start = (start or Path.cwd()).expanduser().resolve()
     cwd = start if start.is_dir() else start.parent
     result = run_command(["git", "rev-parse", "--show-toplevel"], cwd=cwd, timeout=10)
@@ -54,6 +54,7 @@ def git_root(start: Path | None = None) -> Path | None:
 
 
 def repo_root_or_cwd(repo_root: str | Path | None = None) -> Path:
+    # explicit arg -> NEO_LOCALMCP_REPO env -> detected git root -> configured default_root -> cwd, first one that resolves wins
     cfg = load_config()
     if repo_root and str(repo_root) not in {".", "auto"}:
         return Path(repo_root).expanduser().resolve()
@@ -70,6 +71,7 @@ def repo_root_or_cwd(repo_root: str | Path | None = None) -> Path:
 
 
 def safe_path(path: str | Path, repo_root: str | Path | None = None) -> Path:
+    # resolves path relative to root, then verifies the result is still under root -- raises if it escapes (path traversal guard)
     root = repo_root_or_cwd(repo_root)
     p = Path(path).expanduser()
     if not p.is_absolute():
@@ -83,6 +85,7 @@ def safe_path(path: str | Path, repo_root: str | Path | None = None) -> Path:
 
 
 def rel(path: Path, root: Path) -> str:
+    # forward-slash relative path; outside root -> falls back to the raw path string rather than raising
     try:
         return str(path.resolve().relative_to(root.resolve())).replace("\\", "/")
     except ValueError:
@@ -90,6 +93,7 @@ def rel(path: Path, root: Path) -> str:
 
 
 def read_text_file(path: Path, max_chars: int | None = None) -> str:
+    # null byte in the first 4KB -> refuses as binary; else decodes lossily (bad bytes replaced) and truncates to max_chars with a note
     data = path.read_bytes()
     if b"\x00" in data[:4096]:
         raise ValueError(f"Binary file refused: {path}")
@@ -122,17 +126,14 @@ def language_for_path(path: Path) -> str:
 
 
 def is_probably_text(path: Path) -> bool:
+    # configured include_extensions, or a known extensionless text filename (Dockerfile, Makefile, ...)
     cfg = load_config()
     includes = set(str(x).lower() for x in cfg.get("repo", {}).get("include_extensions", []))
     return path.suffix.lower() in includes or path.name in includes or path.name in {"Dockerfile", "Makefile", "Rakefile", "Gemfile"}
 
 
 def _is_excluded_dir(name: str, patterns: Iterable[str]) -> bool:
-    """Match a directory name against configured exclude_dirs glob patterns.
-
-    fnmatch treats a pattern with no wildcard characters as a literal exact
-    match, so plain names (".git") behave exactly as before this was patterns.
-    """
+    # fnmatch glob match; a wildcard-free pattern (".git") still behaves as an exact match
     return any(fnmatch.fnmatch(name, pattern) for pattern in patterns)
 
 
@@ -141,11 +142,8 @@ def scan_repo_files(
     folder: str = ".",
     max_files: int | None = None,
 ) -> tuple[list[Path], int, bool]:
-    """Return selected files, total eligible files, and whether selection is complete.
-
-    Traversal always counts the full eligible manifest. This prevents a capped index
-    from looking complete merely because iteration stopped at the cap.
-    """
+    # walks root, excluding configured dirs -> (selected files up to max_files, total eligible count, complete flag)
+    # always counts the full eligible manifest even when capped, so a capped index isn't mistaken for a complete one
     cfg = load_config()
     root = repo_root_or_cwd(repo_root)
     start = safe_path(folder, root)
@@ -177,10 +175,12 @@ def scan_repo_files(
 
 
 def iter_repo_files(repo_root: str | Path | None = None, folder: str = ".", max_files: int | None = None) -> list[Path]:
+    # scan_repo_files, discarding the eligible-count/completeness info
     return scan_repo_files(repo_root, folder=folder, max_files=max_files)[0]
 
 
 def git_info(root: Path) -> dict[str, Any]:
+    # branch/commit/remote/dirty-file-count via 4 git calls; any failed call -> that field is None, never raises
     branch = run_command(["git", "branch", "--show-current"], cwd=root, timeout=10)
     commit = run_command(["git", "rev-parse", "HEAD"], cwd=root, timeout=10)
     remote = run_command(["git", "remote", "get-url", "origin"], cwd=root, timeout=10)
@@ -194,6 +194,7 @@ def git_info(root: Path) -> dict[str, Any]:
 
 
 def repo_id(root: Path) -> str:
+    # canonical root path + remote -> stable hash, prefixed with a sanitized dir-name label for readability in the shared db
     info = git_info(root)
     canonical_root = os.path.normcase(str(root.resolve()))
     remote = str(info.get("remote") or "")
@@ -203,13 +204,8 @@ def repo_id(root: Path) -> str:
 
 
 def extract_markdown_headings(text: str) -> list[dict[str, Any]]:
-    """Return ATX headings as addressable section symbols.
-
-    Each heading spans from its own line to just before the next heading of
-    equal-or-higher level (or EOF), giving prose docs the same line-range
-    addressability code symbols already have. Headings inside fenced code blocks
-    are ignored so example markdown does not create phantom sections.
-    """
+    # ATX heading -> section symbol spanning to just before the next equal-or-higher-level heading (or EOF)
+    # gives prose docs the same line-range addressability code symbols have; headings inside fenced code blocks are skipped so example markdown doesn't create phantom sections
     lines = text.splitlines()
     found: list[dict[str, Any]] = []
     fence: str | None = None  # active code-fence marker ('```' or '~~~')
@@ -244,6 +240,7 @@ def extract_markdown_headings(text: str) -> list[dict[str, Any]]:
 
 
 def extract_symbols(text: str, language: str) -> list[dict[str, Any]]:
+    # markdown -> headings extractor; else -> per-language regex patterns, one match per line, capped at 400 rows
     if language == "markdown":
         return extract_markdown_headings(text)
     rows: list[dict[str, Any]] = []
@@ -278,8 +275,9 @@ def extract_symbols(text: str, language: str) -> list[dict[str, Any]]:
 
 
 def rg_search(query: str, root: Path, max_results: int = 80) -> list[dict[str, Any]]:
+    # ripgrep on PATH -> shell out to it (fast); else -> pure-Python regex scan fallback below
     if which("rg"):
-        # --sort path disables ripgrep's parallel traversal ordering, making repeated deterministic context calls stable.
+        # --sort path disables ripgrep's parallel traversal ordering, making repeated deterministic context calls stable
         cmd = ["rg", "--line-number", "--column", "--hidden", "--sort", "path", "--glob", "!.git", "--ignore-case", query, str(root)]
         result = run_command(cmd, cwd=root, timeout=20)
         if result["returncode"] not in (0, 1):
@@ -292,12 +290,7 @@ def rg_search(query: str, root: Path, max_results: int = 80) -> list[dict[str, A
             else:
                 rows.append({"raw": raw})
         return rows
-    # No ripgrep on PATH (e.g. a CI image without it preinstalled): fall back to a
-    # pure-Python scan. The query is always regex syntax (mcp/memory.py sends a
-    # re.escape'd alternation like "(?:worker|RareMarkerNeedle)" to mirror rg's
-    # --ignore-case), so it must be compiled and searched as a regex, not matched
-    # as a literal substring -- a literal match of the whole "(?:...|...)" syntax
-    # would never occur in real source text and silently returns nothing.
+    # query is always regex syntax (mcp/memory.py sends a re.escape'd alternation to mirror rg's --ignore-case) -- must be compiled and searched as regex, never as a literal substring
     try:
         pattern = re.compile(query, re.IGNORECASE)
     except re.error:
@@ -317,6 +310,7 @@ def rg_search(query: str, root: Path, max_results: int = 80) -> list[dict[str, A
 
 
 def simple_terms(text: str, limit: int = 10) -> list[str]:
+    # free text -> stopword-filtered word frequency -> top `limit` most frequent words
     words = re.findall(r"[A-Za-z_][A-Za-z0-9_]{2,}", text)
     stop = {"this", "that", "with", "from", "when", "where", "will", "have", "after", "before", "into", "using", "error", "issue", "problem", "the", "and", "for", "not", "can", "does", "what", "why", "how", "we", "are", "building", "debugging"}
     counts: dict[str, int] = {}
