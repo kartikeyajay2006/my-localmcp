@@ -73,6 +73,7 @@ class SourceValidationError(RuntimeError):
 
 
 def _real_validate_source(context: "OperationContext") -> None:
+    # source root must exist and look like an installable package; python executable, if absolute, must exist (a bare name resolves later in the subprocess)
     source_root = Path(context.source_root)
     if not source_root.exists():
         raise SourceValidationError(f"Source root does not exist: {source_root}")
@@ -88,6 +89,7 @@ def _real_validate_source(context: "OperationContext") -> None:
 
 
 def _real_list_registrations(paths: ManagedPaths) -> tuple[dict[str, Any], ...]:
+    # broken/unreadable registry -> empty tuple, never abort a lifecycle op over it
     from .. import mcp_server_lifecycle as lifecycle
 
     try:
@@ -112,13 +114,7 @@ def _real_verify_installation(
 
 
 def delete_managed_root(paths: ManagedPaths) -> Path:
-    """Delete the *entire* validated managed root. The one destructive line.
-
-    Re-validates ``paths.validate_destructive_root()`` immediately before the
-    delete (raising :class:`~neo_localmcp.installer.paths.UnsafeManagedRoot` for
-    anything that is not a safe managed root) and only ever removes that exact
-    resolved path. Returns the resolved path that was deleted.
-    """
+    # the one destructive line in the module: re-validates immediately before shutil.rmtree, only ever deletes that exact resolved path -- never a parent, never an unvalidated root
     resolved = paths.validate_destructive_root()
     if resolved.exists():
         shutil.rmtree(resolved)
@@ -132,14 +128,8 @@ def delete_managed_root(paths: ManagedPaths) -> Path:
 
 @dataclass
 class OperationContext:
-    """Everything an operation needs plus injectable seams for testing.
-
-    ``selected_clients`` are the surfaces an explicit (fresh/clean) install
-    should register; for an install over an existing layout the on-disk snapshot
-    is used instead. ``confirm`` is the full-wipe confirmation gate and defaults
-    to :func:`confirm_full_wipe`.
-    """
-
+    # everything an operation needs, plus injectable seams (the _fn fields below) so tests can drive the whole flow against fakes
+    # selected_clients are the surfaces an explicit fresh/clean install registers; installing over an existing layout uses the on-disk snapshot instead
     paths: ManagedPaths
     source_root: Path
     python_executable: Path
@@ -195,7 +185,7 @@ def _neo_config_path(paths: ManagedPaths) -> Path:
 
 
 def _stop_owned_processes(ctx: OperationContext, actions: list[str], warnings: list[str]) -> bool:
-    """Discover and stop owned processes. Returns True if stop succeeded (or none)."""
+    # discover -> stop -> True if all stopped (or none were owned)
     registrations = ctx.list_registrations_fn(ctx.paths)
     owned = ctx.discover_processes_fn(
         ctx.paths, registrations, provider=ctx.process_provider
@@ -214,6 +204,7 @@ def _stop_owned_processes(ctx: OperationContext, actions: list[str], warnings: l
 
 
 def _run_migration(ctx: OperationContext, actions: list[str], warnings: list[str]) -> bool:
+    # no legacy actions planned -> no-op, True; else applies the plan (processes already stopped by this point) -> True iff it applied cleanly
     plan = ctx.plan_migration_fn(ctx.paths)
     if not getattr(plan, "actions", ()):
         return True
@@ -233,12 +224,8 @@ def _run_migration(ctx: OperationContext, actions: list[str], warnings: list[str
 def _remove_active_clients(
     ctx: OperationContext, actions: list[str], warnings: list[str]
 ) -> bool:
-    """Remove automated registrations and surface manual-only cleanup.
-
-    Automated cleanup failures stop the lifecycle before its runtime or managed
-    root is removed. Claude Desktop is intentionally manual-only, so its result
-    remains a visible warning without blocking the lifecycle.
-    """
+    # removes automated registrations; an automated failure stops the lifecycle before runtime/root removal
+    # Claude Desktop is intentionally manual-only -- its result is a visible warning, never a blocking failure
     try:
         results = ctx.remove_active_registrations_fn(ctx.paths)
     except Exception as exc:  # noqa: BLE001 - convert cleanup crashes to lifecycle failure
@@ -272,11 +259,7 @@ def _remove_active_clients(
 def _build_and_promote(
     ctx: OperationContext, actions: list[str], warnings: list[str]
 ) -> runtime_mod.PromotionResult | None:
-    """Build a candidate runtime and transactionally promote it.
-
-    Returns the promotion result, or ``None`` if the candidate never built (so no
-    promotion was attempted).
-    """
+    # build candidate -> build failed -> None (no promotion attempted); else -> transactionally promote it, returning the promotion result either way
     operation_id = runtime_mod.new_operation_id()
     candidate = ctx.build_candidate_fn(
         ctx.paths,
@@ -305,18 +288,15 @@ def _build_and_promote(
 
 
 def _expected_client_keys(ctx: OperationContext) -> tuple[str, ...]:
+    # currently-recorded client keys, used both to restore and as verify_installation's expected set
     return tuple(record.client for record in clients_mod.read_registrations(ctx.paths))
 
 
 def _restore_and_verify(
     ctx: OperationContext, operation: Operation, actions: list[str], warnings: list[str]
 ) -> OperationResult:
-    """Restore client registrations, verify the endpoint, and finalize metadata.
-
-    Called only after a successful runtime promotion. Handles the client-restore
-    recovery path: if restoration fails the runtime is *kept*, the operation
-    fails visibly with recovery instructions.
-    """
+    # only called after a successful runtime promotion: restore client registrations -> verify_installation -> finalize metadata
+    # restore failure -> runtime is kept (not rolled back), operation fails visibly with recovery instructions
     server_command = ctx.paths.server_executable
     try:
         ctx.restore_clients_fn(
@@ -373,8 +353,7 @@ def _restore_and_verify(
 def _record_client_intent(
     ctx: OperationContext, state: DetectedState, *, fresh: bool
 ) -> None:
-    """Decide client records: explicit selection for a fresh/clean install,
-    on-disk snapshot when installing over an existing layout."""
+    # fresh/clean install (or an absent root) -> record the explicit selection; else -> snapshot whatever's already registered on disk
     if fresh or state.kind is InstallStateKind.ABSENT:
         ctx.record_selection_fn(ctx.paths, list(ctx.selected_clients))
     else:
@@ -387,7 +366,7 @@ def _install_like(
     *,
     clean: bool,
 ) -> OperationResult:
-    """Shared install/reinstall spine (build + promote + restore + verify)."""
+    # shared install/reinstall spine: validate source -> stop owned processes -> unload models -> (clean: wipe root first) -> record client intent -> migrate legacy layout -> build+promote -> restore+verify
     actions: list[str] = []
     warnings: list[str] = []
 
@@ -480,13 +459,8 @@ def install(
     clean: bool = False,
     assume_yes: bool = False,
 ) -> OperationResult:
-    """Install or update the managed runtime.
-
-    Default install preserves durable data and restores (or, for a fresh root,
-    registers the selected) clients. ``clean=True`` destroys the whole managed
-    root first (gated behind confirmation) and rebuilds from the selected
-    surfaces only.
-    """
+    # default: preserves durable data, restores (or registers, for a fresh root) clients
+    # clean=True: destroys the whole managed root first (gated behind confirmation), rebuilds from the selected surfaces only
     if clean:
         if not context.confirm(context.paths, assume_yes=assume_yes):
             context.reporter.warn("Clean install cancelled; no data was deleted.")
@@ -495,11 +469,7 @@ def install(
 
 
 def reinstall(context: OperationContext) -> OperationResult:
-    """Replace the managed runtime transactionally, preserving all durable data.
-
-    Reinstall never deletes a durable directory: it always goes through the
-    build+promote path, which removes and recreates only ``venv/``.
-    """
+    # transactional runtime replacement; never deletes a durable directory -- build+promote only ever removes/recreates venv/
     return _install_like(context, Operation.REINSTALL, clean=False)
 
 
@@ -509,12 +479,8 @@ def uninstall(
     delete_memory: bool = False,
     assume_yes: bool = False,
 ) -> OperationResult:
-    """Remove the managed runtime (``venv/`` only) after client cleanup.
-
-    Default uninstall preserves all durable data and does NOT recreate the venv.
-    ``delete_memory=True`` performs a full wipe of the entire validated managed
-    root (gated behind confirmation) and does not reinstall.
-    """
+    # default: removes venv/ only, after client cleanup; preserves all durable data, does not recreate
+    # delete_memory=True: full wipe of the entire validated root (gated behind confirmation), no reinstall
     ctx = context
     if delete_memory:
         if not ctx.confirm(ctx.paths, assume_yes=assume_yes):

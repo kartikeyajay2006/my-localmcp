@@ -38,8 +38,7 @@ CLIENT_LABELS = {
 
 @dataclass(frozen=True)
 class DetectedInfo:
-    """A fast, network-free snapshot of the current machine + install state."""
-
+    # fast, network-free snapshot of the current machine + install state
     os_label: str  # "Windows" / "macOS" / "this platform"
     python_version: str
     state: str  # raw InstallStateKind value: absent / data-only / healthy / broken-runtime / ...
@@ -60,14 +59,8 @@ class DetectedInfo:
 
 @dataclass(frozen=True)
 class ClientOption:
-    """One connectable AI client surface and where/how it is configured on this OS.
-
-    ``config_path`` is the OS-specific location touched for this client, and
-    ``detail`` says *what* that path is (a slash-commands dir, a config.toml block,
-    or a .mcpb package). ``manual`` marks a surface the wizard cannot fully
-    automate -- Claude Desktop, which needs a manual .mcpb install in-app.
-    """
-
+    # one connectable client surface: config_path is the OS-specific location touched, detail says what that path is (slash-commands dir / config.toml block / .mcpb package)
+    # manual=True marks a surface the wizard can't fully automate (Claude Desktop needs a manual .mcpb install in-app)
     key: str
     label: str
     config_path: str
@@ -78,13 +71,8 @@ class ClientOption:
 
 @dataclass(frozen=True)
 class OllamaInfo:
-    """Result of probing Ollama (the `ollama list` equivalent) plus current config.
-
-    ``installed_models`` is always alphabetically sorted. ``model_sizes`` maps a
-    model name to a human-readable size (e.g. "4.9 GB"); a missing entry means
-    the size wasn't available.
-    """
-
+    # result of probing Ollama (the `ollama list` equivalent) plus current config
+    # installed_models always alphabetically sorted; model_sizes maps name -> human size ("4.9 GB"), missing entry means size wasn't available
     reachable: bool
     base_url: str
     installed_models: tuple[str, ...]
@@ -96,7 +84,7 @@ class OllamaInfo:
 
 
 def human_size(num_bytes: float) -> str:
-    """Format a byte count as a short human-readable size, e.g. "4.9 GB"."""
+    # bytes -> short human-readable size string, e.g. "4.9 GB"
     size = float(num_bytes)
     for unit in ("B", "KB", "MB", "GB"):
         if size < 1024 or unit == "GB":
@@ -107,16 +95,14 @@ def human_size(num_bytes: float) -> str:
 
 @dataclass(frozen=True)
 class StepEvent:
-    """One streamed line of progress from a running operation."""
-
+    # one streamed line of progress from a running operation
     level: str  # info / action / warning / error / summary
     message: str
 
 
 @dataclass(frozen=True)
 class OperationOutcome:
-    """The terminal result of an operation, for the result panel."""
-
+    # terminal result of an operation, for the result panel
     ok: bool
     status: str  # succeeded / failed / cancelled
     title: str
@@ -127,12 +113,7 @@ class OperationOutcome:
 
 @dataclass
 class WizardState:
-    """Mutable choices accumulated as the user moves through the wizard.
-
-    Nothing here executes anything; it is handed to the backend once, at the
-    moment the user confirms.
-    """
-
+    # mutable choices accumulated as the user moves through the wizard; executes nothing itself, handed to the backend once at confirmation
     operation: str = ""
     selected_clients: list[str] = field(default_factory=list)
     configure_ollama: bool = False
@@ -157,39 +138,35 @@ EmitFn = Callable[[StepEvent], None]
 
 @runtime_checkable
 class WizardBackend(Protocol):
-    """Everything a screen can ask the outside world to do."""
+    # everything a screen can ask the outside world to do
 
     def detect(self) -> DetectedInfo:
-        """Fast, network-free state snapshot. Safe to call on every screen resume."""
+        # fast, network-free state snapshot; safe to call on every screen resume
         ...
 
     def client_options(self) -> list[ClientOption]:
-        """The client surfaces and their OS-specific config paths + registration state."""
+        # client surfaces + their OS-specific config paths and registration state
         ...
 
     def ollama_info(self) -> OllamaInfo:
-        """Probe Ollama for its installed models (the `ollama list` equivalent)."""
+        # probes Ollama for its installed models (the `ollama list` equivalent)
         ...
 
     def run_operation(self, state: WizardState, emit: EmitFn) -> OperationOutcome:
-        """Execute install / reinstall / uninstall, streaming StepEvents to ``emit``.
-
-        Runs synchronously; the caller invokes it from a worker thread so the UI
-        stays responsive. Never raises for an expected failure -- returns an
-        OperationOutcome with ``ok=False`` instead.
-        """
+        # runs install/reinstall/uninstall synchronously, streaming StepEvents to emit; caller invokes from a worker thread to keep the UI responsive
+        # never raises for an expected failure -- returns OperationOutcome(ok=False) instead
         ...
 
     def apply_ollama_config(self, state: WizardState, emit: EmitFn) -> OperationOutcome:
-        """Persist the chosen Ollama base URL + models. No runtime rebuild."""
+        # persists the chosen Ollama base URL + models; no runtime rebuild
         ...
 
     def apply_client_changes(self, state: WizardState, emit: EmitFn) -> OperationOutcome:
-        """Register/deregister client surfaces to match ``state.selected_clients``."""
+        # registers/deregisters client surfaces to match state.selected_clients
         ...
 
     def load_prefs(self) -> dict[str, Any]:
-        """Remembered wizard UX choices (last clients, last models). Never authoritative."""
+        # remembered wizard UX choices (last clients, last models); never authoritative
         ...
 
     def save_prefs(self, prefs: dict[str, Any]) -> None:

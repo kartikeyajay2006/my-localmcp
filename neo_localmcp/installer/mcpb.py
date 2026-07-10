@@ -35,6 +35,7 @@ _ROOT_FILES = ("README.md", "pyproject.toml")
 
 
 def _is_excluded(relative: Path) -> bool:
+    # excluded dir anywhere in the path, OS junk name, or a .pyc suffix
     if any(part in _EXCLUDED_DIR_NAMES for part in relative.parts):
         return True
     if relative.name in _EXCLUDED_NAMES:
@@ -43,11 +44,7 @@ def _is_excluded(relative: Path) -> bool:
 
 
 def _next_free_path(package_dir: Path, version: str) -> Path:
-    """Return the versioned bundle path, adding a ``-N`` counter if it is taken.
-
-    ``neo-localmcp-v1.1.0.mcpb`` -> ``neo-localmcp-v1.1.0-2.mcpb`` -> ``-3`` ...
-    Never overwrites an existing file.
-    """
+    # base name taken -> adds a "-N" counter (v1.1.0 -> v1.1.0-2 -> -3 ...); never overwrites an existing file
     base = package_dir / f"neo-localmcp-v{version}.mcpb"
     if not base.exists():
         return base
@@ -60,11 +57,8 @@ def _next_free_path(package_dir: Path, version: str) -> Path:
 
 
 def build_mcpb(source_root: Path | str, version: str) -> Path | None:
-    """Pack ``packages/claude-desktop/neo-localmcp-v{version}.mcpb`` from a checkout.
-
-    Returns the written path, or ``None`` if the ``mcpb/`` staging inputs are absent
-    (i.e. not running from a source checkout -- dev-only, caller should skip).
-    """
+    # staging/manifest.json + repo root files + neo_localmcp/** (minus exclusions) -> zipped into the versioned bundle
+    # returns None (not an error) if staging inputs are absent -- not a source checkout, dev-only, caller should skip
     root = Path(source_root)
     package_dir = root / "packages" / "claude-desktop"
     staging = package_dir / "mcpb"

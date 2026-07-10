@@ -46,13 +46,13 @@ def _clear() -> None:
 
 
 def _text_width() -> int:
-    """Wrap prose at 100 columns, or narrower if the terminal itself is narrower."""
+    # 100 columns, or narrower if the terminal itself is narrower
     cols = shutil.get_terminal_size(fallback=(_MAX_TEXT_WIDTH, 24)).columns
     return max(20, min(_MAX_TEXT_WIDTH, cols))
 
 
 def _wrap(text: str, indent: str = " ", subsequent_indent: str | None = None) -> list[str]:
-    """Wrap ``text`` to the current text width, indenting every physical line."""
+    # wraps text to the current terminal width, indenting every physical line
     sub = indent if subsequent_indent is None else subsequent_indent
     return textwrap.wrap(
         text, width=_text_width(), initial_indent=indent, subsequent_indent=sub,
@@ -60,19 +60,23 @@ def _wrap(text: str, indent: str = " ", subsequent_indent: str | None = None) ->
 
 
 class _GoBack(Exception):
-    """Raised by an input primitive when the user types 'b'/'back'."""
+    # raised by an input primitive when the user types 'b'/'back'
+    pass
 
 
 class _Skip(Exception):
-    """Raised by a phase that has nothing to ask given the current answers."""
+    # raised by a phase that has nothing to ask given the current answers
+    pass
 
 
 class _Abort(Exception):
-    """Raised when the user explicitly declines to proceed at a final confirm."""
+    # raised when the user explicitly declines to proceed at a final confirm
+    pass
 
 
 class _TogglePreview(Exception):
-    """Raised by the main-menu prompt when the user types 'p'/'preview'."""
+    # raised by the main-menu prompt when the user types 'p'/'preview'
+    pass
 
 
 def _is_back(raw: str) -> bool:
@@ -97,6 +101,7 @@ class ConsoleWizard:
     # -- rendering -------------------------------------------------------- #
 
     def _header(self, question: str = "") -> None:
+        # full-screen redraw before every prompt: clear -> title bar -> os/state -> running choices -> optional question
         _clear()
         d = self.detected
 
@@ -142,18 +147,14 @@ class ConsoleWizard:
 
     @staticmethod
     def _explain(*lines: str) -> None:
-        """Print a short, indented 'what this step is about' blurb, then a gap."""
+        # prints a short, indented "what this step is about" blurb, then a blank line
         for line in lines:
             for wrapped in _wrap(line, indent=" "):
                 print(wrapped)
         print()
 
     def _set_summary(self, label: str, value: str) -> None:
-        """Set (or replace) one line of the running summary.
-
-        Phases can be revisited via 'back', so this must overwrite rather than
-        append -- otherwise redoing a step would duplicate its summary line.
-        """
+        # sets (replaces, never duplicates) one running-summary line -- phases can be revisited via "back", so this must overwrite or redoing a step would duplicate its line
         self.summary = [(l, v) for l, v in self.summary if l != label]
         self.summary.append((label, value))
 
@@ -226,6 +227,7 @@ class ConsoleWizard:
     # (used for an explicit "No" at a final confirm) without running anything.
 
     def _run_phases(self, phases: list[Callable[[], None]]) -> bool:
+        # phase succeeds -> advance; _GoBack -> reverse direction and step back; _Skip -> step over in whichever direction we're already moving; _Abort -> end immediately, False
         idx = 0
         direction = 1
         while 0 <= idx < len(phases):
@@ -247,6 +249,8 @@ class ConsoleWizard:
     # -- menu ------------------------------------------------------------- #
 
     def _menu_rows(self) -> list[tuple[str, str, str]]:
+        # detected install state -> the (op_key, title, description) rows the main menu offers
+        # not installed -> install-only; installed -> reinstall/repair + manage-clients + uninstall
         ollama = (OP_CONFIG_OLLAMA, "Configure Ollama models",
                   "Pick the fast + summary models, from those installed (ollama list).")
         quit_row = ("quit", "Quit", "Exit. Nothing is changed.")
@@ -273,6 +277,7 @@ class ConsoleWizard:
         return rows
 
     def _main_menu(self) -> str:
+        # re-detects state fresh on every visit (loop body), so a menu reached via "back to menu" always reflects current reality
         while True:
             self.detected = self.backend.detect()
             self.summary = []
@@ -293,7 +298,7 @@ class ConsoleWizard:
             return rows[choice - 1][0]
 
     def _enter_preview(self) -> None:
-        """One-way switch to the PreviewBackend for the rest of this process."""
+        # one-way switch to PreviewBackend for the rest of this process
         from .preview_backend import PreviewBackend
 
         self.backend = PreviewBackend()
@@ -304,11 +309,11 @@ class ConsoleWizard:
     # -- phase: clients ----------------------------------------------------
 
     def _phase_clients(self) -> None:
+        # default selection: this-session pick (if revisited via "back") -> else currently-registered (manage mode) -> else last_clients pref (install mode)
         manage = self._clients_manage_mode
         options = self.backend.client_options()
         registered = {opt.key for opt in options if opt.registered}
         if self.state.selected_clients:
-            # Revisiting via "back": keep what was already picked this session.
             default_keys = set(self.state.selected_clients)
         elif manage:
             default_keys = registered
@@ -491,6 +496,7 @@ class ConsoleWizard:
     }
 
     def _confirm(self, *, allow_dry_run: bool, default_proceed: bool = True) -> None:
+        # final gate before any change: show chosen actions -> optional dry-run toggle -> yes/no; no -> _Abort
         self._header("Review and confirm")
         self._explain(
             "No changes have been made yet. Your current choices are shown above",
@@ -523,6 +529,7 @@ class ConsoleWizard:
 
     # -- execution -------------------------------------------------------- #
     def _run(self) -> None:
+        # dispatches to the matching backend call by operation, streams its progress via emit, then renders the OperationOutcome
         self._header("Working...")
         op = self.state.operation
 
@@ -557,10 +564,7 @@ class ConsoleWizard:
         if self.state.dry_run or not outcome.ok:
             return
         if self.state.operation == OP_UNINSTALL:
-            # Never write prefs after tearing something down: a full wipe deletes
-            # the whole managed root, and re-creating its config/ dir just to drop
-            # a prefs file back in would silently undermine that guarantee. A
-            # runtime-only uninstall has nothing new worth persisting either.
+            # never write prefs after tearing something down -- a full wipe deletes the whole root, and recreating config/ just for a prefs file would undermine that
             return
         prefs = dict(self.prefs)
         if self.state.operation in {OP_INSTALL, OP_MANAGE_CLIENTS}:
@@ -575,6 +579,7 @@ class ConsoleWizard:
     # -- dispatch ----------------------------------------------------------- #
 
     def _dispatch(self, op: str) -> None:
+        # operation -> its ordered phase list -> _run_phases -> execute on success, else report cancelled
         self.state = WizardState(operation=op)
         labels = {
             OP_INSTALL: "install", OP_REINSTALL: "reinstall", OP_UNINSTALL: "uninstall",

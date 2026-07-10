@@ -23,7 +23,7 @@ WIZARD_EXTRA = ".[wizard]"
 
 
 def missing_dependencies() -> list[str]:
-    """Return the wizard dependencies that are not importable, in order."""
+    # wizard dependencies not importable in the current interpreter, in order
     return [name for name in WIZARD_DEPENDENCIES if importlib.util.find_spec(name) is None]
 
 
@@ -44,14 +44,8 @@ def _prompt_yes_no(question: str, *, default: bool = True) -> bool:
 
 
 def ensure_dependencies(repo_root: Path, argv: list[str]) -> None:
-    """Guarantee the wizard's dependencies are present, or exit trying.
-
-    If everything is importable this returns immediately. Otherwise it prints
-    exactly what is missing and the command that fixes it, offers to run that
-    command, and -- on success -- re-execs the wizard so the new packages load
-    in a clean interpreter. Declining, or a failed install, exits non-zero with
-    the manual command so the user is never left guessing.
-    """
+    # everything importable -> return immediately; else print what's missing, offer to pip install, then re-exec into a clean interpreter on success
+    # decline, or a failed/incomplete install -> exit non-zero with the manual command, never leaves the user guessing
     missing = missing_dependencies()
     if not missing:
         return

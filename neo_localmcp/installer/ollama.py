@@ -24,7 +24,7 @@ class ModelUnloadResult:
 
 
 def configured_models() -> tuple[str, ...]:
-    """Distinct configured fast/summary model names, in stable order."""
+    # distinct fast_model/summary_model names, in stable order
     cfg = load_config().get("ollama", {})
     seen: list[str] = []
     for name in (cfg.get("fast_model"), cfg.get("summary_model")):
@@ -40,16 +40,8 @@ def configure_models(
     summary_model: str | None = None,
     num_ctx: int | None = None,
 ) -> dict[str, Any]:
-    """Merge non-empty overrides into the persisted Ollama config and save it.
-
-    Only fields that are given (truthy) are changed; omitted fields keep
-    their current persisted value. Returns the updated ``ollama`` config
-    block. Shared by ``mcp.ollama.set_ollama`` (the ``neo-localmcp set-ollama``
-    runtime command), the wizard's "Configure Ollama models" operation
-    (``installer/wizard/live_backend.py``), and ``setup.py config-ollama`` -- the three
-    surfaces that let a user change these settings -- so there is exactly one
-    place that decides what "setting the Ollama config" means.
-    """
+    # only given (truthy) fields change; omitted fields keep their current persisted value
+    # single place backing all 3 surfaces that let a user change these settings: mcp.ollama.set_ollama, the wizard, and setup.py config-ollama
     cfg = load_config()
     ollama_cfg = cfg.setdefault("ollama", {})
     if base_url:
@@ -65,7 +57,7 @@ def configure_models(
 
 
 def unload_model(model: str, timeout: float = 5.0) -> ModelUnloadResult:
-    """Unload one model. Never raises; failures are reported, not propagated."""
+    # never raises -- failures come back as a non-ok result, not an exception
     result = ollama_client.unload_model(model, timeout=timeout)
     return ModelUnloadResult(
         model=model,
@@ -76,5 +68,5 @@ def unload_model(model: str, timeout: float = 5.0) -> ModelUnloadResult:
 
 
 def unload_neo_models(timeout_per_model: float = 5.0) -> tuple[ModelUnloadResult, ...]:
-    """Unload every distinct configured model, bounded per model."""
+    # every distinct configured model, each bounded by its own timeout
     return tuple(unload_model(name, timeout=timeout_per_model) for name in configured_models())

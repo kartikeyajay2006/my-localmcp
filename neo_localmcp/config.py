@@ -10,14 +10,8 @@ from .branding import IDENTITY
 
 APP_DIR = Path(os.environ.get("NEO_LOCALMCP_HOME", Path.home() / ".neo-localmcp")).expanduser()
 CONFIG_DIR = APP_DIR / "config"
-# The on-disk content is JSON (ensure_config/load_config/save_config below use
-# json.dumps/json.loads), not YAML -- the ".yaml" extension is legacy naming kept for
-# backward compatibility with existing installs. Hand-editing this file must use JSON
-# syntax (no comments, no YAML-only constructs); it will silently fail to parse otherwise.
-# See #31 -- renaming to .json or adding a real YAML parser were both considered and
-# rejected: the former ripples through the installer/migration/durable-data path
-# references and every real-lifecycle test, the latter adds this project's first
-# third-party dependency for a documentation-drift issue.
+# on-disk content is JSON despite the .yaml extension (legacy naming, kept for backward compat with existing installs) -- hand edits must use JSON syntax, no comments/YAML constructs
+# renaming to .json or adding a YAML parser were both considered and rejected: too much blast radius / a new dependency for a naming-only issue
 CONFIG_PATH = Path(os.environ.get("NEO_LOCALMCP_CONFIG", CONFIG_DIR / "config.yaml")).expanduser()
 SQLITE_DIR = APP_DIR / "sqlite"
 DEFAULT_DB_PATH = SQLITE_DIR / "repo-context.sqlite"
@@ -33,6 +27,7 @@ def config_dir() -> Path:
 
 
 def config_path() -> Path:
+    # explicit env var wins -> else a caller-mutated CONFIG_PATH global -> else the default under config_dir(); re-derived live so env/test overrides don't need patching every call site
     explicit = os.environ.get("NEO_LOCALMCP_CONFIG")
     if explicit:
         return Path(explicit).expanduser()
@@ -84,60 +79,35 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "temperature": 0.1,
         "num_ctx": 32768,
         "fast_num_ctx": 8192,
-        # 1.0.7 (P7a): hard cap on a section summary's generation length. Covers both
-        # the summary and keywords portions of one response; plenty for "1-2 sentences
-        # + up to 8 keywords" while bounding worst-case latency if the model ignores
-        # the length instruction in the prompt.
+        # hard cap on a section summary's generation length (summary + keywords combined); bounds worst-case latency if the model ignores the prompt's length instruction
         "section_summary_num_predict": 400,
         "keep_alive": "30m",
         "auto_start_local": True,
     },
     "repo": {
         "default_root": "auto",
-        # Null means complete indexing. Callers may still request an explicit cap,
-        # which is reported as incomplete rather than silently appearing healthy.
+        # None -> complete indexing; an explicit cap is reported as incomplete rather than silently appearing healthy
         "max_files": None,
         "max_file_bytes": 750_000,
         "summary_max_chars": 80_000,
-        # Glob patterns (fnmatch), matched against the directory name only, not a
-        # path. A plain name with no wildcard (".git") still matches only that exact
-        # name. ".venv*"/"venv*" additionally cover differently-named or versioned
-        # local virtualenvs (e.g. ".venv-phase14", ".venv-nlm-v1.0.10", "venvs") that
-        # an exact-name list would silently index as repository source -- see
-        # PROJECT_NOTES.md 2026-07-03.
+        # fnmatch glob against directory name only, not full path; ".venv*"/"venv*" also cover versioned local virtualenvs an exact-name list would miss
+        # ".claude" excludes worktree sibling copies of the repo, which would otherwise outrank the real working-tree file for the same reason
         "exclude_dirs": [
             ".git", ".hg", ".svn", ".vs", ".vscode", ".idea", "bin", "obj", "node_modules",
             ".venv*", "venv*", "dist", "build", "packages", ".nuget", "TestResults", "coverage",
             ".next", ".svelte-kit", ".turbo", "target", "out", "DerivedData", ".gradle",
-            ".neo-localmcp", ".pytest_cache",
-            # ".claude/worktrees/" holds full sibling copies of the repo for parallel
-            # agent sessions -- without this, each duplicate repo_memory.py/repo_utils.py
-            # outranks the real working-tree file (issue #28, same class of bug as
-            # the .venv* case above).
-            ".claude",
+            ".neo-localmcp", ".pytest_cache", ".claude",
         ],
-        # User surface for adding excludes. The list above is code-owned and always
-        # applied (see load_config); anything here is unioned on top. Put custom
-        # excludes here, not in exclude_dirs -- a persisted exclude_dirs is rebuilt
-        # from the code default on every load and will not preserve hand-edits (#41).
+        # user surface for adding excludes -- exclude_dirs above is code-owned and rebuilt from defaults on every load() (won't preserve hand-edits); put custom excludes here instead, unioned on top
         "extra_exclude_dirs": [],
         "include_extensions": TEXT_EXTENSIONS,
     },
     "memory": {
         "db_path": str(DEFAULT_DB_PATH),
-        # Phase 3 (1.0.6): query/result metadata recording is observational only and
-        # does not influence ranking by itself; see retrieval_boost for the separate,
-        # capped signal that does. Off switch lives here, not a hidden env var.
+        # observational only, doesn't influence ranking by itself; see retrieval_boost_* below for the separate signal that does. Config flag, not a hidden env var
         "record_context_queries": True,
         "task_query_retention": 500,
-        # Retrieval-boost tuning surface (1.0.9, P9g). Promoted from hard-coded
-        # constants in repo_memory.py (RETRIEVAL_BOOST_CAP / RETRIEVAL_BOOST_MIN_SHOWN,
-        # which remain the defaults) so these can be calibrated against real usage
-        # without a code change, the same way retention already is. Defaults are
-        # unchanged pending real multi-session usage data -- a 2026-07-01 live audit
-        # confirmed the mechanism works and is conservative (a boost only appears
-        # after the same task is shown >= min_shown times), so there is no
-        # evidence-based case to move them yet.
+        # config-overridable surface over repo_memory.py's RETRIEVAL_BOOST_CAP/RETRIEVAL_BOOST_MIN_SHOWN defaults, so they can be calibrated without a code change
         "retrieval_boost_retention_days": 90,
         "retrieval_boost_cap": 8,
         "retrieval_boost_min_shown": 3,
@@ -149,6 +119,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
 
 
 def _effective_default_config() -> dict[str, Any]:
+    # deep copy of DEFAULT_CONFIG with db_path re-derived live, so a test/env APP_DIR override is honored even though DEFAULT_CONFIG was built at import time
     defaults = copy.deepcopy(DEFAULT_CONFIG)
     configured_db = str(defaults.get("memory", {}).get("db_path") or "")
     if configured_db == str(_INITIAL_DEFAULT_DB_PATH):
@@ -157,6 +128,7 @@ def _effective_default_config() -> dict[str, Any]:
 
 
 def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    # recursive merge: dict values merge key-by-key, anything else in override replaces base outright
     result = dict(base)
     for key, value in override.items():
         if isinstance(value, dict) and isinstance(result.get(key), dict):
@@ -167,6 +139,7 @@ def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]
 
 
 def ensure_config() -> Path:
+    # creates the config file with effective defaults if it doesn't exist yet; never overwrites an existing one
     path = config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.exists():
@@ -175,6 +148,7 @@ def ensure_config() -> Path:
 
 
 def load_config() -> dict[str, Any]:
+    # disk config -> deep-merged onto defaults -> legacy timeout key migrated -> exclude_dirs rebuilt code-owned (see below) -> identity refreshed
     path = ensure_config()
     raw = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
     cfg = deep_merge(_effective_default_config(), raw or {})
@@ -182,13 +156,8 @@ def load_config() -> dict[str, Any]:
     legacy_timeout = int(ollama_cfg.get("timeout_seconds", 0) or 0)
     if legacy_timeout:
         ollama_cfg.setdefault("summary_timeout_seconds", 200 if legacy_timeout == 180 else legacy_timeout)
-    # Safety exclude_dirs are code-owned: a persisted config can only ADD (via
-    # repo.extra_exclude_dirs), never shrink or override the built-in set. Without
-    # this, deep_merge lets a stale persisted repo.exclude_dirs list win wholesale,
-    # so a newly-added default exclude (e.g. ".claude", #28) never reaches an
-    # install whose config.yaml predates it -- reinstall preserves that config as
-    # durable data. Rebuild the effective list on every load so the guarantee holds
-    # regardless of config age (#41).
+    # exclude_dirs is code-owned: a plain deep_merge would let a stale persisted list win wholesale, so a newly-added default exclude would never reach an install whose config predates it
+    # rebuilt from the code default every load, unioned with repo.extra_exclude_dirs, so the guarantee holds regardless of config age
     repo_cfg = cfg.setdefault("repo", {})
     code_owned = list(_effective_default_config()["repo"]["exclude_dirs"])
     extra = repo_cfg.get("extra_exclude_dirs") or []
@@ -198,6 +167,7 @@ def load_config() -> dict[str, Any]:
 
 
 def save_config(config: dict[str, Any]) -> None:
+    # full overwrite (not a merge); identity is always stamped fresh, never taken from the passed-in dict
     path = config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     config["identity"] = IDENTITY.as_dict()

@@ -17,6 +17,8 @@ def _configure_utf8_stdio() -> None:
 
 
 def main() -> int:
+    # Subprocess entrypoint: stdin JSON payload -> memory.context_prepare -> stdout tool payload.
+    # stdout carries only the result; errors and diagnostics go to stderr / a JSON error object.
     _configure_utf8_stdio()
     try:
         payload = json.loads(sys.stdin.read() or "{}")

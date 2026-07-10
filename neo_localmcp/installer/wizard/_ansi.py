@@ -18,6 +18,7 @@ if sys.platform.startswith("win"):
 
 
 def _supports_color() -> bool:
+    # NO_COLOR set, or stdout not a real terminal (piped/test) -> no color
     if os.environ.get("NO_COLOR") is not None:
         return False
     try:

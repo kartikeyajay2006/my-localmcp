@@ -24,9 +24,7 @@ _PURE_FILLER_WORDS = {
 _PLANNING_NOUN_FILLER_WORDS = {
     "goal", "goals", "decision", "decisions", "implementation", "phase", "phases", "constraint", "constraints", "breakdown", "entry-point",
 }
-# Every intent keyword must also be filler: intent words should set intent, not become
-# grep terms. Derived (not hand-synced) so a new intent keyword can't silently become a
-# weak-weighted search term just because someone forgot to also add it above (#35).
+# derived, not hand-synced: every intent keyword is also filler, so a new intent keyword can't silently become a search term if someone forgets to add it here too
 FILLER_WORDS = _PURE_FILLER_WORDS | _PLANNING_NOUN_FILLER_WORDS | {word for _, words in INTENT_KEYWORDS for word in words}
 
 SOURCE_EXTS = {".cs", ".xaml", ".py", ".ts", ".tsx", ".js", ".jsx", ".vue", ".svelte", ".go", ".rs", ".java", ".kt", ".kts", ".swift", ".rb", ".php", ".sql", ".html", ".css", ".scss"}
@@ -35,6 +33,7 @@ CONFIG_EXTS = {".json", ".xml", ".yml", ".yaml", ".toml", ".ini", ".csproj", ".s
 
 
 def _split_focus(text: str) -> tuple[str, str]:
+    # "natural prose: KnownSymbol, FileName" -> (natural, focus); no colon -> (text, "")
     if ":" not in text:
         return text.strip(), ""
     left, right = text.split(":", 1)
@@ -46,13 +45,12 @@ def _tokens(text: str) -> list[str]:
 
 
 def _is_symbol_like(token: str) -> bool:
+    # PascalCase/camelCase, *Async, milestone (F4.7), snake_case, or dotted/pathlike -> treat as a code identifier (strong term), not prose
     return bool(
         re.search(r"[A-Z][a-z0-9]+[A-Z_]", token)
         or re.search(r"[A-Za-z_][A-Za-z0-9_]*Async\b", token)
         or re.fullmatch(r"[A-Za-z]\d+(?:\.\d+)*", token)
-        # snake_case (e.g. summary_model, section_summaries): an underscore joining
-        # two word chars is almost never natural English, so treat it as a code/schema
-        # identifier -- a high-precision retrieval signal -- regardless of case (#23).
+        # underscore joining two word chars is almost never natural English
         or re.search(r"[A-Za-z0-9]_[A-Za-z0-9]", token)
         or "." in token
         or "/" in token
@@ -65,6 +63,7 @@ def _clean_term(token: str) -> str:
 
 
 def infer_intent(task: str) -> str:
+    # task words -> intent keyword overlap scores -> highest, with debug/feature/refactor/test beating explain on a tie (source-first is safer for dev tasks)
     lower_words = {w.lower() for w in re.findall(r"[A-Za-z_][A-Za-z0-9_'-]*", task)}
     scores: dict[str, int] = {}
     for intent, words in INTENT_KEYWORDS:
@@ -72,7 +71,6 @@ def infer_intent(task: str) -> str:
     best, score = max(scores.items(), key=lambda item: item[1])
     if score <= 0:
         return "context"
-    # Debug/feature/refactor should beat explain if both are present, because source-first is safer for dev tasks.
     if scores.get("debug", 0):
         return "debug"
     if scores.get("feature", 0):
@@ -85,6 +83,7 @@ def infer_intent(task: str) -> str:
 
 
 def normalize_query(task: str) -> dict[str, Any]:
+    # task -> split natural/focus -> classify each token strong/weak/ignored -> infer intent -> pick ranking policy
     natural, focus = _split_focus(task)
     raw_natural = [_clean_term(t) for t in _tokens(natural)]
     raw_focus = [_clean_term(t) for t in re.split(r"[,\s]+", focus) if _clean_term(t)]
@@ -94,8 +93,7 @@ def normalize_query(task: str) -> dict[str, Any]:
     strong_terms: list[str] = []
 
     for term in raw_focus:
-        # A colon is a useful focus hint, but prose after it is still prose. Do not
-        # turn filler words such as "and" into high-weight repository searches.
+        # colon is a useful focus hint, but filler words after it (e.g. "and") still shouldn't become high-weight searches
         if term and (term.lower() not in FILLER_WORDS or _is_symbol_like(term)) and term not in strong_terms:
             strong_terms.append(term)
 
@@ -113,7 +111,7 @@ def normalize_query(task: str) -> dict[str, Any]:
         elif term not in weak_terms:
             weak_terms.append(term)
 
-    # Preserve useful original casing and keep the search bounded.
+    # dedup, preserving original casing, strong terms first
     search_terms = []
     for term in strong_terms + weak_terms:
         if term not in search_terms:
@@ -144,16 +142,13 @@ def normalize_query(task: str) -> dict[str, Any]:
 
 
 def term_key(interpreted: dict[str, Any]) -> str:
-    """Stable, order-independent key for a query's term set.
-
-    Used to associate retrieval-memory feedback with the same query intent
-    across calls, regardless of phrasing order or casing.
-    """
+    # strong+weak terms -> lowercased, sorted, joined key -- stable across phrasing/casing/order so retrieval-memory feedback matches the same query intent across calls
     terms = {str(t).strip().lower() for t in (interpreted.get("strong_terms") or []) + (interpreted.get("weak_terms") or []) if str(t).strip()}
     return "|".join(sorted(terms))
 
 
 def classify_path(path: str) -> str:
+    # path -> one of generated/instructions/test/status/docs/source/config/other, first matching rule wins
     p = path.replace("\\", "/")
     lower = p.lower()
     name = Path(p).name.lower()
@@ -177,6 +172,7 @@ def classify_path(path: str) -> str:
 
 
 def category_boost(category: str, intent: str) -> int:
+    # category + intent -> per-intent score table (source-first for dev intents, tests-first for test, docs-leaning for explain)
     if intent in {"debug", "feature", "refactor"}:
         return {"source": 20, "test": 14, "config": 9, "status": 7, "docs": 2, "instructions": -8, "generated": -30, "other": 0}.get(category, 0)
     if intent == "test":
@@ -187,14 +183,13 @@ def category_boost(category: str, intent: str) -> int:
 
 
 def extract_file_references(text: str) -> list[str]:
+    # scrapes explicit path-like references out of free text -- normal "path.ext" mentions, plus the "MainWindow.xaml(.cs)" shorthand
     refs: list[str] = []
-    # Normal explicit paths.
     pattern = r"[A-Za-z0-9_./\\-]+\.(?:cs|xaml|py|ts|tsx|js|jsx|md|json|xml|csproj|sln|props|targets|yml|yaml|toml|sql|swift|go|rs|java|kt|kts)"
     for match in re.findall(pattern, text):
         cleaned = match.strip("'\"`.,;()[]{}<>").replace("\\", "/")
         if cleaned and cleaned not in refs:
             refs.append(cleaned)
-    # Common shorthand: MainWindow.xaml(.cs)
     for match in re.findall(r"([A-Za-z0-9_./\\-]+\.xaml)\(\.cs\)", text):
         base = match.replace("\\", "/")
         for item in (base, base + ".cs"):

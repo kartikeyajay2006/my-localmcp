@@ -13,10 +13,12 @@ from typing import Any
 
 
 def json_out(data: Any) -> str:
+    # every mcp tool's result serializes through here -- single point of control for output shape
     return json.dumps(data, indent=2, ensure_ascii=False, default=str)
 
 
 def _ns_to_seconds(ns: Any) -> float | None:
+    # ollama raw durations are nanoseconds; anything unparseable -> None, never raises
     try:
         if ns is None:
             return None
@@ -26,6 +28,7 @@ def _ns_to_seconds(ns: Any) -> float | None:
 
 
 def _format_model_timing(result: dict[str, Any] | None) -> dict[str, Any] | None:
+    # raw ollama chat() result -> flat, client-friendly timing/status summary
     if not result:
         return None
     raw = result.get("raw") or {}
@@ -44,9 +47,7 @@ def _format_model_timing(result: dict[str, Any] | None) -> dict[str, Any] | None
 
 
 def _slim_status_for_nesting(status: dict[str, Any] | None) -> dict[str, Any] | None:
-    """Drop the verbose installed_models list from a second, nested copy of an Ollama
-    status dict. The top-level ollama_status key in the same response keeps the full
-    list; embedding it again inside ollama_summary/ollama_ranking is pure duplication."""
+    # drops installed_models from a nested copy; top-level ollama_status already carries the full list, so nesting it again is pure duplication
     if not status:
         return status
     return {k: v for k, v in status.items() if k != "installed_models"}

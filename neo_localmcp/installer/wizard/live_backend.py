@@ -72,8 +72,7 @@ def _os_label(paths: ManagedPaths) -> str:
 
 
 def _reporter_forwarding_to(emit: EmitFn) -> Reporter:
-    """A real Reporter whose printed line is also streamed to the UI."""
-
+    # real Reporter whose printed "LEVEL: message" lines also stream to the wizard UI as StepEvents
     def output_fn(line: str) -> None:
         level, _, rest = line.partition(": ")
         if level in _PREFIX_LEVELS and rest:
@@ -95,6 +94,7 @@ class LiveBackend:
     # -- read-only probes ------------------------------------------------- #
 
     def detect(self) -> DetectedInfo:
+        # detect_state() + registered clients -> the wizard's DetectedInfo snapshot
         state = detect_state(self._paths)
         kind = state.kind.value
         registered = self._registered_clients()
@@ -122,6 +122,7 @@ class LiveBackend:
         return [r.client for r in records if r.client in CLIENT_KEYS]
 
     def client_options(self) -> list[ClientOption]:
+        # each known client key -> its OS-specific config path/detail + whether it's currently registered
         registered = set(self._registered_clients())
         try:
             status = client_setup.client_status(server_command=self._paths.server_executable)
@@ -164,6 +165,7 @@ class LiveBackend:
         ]
 
     def ollama_info(self) -> OllamaInfo:
+        # config values + a live status probe -> reachability, installed models, and human-readable sizes
         cfg = config.load_config().get("ollama", {})
         base_url = str(cfg.get("base_url", "http://127.0.0.1:11434"))
         fast = str(cfg.get("fast_model", ""))
@@ -195,12 +197,7 @@ class LiveBackend:
 
     @staticmethod
     def _model_sizes() -> dict[str, str]:
-        """Per-model size, human-formatted, for wizard display.
-
-        Formatting (human_size) is a wizard presentation concern and stays here;
-        fetching the raw sizes is now ollama_client.model_sizes()'s public API
-        (#36) instead of reaching into that module's private _request_json.
-        """
+        # ollama_client.model_sizes()'s raw bytes -> human-formatted strings for display; formatting is a wizard-presentation concern, kept here
         return {name: human_size(size) for name, size in ollama_client.model_sizes().items()}
 
     # -- operations ------------------------------------------------------- #
@@ -218,6 +215,7 @@ class LiveBackend:
         )
 
     def run_operation(self, state: WizardState, emit: EmitFn) -> OperationOutcome:
+        # dry_run -> preview only; else dispatch to install/reinstall/uninstall, then optionally write Ollama config + rebuild the desktop bundle on success
         if state.dry_run:
             return self._dry_run(state, emit)
         try:
@@ -239,13 +237,11 @@ class LiveBackend:
                 log_hint=str(self._paths.logs),
             )
 
-        # Optional Ollama config on top of a successful install/reinstall.
         if (result.status is OperationStatus.SUCCEEDED
                 and state.configure_ollama and state.operation != OP_UNINSTALL):
             self._write_ollama_config(state, emit)
 
-        # Rebuild the versioned Claude Desktop .mcpb into the repo (dev-only, from a
-        # source checkout). Never an uninstall concern.
+        # dev-only rebuild of the versioned .mcpb from a source checkout; never an uninstall concern
         extra_details: tuple[str, ...] = ()
         if (result.status is OperationStatus.SUCCEEDED
                 and state.operation != OP_UNINSTALL):
@@ -256,13 +252,8 @@ class LiveBackend:
         return self._outcome_from_result(state, result, extra_details=extra_details)
 
     def _build_desktop_bundle(self, emit: EmitFn) -> str | None:
-        """Pack the versioned .mcpb into packages/claude-desktop/ when run from a
-        source checkout; return its path or None.
-
-        Dev-only: returns None (doing nothing) when the mcpb/ staging inputs are
-        absent. A build failure degrades to a warning -- it must never fail an
-        otherwise-successful install.
-        """
+        # packs the versioned .mcpb into packages/claude-desktop/ if run from a source checkout; dev-only, no staging inputs -> None
+        # a build failure degrades to a warning, never fails an otherwise-successful install
         try:
             written = build_mcpb(self._source_root, self._source_version)
         except Exception as exc:  # noqa: BLE001 - a build hiccup must not fail the install
@@ -275,6 +266,7 @@ class LiveBackend:
         return str(written)
 
     def _dry_run(self, state: WizardState, emit: EmitFn) -> OperationOutcome:
+        # previews the ordered action plan via cli.dry_run_plan + current detect_state; makes no changes
         from .. import cli as installer_cli  # public dry_run_plan() lives here; same repo
 
         key, plan = installer_cli.dry_run_plan(
@@ -297,6 +289,7 @@ class LiveBackend:
     def _outcome_from_result(
         self, state: WizardState, result: Any, *, extra_details: tuple[str, ...] = ()
     ) -> OperationOutcome:
+        # OperationResult -> wizard-facing OperationOutcome, branching on cancelled/succeeded/failed
         ok = result.status is OperationStatus.SUCCEEDED
         status = result.status.value
         op = result.operation.value

@@ -44,9 +44,7 @@ DEFAULT_STOP_TIMEOUT_SECONDS = 12.0
 
 
 def _servers_root() -> Path:
-    # Resolved dynamically from config.APP_DIR (not bound at import) so it follows
-    # both the NEO_LOCALMCP_HOME env used by spawned servers and the test fixture's
-    # APP_DIR override, without any caller needing to remember to patch it.
+    # resolved dynamically from config.APP_DIR (not bound at import), so it follows NEO_LOCALMCP_HOME/test APP_DIR overrides with no caller patching needed
     return config.process_registry_dir() / "servers"
 
 
@@ -68,6 +66,7 @@ def _stop_path(pid: int) -> Path:
 
 
 def pid_alive(pid: int, create_time: float | None = None) -> bool:
+    # create_time given -> psutil PID-reuse-safe check; else platform-native liveness probe (Windows WaitForSingleObject, else os.kill(pid, 0))
     if pid <= 0:
         return False
     if create_time is not None:
@@ -84,12 +83,10 @@ def pid_alive(pid: int, create_time: float | None = None) -> bool:
         kernel32 = ctypes.windll.kernel32
         handle = kernel32.OpenProcess(SYNCHRONIZE, False, int(pid))
         if not handle:
-            # NULL handle => process does not exist (or is inaccessible, which for a
-            # same-user server we treat as gone rather than risk a false "alive").
+            # NULL handle -> process gone or inaccessible; treat as gone rather than risk a false "alive"
             return False
         try:
-            # WAIT_TIMEOUT means the process object is not signaled => still running.
-            # This avoids the STILL_ACTIVE(259) exit-code ambiguity of GetExitCodeProcess.
+            # WAIT_TIMEOUT -> object not signaled -> still running; avoids GetExitCodeProcess's STILL_ACTIVE(259) ambiguity
             return kernel32.WaitForSingleObject(handle, 0) == WAIT_TIMEOUT
         finally:
             kernel32.CloseHandle(handle)
@@ -103,7 +100,7 @@ def pid_alive(pid: int, create_time: float | None = None) -> bool:
 
 
 def force_terminate(pid: int) -> bool:
-    """Last-resort external termination. Only reached when a graceful stop times out."""
+    # last-resort external termination; only reached when a graceful stop-file wait times out
     try:
         if os.name == "nt":
             os.kill(pid, signal.SIGTERM)  # maps to TerminateProcess on Windows
@@ -118,6 +115,7 @@ def force_terminate(pid: int) -> bool:
 
 
 def register_server(version: str, source: str = "managed-runtime") -> dict[str, Any]:
+    # this process's identity (pid/create_time/executable/cmdline) -> written atomically to servers/<pid>.json
     pid = os.getpid()
     process = psutil.Process(pid)
     try:
@@ -146,6 +144,7 @@ def register_server(version: str, source: str = "managed-runtime") -> dict[str, 
 
 
 def unregister_server(pid: int | None = None) -> None:
+    # removes this pid's registry + any stop-file it left behind; no pid -> self
     pid = os.getpid() if pid is None else pid
     for path in (_registry_path(pid), _stop_path(pid)):
         try:
@@ -162,7 +161,7 @@ def _read_registry_entry(path: Path) -> dict[str, Any] | None:
 
 
 def list_servers(prune: bool = True) -> list[dict[str, Any]]:
-    """Return registered servers with an `alive` flag, pruning dead entries by default."""
+    # every registry entry -> tagged with a live alive flag; prune=True also deletes dead/corrupt entries as it goes
     root = _servers_root()
     if not root.exists():
         return []
@@ -179,7 +178,7 @@ def list_servers(prune: bool = True) -> list[dict[str, Any]]:
         pid = int(entry["pid"])
         alive = pid_alive(pid, entry.get("create_time"))
         if not alive and prune:
-            # A server that died without unregistering (crash / force-kill). Clean up.
+            # died without unregistering (crash/force-kill) -> clean up
             unregister_server(pid)
             continue
         servers.append({**entry, "alive": alive})
@@ -198,6 +197,7 @@ def stop_requested(pid: int) -> bool:
 
 
 def resolve_stop_targets(pid: int | None = None, all_servers: bool = False, match_executable: str | None = None) -> list[int]:
+    # explicit pid wins -> else all_servers -> else match_executable substring against live servers -> else empty (no implicit "stop everything")
     if pid is not None:
         return [int(pid)]
     live = [s for s in list_servers(prune=True) if s.get("alive")]
@@ -210,8 +210,7 @@ def resolve_stop_targets(pid: int | None = None, all_servers: bool = False, matc
 
 
 def stop_servers(pids: list[int], timeout: float = DEFAULT_STOP_TIMEOUT_SECONDS, allow_force: bool = True, poll: float = 0.2) -> dict[str, Any]:
-    """Request graceful stop for each PID, wait up to `timeout`, escalate to force
-    only as a last resort. Returns a per-PID outcome and a summary."""
+    # write stop-file per pid -> poll until each exits or timeout -> escalate remaining to force_terminate as a last resort
     pids = [int(p) for p in pids]
     outcomes: dict[int, str] = {}
     for pid in pids:
@@ -263,19 +262,8 @@ def stop_servers(pids: list[int], timeout: float = DEFAULT_STOP_TIMEOUT_SECONDS,
 
 
 def _graceful_self_exit() -> None:
-    """Best-effort cleanup, then a process-initiated exit.
-
-    os._exit is deliberate: it is a *self* exit (clean OS-level teardown that
-    releases file locks and detaches the console without the ghost-frame artifact
-    an external TerminateProcess leaves), and it does not depend on unwinding the
-    blocked anyio/mcp.run loop on the main thread. It skips Python atexit/buffer
-    flushing, so we flush and unregister here first. The server holds no long-lived
-    in-process state -- SQLite connections are per-call and closed, and the WAL
-    protects integrity against an abrupt stop exactly as it would a crash -- so an
-    in-flight tool call being cut off is acceptable (the client reconnects to the
-    new server). If a future version holds per-connection state, drain it here
-    before the exit.
-    """
+    # flush + unregister first (os._exit skips atexit/buffer flushing), then a self-exit -- clean OS teardown, no ghost console frames, doesn't need to unwind the blocked anyio/mcp.run loop
+    # safe because the server holds no long-lived in-process state: sqlite connections are per-call+closed, WAL protects an abrupt stop same as a crash would
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.flush()
@@ -289,7 +277,7 @@ def _graceful_self_exit() -> None:
 
 
 def start_stop_watcher(poll: float = DEFAULT_POLL_SECONDS, on_stop: Callable[[], None] = _graceful_self_exit) -> threading.Thread:
-    """Start a daemon thread that exits the process when its stop-file appears."""
+    # daemon thread: polls for this pid's stop-file, calls on_stop() (self-exit) when it appears
     pid = os.getpid()
 
     def _loop() -> None:
