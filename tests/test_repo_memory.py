@@ -4,7 +4,6 @@ import pytest
 
 from neo_localmcp.retrieval import repo_memory
 
-# ci-verify: retrieval
 pytestmark = pytest.mark.retrieval
 
 
