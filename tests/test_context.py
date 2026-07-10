@@ -343,3 +343,84 @@ def test_excerpt_centers_on_highest_weight_hint_not_first_by_line(tmp_path, isol
     excerpt = next(e for e in result["context_excerpts"] if e["path"] == "module_a.py")
     target_line = next(i for i, line in enumerate(lines, start=1) if "RareMarkerNeedle" in line)
     assert excerpt["start_line"] <= target_line <= excerpt["end_line"]
+
+
+# 12a: index-freshness surfaced inline in prepare_context (docs/1.2.0_PLAN.md)
+
+def _git(repo, *args):
+    import subprocess
+    subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+
+
+def _init_git_repo(repo):
+    _git(repo, "init")
+    _git(repo, "config", "user.email", "test@test.local")
+    _git(repo, "config", "user.name", "test")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "initial")
+
+
+def test_index_repo_stamps_indexed_commit(tmp_path, isolated_config):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "service.py").write_text("def load_model():\n    return True\n", encoding="utf-8")
+    _init_git_repo(repo)
+    repo_memory.index_repo(repo)
+    conn = repo_memory.connect()
+    rid = repo_memory.upsert_repo(conn, repo)
+    from neo_localmcp.repo_utils import git_info
+    head = git_info(repo)["commit"]
+    assert head
+    assert repo_memory.get_repo_meta(conn, rid, "indexed_commit") == head
+
+
+def test_freshness_line_reports_commits_behind(tmp_path, isolated_config):
+    """Index at commit A, make N commits without staling any indexed file
+    (--allow-empty), and the freshness line must report exactly N behind,
+    pointing at refresh_index."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "service.py").write_text("def load_model():\n    return True\n", encoding="utf-8")
+    _init_git_repo(repo)
+    repo_memory.index_repo(repo)
+    for i in range(3):
+        _git(repo, "commit", "--allow-empty", "-m", f"empty {i}")
+    text = memory.prepare_context("load_model in service", str(repo), token_budget=800, max_files=2, output_format="mcp_text")
+    assert "index: 3 commits behind HEAD" in text
+    assert "refresh_index" in text
+
+
+def test_freshness_line_fresh_at_head(tmp_path, isolated_config):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "service.py").write_text("def load_model():\n    return True\n", encoding="utf-8")
+    _init_git_repo(repo)
+    repo_memory.index_repo(repo)
+    text = memory.prepare_context("load_model in service", str(repo), token_budget=800, max_files=2, output_format="mcp_text")
+    assert "index: fresh, at HEAD" in text
+
+
+def test_no_freshness_line_for_pre_upgrade_index(tmp_path, isolated_config):
+    """A repo indexed before 12a has no indexed_commit key: degrade to the
+    old output (no freshness line), never crash."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "service.py").write_text("def load_model():\n    return True\n", encoding="utf-8")
+    _init_git_repo(repo)
+    repo_memory.index_repo(repo)
+    conn = repo_memory.connect()
+    rid = repo_memory.upsert_repo(conn, repo)
+    conn.execute("DELETE FROM repo_metadata WHERE repo_id=? AND key='indexed_commit'", (rid,))
+    conn.commit()
+    text = memory.prepare_context("load_model in service", str(repo), token_budget=800, max_files=2, output_format="mcp_text")
+    assert "index: fresh" not in text
+    assert "commits behind HEAD" not in text
+
+
+def test_no_freshness_line_for_non_git_repo(tmp_path, isolated_config):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "service.py").write_text("def load_model():\n    return True\n", encoding="utf-8")
+    text = memory.prepare_context("load_model in service", str(repo), token_budget=800, max_files=2, output_format="mcp_text")
+    assert "index: fresh" not in text
+    assert "commits behind HEAD" not in text
