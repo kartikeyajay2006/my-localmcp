@@ -62,13 +62,8 @@ def _compact_line_hints(hints: list[str], max_hints: int = LINE_HINT_MAX_PER_FIL
 
 
 def _project_read_first_item(item: dict[str, Any], *, reason_limit: int | None = None, hint_limit: int | None = None) -> dict[str, Any]:
-    """Common path/category/score/line_hints/reasons projection of a
-    read_first/candidate_files item (#30, 1.2), shared by the MCP-compact
-    renderer and the determinism-hash projection. They differ only in
-    whether hints/reasons are compacted or capped: pass a limit to compact,
-    or leave it None to keep every raw entry (the determinism hash needs the
-    full, uncompacted shape to stay stable field-for-field across runs).
-    """
+    # candidate item -> path/category/score/hints/reasons projection
+    # shared by MCP-compact renderer (pass a limit) and determinism hash (pass None, keeps full raw shape stable)
     reasons = item.get("reasons") or []
     hints = item.get("line_hints") or []
     return {
@@ -81,13 +76,12 @@ def _project_read_first_item(item: dict[str, Any], *, reason_limit: int | None =
 
 
 def _git_summary(git: dict[str, Any]) -> str:
-    """Shared "branch=... commit=... dirty=..." fragment (#30, 1.2) -- the CLI
-    text and MCP-tiny renderers built this line independently and identically,
-    differing only in the leading label's casing."""
+    # shared "branch=... commit=... dirty=..." fragment, used by both text renderers below
     return f"branch={git.get('branch')} commit={str(git.get('commit') or '')[:12]} dirty={git.get('dirty_files')}"
 
 
 def _render_context_text(data: dict[str, Any]) -> str:
+    # full human-readable CLI text: repo/git/query header -> read first -> other candidates -> guidance -> ollama
     lines: list[str] = []
     interp = data.get("interpreted_query", {})
     repo = data.get("repo_status", {})
@@ -145,12 +139,8 @@ def _render_context_text(data: dict[str, Any]) -> str:
 
 
 def _mcp_compact_context(data: dict[str, Any]) -> dict[str, Any]:
-    """Compact context response for MCP clients.
-
-    Claude Desktop/Code and Codex clients can hang or feel slow if a tool returns the
-    full diagnostic search payload. Keep the default MCP result small and useful,
-    while leaving the CLI JSON path able to expose full diagnostics.
-    """
+    # trims the full diagnostic payload -> small MCP-safe response
+    # full payload still available via CLI --format json
     repo = data.get("repo_status") or {}
     git = repo.get("git") or {}
 
@@ -197,12 +187,8 @@ def _mcp_compact_context(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def _sanitize_ollama_advisory(text: str, max_chars: int = 1200) -> str:
-    """Return a short, client-safe Ollama advisory.
-
-    Deterministic READ FIRST is authoritative. Ollama text is advisory and can be
-    verbose or malformed near timeout boundaries, so the MCP response only includes
-    a bounded, line-aware excerpt.
-    """
+    # raw ollama text -> strip control chars -> keep only recognized section lines -> cap at max_chars
+    # advisory only; deterministic READ FIRST stays authoritative regardless of this output
     cleaned = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", str(text or "")).strip()
     cleaned = re.sub(r"[ \t]+", " ", cleaned)
     lines = [line.rstrip() for line in cleaned.splitlines()]
@@ -233,12 +219,7 @@ def _sanitize_ollama_advisory(text: str, max_chars: int = 1200) -> str:
 
 
 def _mcp_tiny_context_text(data: dict[str, Any]) -> str:
-    """Ultra-small plain-text context for MCP clients.
-
-    Some MCP clients handle plain text more reliably than nested JSON for tool results.
-    This is the default server response in V1. It intentionally omits diagnostic
-    search payloads; the CLI JSON path remains available for full debugging.
-    """
+    # default V1 server response: plain text, no diagnostic payload (some MCP clients handle text more reliably than nested JSON)
     repo = data.get("repo_status") or {}
     git = repo.get("git") or {}
     interp = data.get("interpreted_query") or {}
@@ -315,6 +296,7 @@ def _mcp_tiny_context_text(data: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 def _format(data: dict[str, Any], output_format: str = "json") -> str:
+    # output_format + mode -> render fn; falls through to raw json for anything else
     if output_format == "text" and data.get("mode") == "agent_ready_natural_context":
         return _render_context_text(data)
     if output_format in {"mcp_text", "mcp_tiny", "agent_text"} and data.get("mode") == "agent_ready_natural_context":
@@ -325,7 +307,7 @@ def _format(data: dict[str, Any], output_format: str = "json") -> str:
 
 
 def _stable_context_projection(data: dict[str, Any]) -> dict[str, Any]:
-    """Keep the fields that must be identical for deterministic context tests."""
+    # fields that must be identical run-to-run for the determinism test
     repo = data.get("repo_status") or {}
     git = repo.get("git") or {}
     return {
@@ -345,9 +327,8 @@ def _stable_hash(data: dict[str, Any]) -> str:
 
 
 def test_determinism(task: str, repo_root: str = "auto", runs: int = 5, max_files: int = 6, limit: int = 6, reset_repo_first: bool = False, reindex_first: bool = False, *, record: bool = True) -> str:
-    """`record` is internal-only, same as context_prepare's -- only the
-    benchmark tool (#9) passes record=False, so its determinism-gate calls
-    (5+ context_prepare calls per query) don't get recorded as real usage."""
+    # optional reset/reindex -> N identical context_prepare calls -> hash each -> compare -> diff report if mismatched
+    # record=False is benchmark-only, so its repeated gate calls aren't logged as real usage
     if runs < 2:
         runs = 2
     root = repo_root_or_cwd(repo_root)
@@ -396,21 +377,21 @@ def test_determinism(task: str, repo_root: str = "auto", runs: int = 5, max_file
 
 
 def file_context(path: str, repo_root: str = "auto", around_line: int | None = None, context_lines: int = 40) -> str:
+    # single-file excerpt centered on around_line, for a targeted follow-up read
     return json_out(repo_memory.file_context(path, repo_root, around_line=around_line, context_lines=context_lines))
 
 
 def file_excerpts(ranges: list[dict[str, Any]], repo_root: str = "auto", max_chars: int = 20_000, retrieval_id: str | None = None) -> str:
+    # explicit ranges -> raw excerpts; retrieval_id present -> also record as implicit success signal for that earlier prepare_context call
+    # feeds only the capped retrieval_boost table, never changes what's already returned here
     result = repo_memory.file_excerpts(ranges, repo_root, max_chars=max_chars)
     if retrieval_id:
-        # P4/P5 (1.0.6): an explicit follow-up pull is the implicit success signal
-        # for the earlier prepare_context call that returned this retrieval_id.
-        # This only ever feeds the capped retrieval_boost table; it cannot change
-        # what was already returned here.
         result["retrieval_feedback"] = repo_memory.record_retrieval_feedback(retrieval_id, repo_root, ranges)
     return json_out(result)
 
 
 def _resolve_reference(ref: str, indexed_files: list[str]) -> list[str]:
+    # loose path/basename reference -> up to 5 matching indexed files
     ref_norm = ref.replace("\\", "/").strip("/")
     out: list[str] = []
     for path in sorted(indexed_files):
@@ -421,6 +402,7 @@ def _resolve_reference(ref: str, indexed_files: list[str]) -> list[str]:
 
 
 def _line_hint_from_reason(reason: str) -> str | None:
+    # scrapes a "line N" / "lines N-M" hint out of a free-text scoring reason
     m = re.search(r"line (\d+)", reason)
     if m:
         n = int(m.group(1))
@@ -432,6 +414,7 @@ def _line_hint_from_reason(reason: str) -> str | None:
 
 
 def _add_candidate(candidates: dict[str, dict[str, Any]], path: str, reason: str, score: int, intent: str, *, line_hint: str | None = None, allow_reason_line_hint: bool = True, strong_term: str | None = None) -> None:
+    # path -> candidates[path] (create if new) -> accumulate score/reasons/line_hints in place
     category = classify_path(path)
     if path not in candidates:
         candidates[path] = {"path": path, "category": category, "score": category_boost(category, intent), "reasons": [], "line_hints": [], "line_hint_weights": {}, "strong_terms_matched": set()}
@@ -463,6 +446,7 @@ def _group_line_hints_for_guidance(item: dict[str, Any]) -> str:
 
 
 def _agent_guidance(read_first: list[dict[str, Any]], interpreted: dict[str, Any]) -> list[str]:
+    # read_first + interpreted query -> short list of always-on + conditional guidance lines for the calling agent
     lines: list[str] = []
     if read_first:
         compact = []
@@ -494,12 +478,8 @@ def _heading_words(name: str) -> set[str]:
 
 
 def _heading_match_score(term: str, sym: dict[str, Any], interpreted: dict[str, Any]) -> tuple[int, str]:
-    """Score a heading-symbol candidate hit.
-
-    An exact milestone token (e.g. ``f4.7``) appearing in a heading is the
-    strongest document signal available and must beat incidental code-symbol
-    collisions on generic words like ``render``.
-    """
+    # term in heading words -> score bump: exact milestone token (e.g. "f4.7") > generic heading-term match > base
+    # milestone must beat incidental code-symbol collisions on generic words like "render"
     base = _term_score(term, interpreted, 16, 10)
     words = _heading_words(sym.get("name", ""))
     term_l = term.lower()
@@ -512,12 +492,8 @@ def _heading_match_score(term: str, sym: dict[str, Any], interpreted: dict[str, 
 
 
 def _best_heading_section(path: str, symbol_hits: list[dict[str, Any]], interpreted: dict[str, Any]) -> dict[str, Any] | None:
-    """Pick the heading section in ``path`` that best matches the query terms.
-
-    This is what lets a filename-anchored or free-text doc query land on the
-    correct section instead of line 1. Returns the winning heading symbol, or
-    ``None`` when no heading's text overlaps the query.
-    """
+    # query terms -> best-overlapping heading in path, or None if no heading matches
+    # lets a doc query land on the correct section instead of line 1
     strong = [t.lower() for t in interpreted.get("strong_terms", [])]
     weak = [t.lower() for t in interpreted.get("weak_terms", [])]
     best: dict[str, Any] | None = None
@@ -544,12 +520,8 @@ def _best_heading_section(path: str, symbol_hits: list[dict[str, Any]], interpre
 
 
 def _score_index_and_symbol_hits(terms: list[str], interpreted: dict[str, Any], root: Path, limit: int, intent: str) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]]:
-    """Job (c1) of context_prepare (#29): score repo_memory.lookup's index/symbol
-    hits per term into a fresh candidates dict, collecting every symbol hit seen
-    along the way. First job in the pipeline, so it originates candidates/
-    symbol_hits rather than receiving them -- later jobs take and mutate/return
-    the same dict this returns.
-    """
+    # pipeline step 1/7: term -> repo_memory.lookup index/symbol hits -> candidates + symbol_hits
+    # originates both dicts; every later step takes and mutates/returns them
     candidates: dict[str, dict[str, Any]] = {}
     symbol_hits: list[dict[str, Any]] = []
     strong_terms_set = set(interpreted.get("strong_terms") or [])
@@ -580,12 +552,8 @@ def _score_index_and_symbol_hits(terms: list[str], interpreted: dict[str, Any], 
 
 
 def _score_batched_search(batch_terms: list[str], interpreted: dict[str, Any], root: Path, limit: int, intent: str, indexed_files: list[str], candidates: dict[str, dict[str, Any]], strong_terms_set: set[str]) -> tuple[dict[str, dict[str, Any]], dict[str, list[dict[str, Any]]], list[dict[str, Any]]]:
-    """Job (c2) of context_prepare (#29): one batched rg_search across every
-    term, scoring each hit into `candidates` (mutated in place; the same dict
-    is returned so the pipeline reads as take-and-return, not a silent
-    closure mutation), and following any doc/status file's source references
-    into extra candidates. Returns (candidates, search_results, followed_references).
-    """
+    # pipeline step 2/7: all terms -> one batched rg_search -> score hits into candidates (mutated + returned, not a silent closure)
+    # doc/status file hit -> follow its source references -> extra candidates
     search_results: dict[str, list[dict[str, Any]]] = {}
     followed_references: list[dict[str, Any]] = []
     if batch_terms:
@@ -614,13 +582,8 @@ def _score_batched_search(batch_terms: list[str], interpreted: dict[str, Any], r
 
 
 def _resolve_explicit_paths(task: str, terms: list[str], indexed_files: list[str], candidates: dict[str, dict[str, Any]], intent: str, strong_terms_set: set[str]) -> set[str]:
-    """Job (c3) of context_prepare (#29): resolve any file path/reference named
-    directly in the raw task text or in a search term to a real indexed file,
-    adding each as a strong "direct file reference" candidate (mutates
-    `candidates` in place). Returns the resolved explicit_paths set -- used
-    both by the later "explicit path in task" bonus and by read_first
-    selection's "explicit paths are authoritative" rule.
-    """
+    # pipeline step 3/7: task text/terms -> resolved indexed file paths -> strong "direct file reference" candidates
+    # returned explicit_paths also drives read_first's "explicit paths are authoritative" rule below
     explicit_paths: set[str] = set()
     for reference in extract_file_references(task):
         explicit_paths.update(_resolve_reference(reference, indexed_files))
@@ -633,14 +596,8 @@ def _resolve_explicit_paths(task: str, terms: list[str], indexed_files: list[str
 
 
 def _apply_retrieval_boost(candidates: dict[str, dict[str, Any]], root: Path, interpreted: dict[str, Any], symbol_hits: list[dict[str, Any]]) -> str | None:
-    """Job (d) of context_prepare (#29): a small, capped, recency-gated nudge
-    from prior sessions' implicit feedback (repo_memory.get_boost_map). Runs
-    after all structural scoring and is bounded well below any structural
-    signal (a heading milestone match alone is +60), so memory can only break
-    near-ties, never override a real structural match. Mutates candidate
-    scores/reasons in place; returns the term_key (also needed later to
-    record this call's own task query).
-    """
+    # pipeline step 4/7: prior sessions' implicit feedback -> small capped nudge on candidate scores
+    # runs last, after all structural scoring, and stays well below any structural signal (a milestone match alone is +60) -- can only break near-ties, never override structure
     term_key = compute_term_key(interpreted)
     if term_key and candidates:
         boost_map = repo_memory.get_boost_map(root, term_key, list(candidates.keys()))
@@ -656,12 +613,8 @@ def _apply_retrieval_boost(candidates: dict[str, dict[str, Any]], root: Path, in
 
 
 def _select_read_first(candidates: dict[str, dict[str, Any]], explicit_paths: set[str], intent: str, limit: int, max_files: int | None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Job (e) of context_prepare (#29): finalize each candidate's
-    reasons/line_hints, sort into `ranked`, then fill `read_first` up to
-    read_limit -- explicit user paths first (authoritative even for
-    feature/debug tasks), then source-first policy for dev-shaped intents,
-    then whatever's left in ranked order. Returns (ranked, read_first).
-    """
+    # pipeline step 5/7: candidates -> sorted ranked list -> read_first fill order:
+    # explicit user paths (always first) -> source/test/config for dev intents -> remaining ranked order
     for item in candidates.values():
         item["reasons"] = sorted(item.get("reasons", []))
         item["line_hints"] = _compact_line_hints(item.get("line_hints", []))
@@ -688,13 +641,8 @@ def _select_read_first(candidates: dict[str, dict[str, Any]], explicit_paths: se
 
 
 def _build_excerpt_ranges(read_first: list[dict[str, Any]], symbol_hits: list[dict[str, Any]], interpreted: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]], list[dict[str, Any]]]:
-    """Job (f) of context_prepare (#29): pick the excerpt range for each
-    read_first item via a three-tier fallback -- matched heading section (a
-    long doc opens at the relevant section, not its first line), then the
-    exact symbol/strong-term match, then the highest-weighted line hint (tie
-    breaking to the earliest line for determinism). Returns (ranges,
-    section_by_path, sections_for_memory).
-    """
+    # pipeline step 6/7: read_first item -> excerpt range via 3-tier fallback:
+    # matched heading section -> exact symbol/strong-term match -> highest-weighted line hint (ties -> earliest line, for determinism)
     ranges: list[dict[str, Any]] = []
     section_by_path: dict[str, dict[str, Any]] = {}
     sections_for_memory: list[dict[str, Any]] = []
@@ -736,13 +684,8 @@ def _build_excerpt_ranges(read_first: list[dict[str, Any]], symbol_hits: list[di
 
 
 def _run_ollama_ranking(task: str, interpreted: dict[str, Any], ranked: list[dict[str, Any]], limit: int, model: str | None) -> dict[str, Any] | None:
-    """Job (h) of context_prepare (#29): build the second-pass ranking-review
-    prompt and call the fast Ollama model. Advisory only -- the deterministic
-    READ FIRST built by earlier jobs is never replaced by this, only
-    reviewed. Caller only invokes this when Ollama ranking was requested and
-    there is something to rank (`use_ollama and ranked`); this function
-    itself always runs the call. Returns the raw chat() result.
-    """
+    # pipeline step 7/7 (optional): ranked candidates -> second-pass review prompt -> fast model call
+    # advisory only, never replaces the deterministic READ FIRST built above; caller gates on use_ollama, this fn always calls when invoked
     prompt = f"""
 You are a second-pass ranking reviewer for neo-localmcp. You improve the deterministic repo context; you do not replace it. Do not write source code.
 
@@ -766,15 +709,8 @@ Candidate files, scores, reasons, and line hints:
 
 
 def context_prepare(task: str, repo_root: str = "auto", max_files: int | None = None, limit: int = 6, use_ollama: bool = False, model: str | None = None, output_format: str = "json", token_budget: int = 3000, *, record: bool = True) -> str:
-    """Core retrieval implementation; prepare_context is the MCP/CLI adapter over this.
-
-    `record` is internal-only -- not exposed via the MCP tool or the CLI's
-    `context` subcommand, both of which always record real usage. Only the
-    benchmark tool (#9) calls this with `record=False`, since a benchmark
-    query must never be recorded into task_queries/retrieval_boost as if it
-    were real usage -- that's not a config option, it's always off for
-    benchmark-invoked calls.
-    """
+    # core retrieval pipeline: task -> index refresh -> score (index/symbol + batched search + explicit paths) -> boost -> read_first -> excerpt ranges -> optional ollama review -> render
+    # record=False is benchmark-only (not exposed via MCP/CLI); real usage is always recorded
     root = repo_root_or_cwd(repo_root)
     status_data = repo_memory.status(root)
     refreshed = False
@@ -800,12 +736,7 @@ def context_prepare(task: str, repo_root: str = "auto", max_files: int | None = 
     candidates, search_results, followed_references = _score_batched_search(batch_terms, interpreted, root, limit, intent, indexed_files, candidates, strong_terms_set)
     explicit_paths = _resolve_explicit_paths(task, terms, indexed_files, candidates, intent, strong_terms_set)
 
-    # Distinct-strong-term-coverage bonus (#24): a file that co-occurs with several
-    # *different* strong terms is much stronger evidence of relevance than a file
-    # that racks up many repeated hits on a single overloaded term (e.g. "migration"
-    # matching every symbol in a filesystem-layout-migration module by coincidence of
-    # vocabulary). Applied once per candidate, after all term-matching passes above,
-    # so it reflects breadth of query coverage rather than depth of one term's hits.
+    # coverage bonus: 2+ distinct strong terms matched -> extra score (breadth of query match beats depth on one overloaded term)
     for item in candidates.values():
         matched = item.pop("strong_terms_matched", None) or set()
         if len(matched) > 1:
@@ -877,9 +808,10 @@ def context_prepare(task: str, repo_root: str = "auto", max_files: int | None = 
 
 
 def prepare_context(task: str, repo_root: str = "auto", token_budget: int = 3000, max_files: int = 6, use_ollama: bool = False, model: str | None = None, output_format: str = "mcp_text", *, record: bool = True) -> str:
-    """MCP/CLI-facing adapter -- see context_prepare for the core implementation."""
+    # MCP/CLI-facing adapter over context_prepare; max_files here maps to that fn's `limit`
     return context_prepare(task, repo_root, max_files=None, limit=max_files, use_ollama=use_ollama, model=model, output_format=output_format, token_budget=token_budget, record=record)
 
 
 def record_change(summary: str, paths: list[str], repo_root: str = "auto") -> str:
+    # logs a completed edit against the touched paths, for later retrieval-boost signal
     return json_out(repo_memory.record_change(summary, paths, repo_root))
