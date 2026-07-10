@@ -38,6 +38,7 @@ def configure_models(
     base_url: str | None = None,
     fast_model: str | None = None,
     summary_model: str | None = None,
+    embed_model: str | None = None,
     num_ctx: int | None = None,
 ) -> dict[str, Any]:
     # only given (truthy) fields change; omitted fields keep their current persisted value
@@ -50,6 +51,8 @@ def configure_models(
         ollama_cfg["fast_model"] = fast_model
     if summary_model:
         ollama_cfg["summary_model"] = summary_model
+    if embed_model:
+        ollama_cfg["embed_model"] = embed_model
     if num_ctx:
         ollama_cfg["num_ctx"] = int(num_ctx)
     save_config(cfg)

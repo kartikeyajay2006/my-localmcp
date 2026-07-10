@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import array
 import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from .. import ollama_client
 from ..config import db_path, load_config
 
 INDEXER_VERSION = "1.2.0"
@@ -129,6 +131,15 @@ def init_db(conn: sqlite3.Connection) -> None:
             prompt_version TEXT,
             created_at TEXT NOT NULL,
             UNIQUE(repo_id, file_path, heading_name)
+        );
+        CREATE TABLE IF NOT EXISTS file_embeddings (
+            repo_id TEXT NOT NULL,
+            path TEXT NOT NULL,
+            model TEXT NOT NULL,
+            content_hash TEXT NOT NULL,
+            vector BLOB NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY(repo_id, path)
         );
         CREATE VIRTUAL TABLE IF NOT EXISTS repo_fts USING fts5(repo_id UNINDEXED, kind UNINDEXED, target UNINDEXED, body);
         """
@@ -260,6 +271,7 @@ def _delete_indexed_path(conn: sqlite3.Connection, rid: str, relative: str) -> N
     # removes a path's symbols/fts/files rows together, for a deleted or no-longer-selected file
     conn.execute("DELETE FROM symbols WHERE repo_id=? AND file_path=?", (rid, relative))
     conn.execute("DELETE FROM repo_fts WHERE repo_id=? AND (target=? OR target LIKE ?)", (rid, relative, relative + ":%"))
+    conn.execute("DELETE FROM file_embeddings WHERE repo_id=? AND path=?", (rid, relative))
     conn.execute("DELETE FROM files WHERE repo_id=? AND path=?", (rid, relative))
 
 
@@ -301,6 +313,7 @@ def index_repo(repo_root: str | Path | None = None, max_files: int | None = None
         set_repo_meta(conn, rid, "indexed_branch", str(git.get("branch") or ""))
         set_repo_meta(conn, rid, "indexed_commit", str(git.get("commit") or ""))
         set_repo_meta(conn, rid, "last_indexed_at", indexed_at)
+        _generate_embeddings(conn, root, rid, changed_paths)  # lazy semantic layer; no-op unless embed_model set + Ollama up
     return {
         "ok": errors == 0,
         "repo_root": str(root),
@@ -394,6 +407,66 @@ def index_freshness(repo_root: str | Path | None = None, head_commit: str | None
         except ValueError:
             return None
     return {"indexed_commit": indexed_commit, "head_commit": head, "commits_behind": behind, "fresh": behind == 0}
+
+
+def _vector_to_blob(vector: list[float]) -> bytes:
+    # float list -> packed float32 bytes (compact, deterministic, stdlib-only)
+    return array.array("f", [float(x) for x in vector]).tobytes()
+
+
+def _blob_to_vector(blob: bytes) -> list[float]:
+    arr = array.array("f")
+    arr.frombytes(bytes(blob))
+    return arr.tolist()
+
+
+def store_file_embedding(conn: sqlite3.Connection, rid: str, path: str, model: str, content_hash: str, vector: list[float]) -> None:
+    # one embedding per (repo, path); re-index replaces it, so a content change (new hash) supersedes the stale vector
+    conn.execute(
+        """
+        INSERT INTO file_embeddings(repo_id, path, model, content_hash, vector, created_at)
+        VALUES(?, ?, ?, ?, ?, ?)
+        ON CONFLICT(repo_id, path) DO UPDATE SET
+            model=excluded.model, content_hash=excluded.content_hash, vector=excluded.vector, created_at=excluded.created_at
+        """,
+        (rid, path, model, content_hash, _vector_to_blob(vector), now_iso()),
+    )
+
+
+def get_file_embeddings(conn: sqlite3.Connection, rid: str, paths: list[str]) -> dict[str, dict[str, Any]]:
+    # path -> {model, content_hash, vector} for the requested paths that have a stored embedding
+    if not paths:
+        return {}
+    placeholders = ",".join("?" for _ in paths)
+    rows = conn.execute(
+        f"SELECT path, model, content_hash, vector FROM file_embeddings WHERE repo_id=? AND path IN ({placeholders})",
+        (rid, *paths),
+    ).fetchall()
+    return {str(row["path"]): {"model": row["model"], "content_hash": row["content_hash"], "vector": _blob_to_vector(row["vector"])} for row in rows}
+
+
+def repo_has_embeddings(conn: sqlite3.Connection, rid: str) -> bool:
+    # cheap existence check gating the whole semantic-rerank path -> False means "behave exactly as pre-12b"
+    return conn.execute("SELECT 1 FROM file_embeddings WHERE repo_id=? LIMIT 1", (rid,)).fetchone() is not None
+
+
+def _generate_embeddings(conn: sqlite3.Connection, root: Path, rid: str, changed_paths: list[str]) -> None:
+    # lazy, non-blocking: embed_model unset -> return (zero network); else embed each changed file, stop the pass on the first non-ok so a down/busy Ollama costs one probe, not one per file
+    embed_model = load_config().get("ollama", {}).get("embed_model")
+    if not embed_model or not changed_paths:
+        return
+    for relative in changed_paths:
+        p = root / relative
+        try:
+            text = read_text_file(p, int(load_config().get("repo", {}).get("summary_max_chars", 80_000)))
+            content_hash = sha256_file(p)
+        except OSError:
+            continue
+        result = ollama_client.embed(text)
+        if not result.get("ok"):
+            break  # Ollama unavailable/busy this pass -> skip the rest, backfills next index
+        store_file_embedding(conn, rid, relative, str(result.get("model") or embed_model), content_hash, result.get("vector") or [])
+    conn.commit()
 
 
 def lookup(query: str, repo_root: str | Path | None = None, limit: int = 20) -> dict[str, Any]:
@@ -790,7 +863,7 @@ def reset_repo(repo_root: str | Path | None = None) -> dict[str, Any]:
     conn = connect()
     rid = repo_id(root)
     counts_before: dict[str, int] = {}
-    for table in ["files", "symbols", "task_queries", "change_events", "retrieval_boost", "section_summaries", "repo_metadata", "repos"]:
+    for table in ["files", "symbols", "task_queries", "change_events", "retrieval_boost", "section_summaries", "file_embeddings", "repo_metadata", "repos"]:
         if table == "repos":
             row = conn.execute("SELECT COUNT(*) AS n FROM repos WHERE id=?", (rid,)).fetchone()
         else:
@@ -802,6 +875,7 @@ def reset_repo(repo_root: str | Path | None = None) -> dict[str, Any]:
     conn.execute("DELETE FROM change_events WHERE repo_id=?", (rid,))
     conn.execute("DELETE FROM retrieval_boost WHERE repo_id=?", (rid,))
     conn.execute("DELETE FROM section_summaries WHERE repo_id=?", (rid,))
+    conn.execute("DELETE FROM file_embeddings WHERE repo_id=?", (rid,))
     conn.execute("DELETE FROM repo_metadata WHERE repo_id=?", (rid,))
     conn.execute("DELETE FROM repo_fts WHERE repo_id=?", (rid,))
     conn.execute("DELETE FROM repos WHERE id=?", (rid,))
