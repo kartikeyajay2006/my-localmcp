@@ -18,6 +18,7 @@ from ._shared import json_out
 
 
 def init() -> str:
+    # first run: create config if missing -> hand back onboarding steps
     path = ensure_config()
     return json_out({
         "ok": True,
@@ -33,10 +34,12 @@ def init() -> str:
 
 
 def status(repo_root: str = "auto") -> str:
+    # identity + repo index status + live ollama ping -> single snapshot
     return json_out({"product": IDENTITY.as_dict(), "config_path": str(CONFIG_PATH), "repo": repo_memory.status(repo_root), "ollama": ping()})
 
 
 def where(repo_root: str = "auto") -> str:
+    # "auto" -> resolve to cwd; reports concrete paths for user-facing debugging
     cfg = load_config()
     root = repo_root_or_cwd(repo_root)
     return json_out({
@@ -52,6 +55,7 @@ def where(repo_root: str = "auto") -> str:
 
 
 def model_status() -> str:
+    # ollama config + live ping -> quick model-readiness check
     cfg = load_config()
     return json_out({
         "ollama_config": cfg.get("ollama", {}),
@@ -61,7 +65,8 @@ def model_status() -> str:
 
 
 def doctor(repo_root: str = "auto") -> str:
-    from .. import mcp_server_lifecycle as lifecycle
+    # config + ollama + repo status + running servers -> one diagnostic payload
+    from .. import mcp_server_lifecycle as lifecycle  # local: only doctor() needs psutil's process-listing cost
     cfg = load_config()
     checks = {
         "config_exists": CONFIG_PATH.exists(),
@@ -82,24 +87,31 @@ def doctor(repo_root: str = "auto") -> str:
 
 
 def repo_index(repo_root: str = "auto", max_files: int | None = None, force: bool = False) -> str:
+    # entrypoint for indexing this repo into the shared sqlite memory
+    # first index or hash-aware incremental, unless force -> full rebuild
     return json_out(repo_memory.index_repo(repo_root, max_files=max_files, force=force))
 
 
 def repo_reindex(repo_root: str = "auto", max_files: int | None = None) -> str:
+    # repo_index with force pinned true -> always full rebuild
     return json_out(repo_memory.index_repo(repo_root, max_files=max_files, force=True))
 
 
 def reset_repo(repo_root: str = "auto") -> str:
+    # wipes this repo's indexed data only; other indexed repos in the shared db are untouched
     return json_out(repo_memory.reset_repo(repo_root))
 
 
 def reset_all() -> str:
+    # destructive: wipes repo-context.sqlite for every indexed repo, not just this one
     return json_out(repo_memory.reset_all())
 
 
 def repo_refresh(repo_root: str = "auto", max_files: int | None = None, force: bool = False) -> str:
+    # thin alias: refresh() is hash-aware re-index under the hood, same as repo_index
     return json_out(repo_memory.refresh(repo_root, force=force, max_files=max_files))
 
 
 def repo_lookup(query: str, repo_root: str = "auto", limit: int = 20) -> str:
+    # read-only FTS probe against indexed symbols/files; hot path, no branch/remote refresh
     return json_out(repo_memory.lookup(query, repo_root, limit=limit))

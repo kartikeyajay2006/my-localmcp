@@ -86,6 +86,32 @@ neo-localmcp context "debug repository indexing: index_repo, refresh" --repo-roo
   session that changes verified behavior — status/limitations in the former, a
   one-or-two-line dated entry in the latter.
 
+## Code commenting standard
+
+Use concise developer comments when editing or generating code. The goal is
+better navigation for Neel and future maintainers, not more comments.
+
+Functions may have up to three short comment lines that describe purpose,
+responsibility, inputs, outputs, or important constraints. Prefer compact
+pseudocode-like sentences over prose paragraphs.
+
+Use breadcrumb comments (`input -> state -> UI`, `action -> mutation -> redraw`,
+`parent -> child`, `state -> visual`, `old position -> new position`, `if X then Y`)
+only when the code is genuinely following a clear multi-step process or branch —
+a real A -> B -> C or conditional flow. Don't force arrow notation onto code that
+isn't actually a process/state transition; default to a short pseudocode-like
+sentence comment instead. Use `^` only when it clearly points to the concept
+directly above.
+
+Lightweight concept tags are welcome when they make a section easier to scan:
+`#Binding`, `#StateFlow`, `#Animation`, `#Layout`, `#MatchedGeometry`,
+`#Preview`, `#Action`, `#Persistence`, and `#Render`.
+
+Sentence-style comments are fine when useful, but keep them short, direct, and
+technical. Avoid comments that explain obvious syntax, repeat the code,
+describe every modifier, over-document simple styling, or fragment the code with
+noise. Use longer comments only for genuinely tricky concepts.
+
 ## GitHub workflow
 
 - **`main` is merge-only, enforced by branch protection**, not just a stated

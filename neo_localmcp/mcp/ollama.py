@@ -14,6 +14,8 @@ from ._shared import json_out
 
 
 def set_ollama(base_url: str | None = None, summary_model: str | None = None, fast_model: str | None = None, num_ctx: int | None = None) -> str:
+    # writes model config to disk, then reports live daemon status
+    # does NOT invalidate/regenerate existing summaries on a model swap (see CLAUDE.md known gaps, issue #8)
     ollama_cfg = installer_configure_models(
         base_url=base_url, fast_model=fast_model, summary_model=summary_model, num_ctx=num_ctx,
     )
@@ -21,14 +23,18 @@ def set_ollama(base_url: str | None = None, summary_model: str | None = None, fa
 
 
 def ollama_status(model: str | None = None, purpose: str = "ranking") -> str:
+    # purpose "ranking"/"query" -> fast_model, else -> summary_model
     return json_out(ollama_state(model, purpose))
 
 
 def ollama_ensure(model: str | None = None, purpose: str = "ranking") -> str:
+    # confirms model reachable, auto-starting/warming the daemon if needed
     return json_out(ensure_ollama(model, purpose))
 
 
 def ollama_control(action: str, model: str | None = None, purpose: str = "ranking") -> str:
+    # single dispatcher for all daemon actions: action string -> lambda -> invoke
+    # unknown action -> error payload instead of raising, since this is MCP-facing
     actions = {
         "status": lambda: ollama_state(model, purpose),
         "ensure": lambda: ensure_ollama(model, purpose),
