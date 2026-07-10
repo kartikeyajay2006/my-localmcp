@@ -50,6 +50,8 @@ mcp = FastMCP(IDENTITY.mcp_server_name, instructions=SERVER_INSTRUCTIONS)
 
 
 async def _resolve_repo_root(repo_root: str, ctx: Context) -> str:
+    # Fallback chain: explicit repo_root -> NEO_LOCALMCP_REPO env -> config default_root -> the sole MCP file root.
+    # Zero or multiple client roots is ambiguous scope -> raise rather than guess.
     if repo_root and repo_root not in {"auto", "."}:
         return str(Path(repo_root).expanduser().resolve())
     env_root = os.environ.get("NEO_LOCALMCP_REPO")
