@@ -80,8 +80,7 @@ class CommandRunner(Protocol):
 
 
 class SubprocessCommandRunner:
-    """Real command runner. Always passes an argument list; never uses a shell."""
-
+    # real runner: argument list only, never a shell; timeout/OSError both normalize into a CommandResult instead of raising
     def run(
         self,
         args: Sequence[str],
@@ -156,18 +155,8 @@ class RuntimeFileSystem(Protocol):
 
 
 def rehome_scripts(bindir: Path, old_prefix: str, new_prefix: str) -> tuple[str, ...]:
-    """Rewrite absolute script shebangs after a venv is moved.
-
-    Python ``venv`` console scripts (``pip``, ``neo-localmcp``, ...) embed an
-    absolute shebang pointing at the interpreter path used when the venv was
-    created. Moving the venv therefore breaks every script even though the
-    ``bin/python`` symlink itself still resolves. Rewriting the first line of
-    each affected script to the promoted prefix makes the moved venv runnable.
-
-    Returns the names of the scripts that were rehomed. POSIX-only concern; on
-    Windows the equivalent launchers are ``.exe`` files handled in Task 14.
-    """
-
+    # venv console scripts embed an absolute shebang pointing at the interpreter path from creation time -- moving the venv breaks every script even though bin/python itself still resolves
+    # rewrites each affected script's first line to the new prefix; POSIX only (Windows launchers are .exe, handled by rehome_windows_launchers)
     directory = Path(bindir)
     if old_prefix == new_prefix or not directory.is_dir():
         return ()
@@ -201,15 +190,8 @@ def rehome_scripts(bindir: Path, old_prefix: str, new_prefix: str) -> tuple[str,
 def rehome_windows_launchers(
     scripts_dir: Path, old_prefix: str, new_prefix: str
 ) -> tuple[str, ...]:
-    """Relocate distlib/pip Windows launchers after moving a virtualenv.
-
-    Windows console-script launchers contain an appended shebang with the
-    absolute interpreter path.  The launcher executable is otherwise
-    relocatable, and its embedded zip payload supports a changed prepended
-    length, so replacing the exact venv prefix regenerates the effective
-    shebang without depending on PowerShell or a package-index reinstall.
-    """
-
+    # Windows .exe console-script launchers embed the absolute interpreter path as an appended shebang inside their zip payload
+    # byte-replacing the old venv prefix with the new one regenerates a working shebang, without needing PowerShell or a package reinstall
     directory = Path(scripts_dir)
     if old_prefix == new_prefix or not directory.is_dir():
         return ()
@@ -340,12 +322,8 @@ def build_candidate(
     runner: CommandRunner | None = None,
     reporter: Reporter | None = None,
 ) -> CandidateRuntime:
-    """Build a candidate venv under ``cache/runtime-staging/<operation-id>/venv``.
-
-    The current runtime is never touched here. Subprocess output is captured to a
-    per-operation lifecycle log while concise progress is streamed to the reporter.
-    """
-
+    # venv create -> pip upgrade -> install source_root, staged under cache/runtime-staging/<op_id>/venv -- current runtime is never touched here
+    # each subprocess's output goes to a per-operation log file; concise progress streams to the reporter
     op_id = operation_id or new_operation_id()
     command_runner = runner or SubprocessCommandRunner()
     staging_dir = paths.cache / "runtime-staging" / op_id
@@ -437,6 +415,7 @@ class RuntimeValidation:
 
 
 def _parse_version(text: str) -> tuple[int, ...]:
+    # "3.12.1\n" -> (3, 12, 1); stops at the first non-numeric chunk
     parts: list[int] = []
     for chunk in text.strip().split("."):
         digits = "".join(ch for ch in chunk if ch.isdigit())
@@ -454,6 +433,7 @@ def _validate_location(
     python_floor: tuple[int, int],
     reporter: Reporter | None = None,
 ) -> RuntimeValidation:
+    # 5 independent checks against a runtime location: python/cli executables exist, interpreter version >= floor, package version matches, cli --help runs, server module imports
     checks: list[RuntimeCheck] = []
 
     python_ok = Path(location.python_executable).exists()
@@ -527,6 +507,7 @@ def validate_candidate(
     reporter: Reporter | None = None,
     python_floor: tuple[int, int] = PYTHON_FLOOR,
 ) -> RuntimeValidation:
+    # _validate_location against the candidate's own staged location, before it's ever promoted
     command_runner = runner or SubprocessCommandRunner()
     return _validate_location(
         candidate.location,
@@ -563,13 +544,8 @@ def promote_candidate(
     filesystem: RuntimeFileSystem | None = None,
     python_floor: tuple[int, int] = PYTHON_FLOOR,
 ) -> PromotionResult:
-    """Transactionally replace ``venv/`` with a validated candidate.
-
-    The previous runtime is renamed to a rollback path and only deleted after the
-    candidate validates from its final installed location. Any promotion or
-    validation failure restores the previous runtime.
-    """
-
+    # validate candidate in staging -> move current venv aside (rollback path) -> move candidate into place -> rehome scripts -> re-validate from final path -> only then delete the rollback backup
+    # any failure at any step restores the previous runtime from the rollback path
     command_runner = runner or SubprocessCommandRunner()
     fs = filesystem or RealRuntimeFileSystem()
     warnings: list[str] = []
@@ -585,8 +561,7 @@ def promote_candidate(
             warnings=(),
         )
 
-    # Validate the candidate in its staging location before disturbing the
-    # current runtime; a bad candidate must never displace a healthy venv.
+    # validate before disturbing the current runtime -- a bad candidate must never displace a healthy venv
     candidate_validation = _validate_location(
         candidate.location,
         expected_version,
@@ -645,8 +620,7 @@ def promote_candidate(
             warnings=tuple(warnings),
         )
 
-    # A moved venv keeps script shebangs pointing at the staging path; rehome
-    # them to the promoted location before validating from the final path.
+    # a moved venv keeps script shebangs pointing at the staging path -- rehome them before validating from the final path
     final_location = installed_location(paths)
     if paths.platform == "windows":
         rehome_windows_launchers(
@@ -731,8 +705,7 @@ def remove_runtime(
     filesystem: RuntimeFileSystem | None = None,
     reporter: Reporter | None = None,
 ) -> RemovalResult:
-    """Remove only the managed ``venv/``. Durable directories are never touched."""
-
+    # removes only venv/; durable directories are never touched here
     fs = filesystem or RealRuntimeFileSystem()
     target = paths.venv
     if not fs.exists(target):
