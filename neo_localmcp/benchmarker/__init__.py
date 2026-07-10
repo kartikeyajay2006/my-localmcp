@@ -37,6 +37,7 @@ def _check(group: str, name: str, *, ok: bool, wall_seconds: float, mode: str | 
            generation_method: str | None = None, estimated_tokens: int | None = None,
            gold_file: str | None = None, rank_of_gold_file: int | None = None,
            deterministic: bool | None = None, error: str | None = None, notes: str | None = None) -> CheckResult:
+    # every field present on every row regardless of group, so the report table has uniform columns
     return {
         "group": group,
         "name": name,
@@ -50,22 +51,14 @@ def _check(group: str, name: str, *, ok: bool, wall_seconds: float, mode: str | 
         "deterministic": deterministic,
         "error": error,
         "notes": notes,
-        # Filled in by _score_token_reduction (only for mem checks with a
-        # known gold_file) -- left None here so every row has the same
-        # columns regardless of group.
+        # filled in later by _score_token_reduction, mem checks with a gold_file only
         "baseline_tokens": None,
         "reduction_ratio": None,
     }
 
 
 def _run_sys_command(group: str, name: str, func: Callable[[], str]) -> CheckResult:
-    """Run one existing CLI-backing function and record pass/fail + timing.
-
-    Pass/fail here means "did the command run without erroring" -- not a
-    quality judgement. A live issue (e.g. Ollama unreachable) surfaces as a
-    separate flagged finding elsewhere, never as a benchmark failure (#9
-    design decision).
-    """
+    # ok means "ran without erroring", not a quality judgement -- a live issue (e.g. Ollama unreachable) is a separate flagged finding, never a benchmark failure
     started = time.monotonic()
     try:
         raw = func()
@@ -79,12 +72,8 @@ def _run_sys_command(group: str, name: str, func: Callable[[], str]) -> CheckRes
 
 
 def _sys_checks(root: Path, options: dict[str, Any]) -> list[CheckResult]:
-    """Group 'sys': a liveness sweep of the CLI/admin surface.
-
-    No LLM, no Ollama -- always safe and effectively free to run. Reuses the
-    existing mcp/system.py functions directly (in-process), not a subprocess
-    shell-out to the CLI.
-    """
+    # group 'sys': liveness sweep of the CLI/admin surface, no LLM/Ollama involved -- always safe and free to run
+    # calls mcp/system.py functions directly in-process, not a subprocess shell-out to the CLI
     root_str = str(root)
     return [
         _run_sys_command("sys", "doctor", lambda: system.doctor(root_str)),
@@ -95,11 +84,8 @@ def _sys_checks(root: Path, options: dict[str, Any]) -> list[CheckResult]:
 
 
 def _run_query_check(root: Path, mode: str, generation_method: str, task: str, gold_file: str | None, check_name: str) -> CheckResult:
-    """Run one query through the determinism gate, then score it.
-
-    record=False on every call here, always -- benchmark queries are never
-    recorded as real usage (#9 design decision, not a config option).
-    """
+    # determinism gate first (5 runs) -> non-deterministic -> excluded from scoring; else -> real prepare_context call, scored against gold_file's rank
+    # record=False on every call here -- benchmark queries are never recorded as real usage
     started = time.monotonic()
     det = json.loads(memory.test_determinism(task, str(root), runs=5, record=False))
     deterministic = bool(det.get("ok")) and len(det.get("unique_hashes") or []) == 1
@@ -123,11 +109,7 @@ def _run_query_check(root: Path, mode: str, generation_method: str, task: str, g
 
 
 def _mem_synthetic_checks(root: Path) -> list[CheckResult]:
-    """Mechanical synthetic queries: template one query per real indexed
-    symbol, gold file = that symbol's defining file. Zero LLM cost -- always
-    labeled generation_method='mechanical' in the report, not silently
-    implied to be LLM-generated.
-    """
+    # one templated query per real indexed symbol, gold file = that symbol's defining file; zero LLM cost, labeled generation_method='mechanical'
     results = []
     for sym in repo_memory.sample_symbols(root, limit=DEFAULT_SYNTHETIC_SAMPLE_SIZE):
         name = sym["name"]
@@ -141,11 +123,7 @@ def _default_queries_path() -> Path:
 
 
 def _load_natural_queries(path: Path | None) -> list[dict[str, Any]]:
-    """Each row: {"task": "...", "gold_file": "..." | null}. gold_file may be
-    null -- scored on speed/tokens only, no accuracy claim, since there's no
-    agreed way yet to auto-generate ground truth for prose queries (#9 open
-    question, not solved by this phase).
-    """
+    # each row: {"task": "...", "gold_file": "..." | null}; null gold_file -> scored on speed/tokens only, no accuracy claim
     source = path or _default_queries_path()
     if not source.exists():
         return []
@@ -158,9 +136,7 @@ def _load_natural_queries(path: Path | None) -> list[dict[str, Any]]:
 
 
 def _mem_natural_checks(root: Path, queries_path: Path | None) -> list[CheckResult]:
-    """Hand-curated, natural-language-phrased queries -- the shape that
-    catches bugs synthetic symbol-templated queries can't (e.g. #22/#23/#24
-    were all found on prose queries, not synthetic ones)."""
+    # hand-curated, natural-language-phrased queries -- catches bugs synthetic symbol-templated queries can't
     results = []
     for row in _load_natural_queries(queries_path):
         task = row["task"]
@@ -177,11 +153,8 @@ DISCOVERY_READ_TARGET_RATIO = 0.50
 
 
 def _score_token_reduction(root: Path, checks: list[CheckResult]) -> None:
-    """Mutate each scored mem check in place with baseline_tokens (a whole
-    gold-file read, char/4 estimate) and reduction_ratio (1 -
-    estimated_tokens/baseline_tokens). A proxy for "MCP bundle vs. reading
-    the whole file yourself" -- not real agent behavior (#65 covers that).
-    """
+    # mutates each scored mem check in place: baseline_tokens (whole gold-file read, char/4 estimate) and reduction_ratio (1 - estimated/baseline)
+    # a proxy for "MCP bundle vs. reading the whole file yourself", not real agent behavior
     for check in checks:
         if check["group"] != "mem" or not check["ok"] or check["gold_file"] is None or check["estimated_tokens"] is None:
             continue
@@ -195,11 +168,7 @@ def _score_token_reduction(root: Path, checks: list[CheckResult]) -> None:
 
 
 def _mem_checks(root: Path, options: dict[str, Any]) -> list[CheckResult]:
-    """Group 'mem': the retrieval/token-reduction benchmark itself.
-
-    Precondition is `refresh` -- additive, never `reset-repo` -- so existing
-    accumulated memory (however much or little exists) is never touched.
-    """
+    # group 'mem': the retrieval/token-reduction benchmark; precondition is refresh (additive, never reset-repo) -- existing memory is never touched
     repo_memory.refresh(root)
     queries_path = options.get("queries_path")
     checks = _mem_synthetic_checks(root) + _mem_natural_checks(root, queries_path)
@@ -215,14 +184,8 @@ OLLAMA_RELIABILITY_ATTEMPTS = 3
 
 
 def _ollama_checks(root: Path, options: dict[str, Any]) -> list[CheckResult]:
-    """Group 'ollama': reachability + configured-model presence + reliability.
-
-    Never requires the model to already be warm/loaded -- a cold model is
-    not a problem, that's exactly what the existing ensure()/chat() auto-load
-    behavior (verified already in place, #36/#9 design discussion) is for.
-    Reliability is scored as "did it respond usably," never "did it match
-    last time" -- Ollama's own output is not expected to be deterministic.
-    """
+    # group 'ollama': reachability -> configured-model presence -> reliability (repeated ensure() calls)
+    # a cold model is not a failure -- ensure()'s auto-load handles that; reliability means "responded usably", never "matched last time" (Ollama output isn't deterministic)
     results: list[CheckResult] = []
 
     started = time.monotonic()
@@ -274,11 +237,7 @@ GROUPS: dict[str, Callable[[Path, dict[str, Any]], list[CheckResult]]] = {
 
 
 def resolve_groups(requested: list[str]) -> list[str]:
-    """Expand the requested group list, with 'full' meaning every registered group.
-
-    Raises ValueError on an unknown group name rather than silently ignoring
-    it -- a typo'd group must not silently benchmark nothing.
-    """
+    # "full" -> every registered GROUPS key; unknown group name -> raises rather than silently ignoring (a typo must not silently benchmark nothing)
     if not requested:
         raise ValueError("At least one group is required (e.g. 'sys', 'full').")
     if "full" in requested:
@@ -295,6 +254,7 @@ def resolve_groups(requested: list[str]) -> list[str]:
 
 
 def _median(values: list[float]) -> float:
+    # even count -> average of the two middle values, odd -> the middle one
     ordered = sorted(values)
     mid = len(ordered) // 2
     if len(ordered) % 2:
@@ -303,6 +263,7 @@ def _median(values: list[float]) -> float:
 
 
 def _summarize(checks: list[CheckResult]) -> dict[str, Any]:
+    # per-group pass/total counts, plus a token_reduction block if any check was scored for it
     by_group: dict[str, dict[str, Any]] = {}
     for c in checks:
         bucket = by_group.setdefault(c["group"], {"total": 0, "passed": 0})
@@ -384,18 +345,10 @@ def _render_csv(report: dict[str, Any]) -> str:
 
 
 def _write_report(report: dict[str, Any], base_dir: Path) -> str:
-    """Write json/md/csv for this run under a timestamped, never-overwritten path.
-
-    Path convention (agreed during design): neo-localmcp_benchmarks/<timestamp>/
-    benchmark_<groups-and-flags>_<timestamp>.{json,md,csv} -- under the
-    current working directory, not inside the repo being benchmarked (which
-    may not even belong to the person running the benchmark).
-    """
+    # writes json/md/csv under a timestamped dir, under cwd (not inside the benchmarked repo, which may not belong to the person running this)
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     groups_slug = "-".join(report["groups_run"]) or "none"
-    # Two runs within the same second must never collide: never overwrite an
-    # existing report, add a -2/-3/... counter instead (same precedent as
-    # installer/mcpb.py's _next_free_path).
+    # never overwrite an existing report -- add a -2/-3/... counter instead (same precedent as installer/mcpb.py's _next_free_path)
     run_dir = base_dir / "neo-localmcp_benchmarks" / ts
     suffix = ""
     counter = 2
@@ -415,12 +368,8 @@ def _write_report(report: dict[str, Any], base_dir: Path) -> str:
 
 
 def run_benchmark(groups: list[str], repo_root: str = "auto", out_dir: str | None = None, queries_path: str | None = None) -> dict[str, Any]:
-    """Run the requested benchmark groups and write one timestamped report.
-
-    Never modifies existing repository memory: no reset-repo is ever issued,
-    and benchmark-invoked queries are never recorded into
-    task_queries/retrieval_boost -- not a config option, always off.
-    """
+    # resolves requested groups -> runs each group's checks -> summarizes -> writes one timestamped report
+    # never modifies existing repository memory: no reset-repo issued, benchmark queries never recorded into task_queries/retrieval_boost
     root = repo_root_or_cwd(repo_root)
     resolved_groups = resolve_groups(groups)
     options: dict[str, Any] = {"queries_path": Path(queries_path) if queries_path else None}
