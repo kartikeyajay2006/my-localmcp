@@ -206,3 +206,29 @@ def test_isolated_app_home_actually_redirects_in_process_config_writes(isolated_
     resolved = config.config_path()
     assert str(resolved).startswith(str(isolated_app_home))
     assert resolved != config._INITIAL_CONFIG_PATH
+
+
+def test_confirm_phase_asks_a_single_default_yes_question_no_dry_run_prompt(tmp_path, monkeypatch):
+    """The interactive review-and-confirm page used to ask two questions
+    (a 'Preview only (dry run)?' toggle, then a separate proceed question) --
+    confusing UX for a rarely-used capability. It must now ask exactly one
+    question ('Install as shown?', default Yes), and never set dry_run."""
+    from neo_localmcp.installer.wizard.console import ConsoleWizard
+
+    backend = _isolated_preview_backend(tmp_path, monkeypatch)
+    wizard = ConsoleWizard(backend, fake=True)
+    wizard.state.operation = OP_INSTALL
+
+    prompts: list[str] = []
+
+    def fake_input(self, prompt):
+        prompts.append(prompt)
+        return ""  # accept the default every time
+
+    monkeypatch.setattr(ConsoleWizard, "_input", fake_input)
+    wizard._phase_confirm()  # must not raise _Abort on the default
+
+    assert len(prompts) == 1, f"expected exactly one confirm prompt, got {prompts}"
+    assert "dry run" not in prompts[0].lower()
+    assert "preview only" not in prompts[0].lower()
+    assert wizard.state.dry_run is False
