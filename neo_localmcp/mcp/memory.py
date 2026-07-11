@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import re
 import uuid
 from pathlib import Path
@@ -21,6 +20,7 @@ from typing import Any
 from .. import __version__
 from .. import ollama_client
 from ..retrieval import repo_memory
+from ..retrieval.repo_memory import _cosine
 from ..branding import IDENTITY
 from ..ollama_client import chat
 from ..retrieval.query import category_boost, classify_path, extract_file_references, normalize_query, term_key as compute_term_key
@@ -614,12 +614,13 @@ def _resolve_explicit_paths(task: str, terms: list[str], indexed_files: list[str
     return explicit_paths
 
 
-def _apply_retrieval_boost(candidates: dict[str, dict[str, Any]], root: Path, interpreted: dict[str, Any], symbol_hits: list[dict[str, Any]]) -> str | None:
+def _apply_retrieval_boost(candidates: dict[str, dict[str, Any]], root: Path, interpreted: dict[str, Any], symbol_hits: list[dict[str, Any]], task: str) -> str | None:
     # pipeline step 4/7: prior sessions' implicit feedback -> small capped nudge on candidate scores
     # runs last, after all structural scoring, and stays well below any structural signal (a milestone match alone is +60) -- can only break near-ties, never override structure
+    # 12c: get_boost_map falls back to paraphrase matching (task text) only when no exact term_key match exists
     term_key = compute_term_key(interpreted)
     if term_key and candidates:
-        boost_map = repo_memory.get_boost_map(root, term_key, list(candidates.keys()))
+        boost_map = repo_memory.get_boost_map(root, term_key, list(candidates.keys()), query=task)
         if boost_map:
             for path, item in candidates.items():
                 section = _best_heading_section(path, symbol_hits, interpreted)
@@ -634,18 +635,6 @@ def _apply_retrieval_boost(candidates: dict[str, dict[str, Any]], root: Path, in
 # semantic re-rank weight: cosine (~[0,1] for related text) * this -> score bump. Sized like retrieval boost:
 # below any single structural signal (heading match +60, coverage +20/term), so it re-orders near-ties, never overrides structure.
 SEMANTIC_RERANK_WEIGHT = 18
-
-
-def _cosine(a: list[float], b: list[float]) -> float:
-    # 0.0 on any degenerate input (length mismatch / zero vector) so a bad embedding can't perturb ranking
-    if not a or not b or len(a) != len(b):
-        return 0.0
-    dot = sum(x * y for x, y in zip(a, b))
-    na = math.sqrt(sum(x * x for x in a))
-    nb = math.sqrt(sum(y * y for y in b))
-    if na == 0.0 or nb == 0.0:
-        return 0.0
-    return dot / (na * nb)
 
 
 def _apply_semantic_rerank(candidates: dict[str, dict[str, Any]], root: Path, task: str) -> None:
@@ -809,7 +798,7 @@ def context_prepare(task: str, repo_root: str = "auto", max_files: int | None = 
     for resolved in sorted(explicit_paths):
         _add_candidate(candidates, resolved, "explicit path in task", 120, intent, allow_reason_line_hint=False)
 
-    term_key = _apply_retrieval_boost(candidates, root, interpreted, symbol_hits)
+    term_key = _apply_retrieval_boost(candidates, root, interpreted, symbol_hits, task)
     _apply_semantic_rerank(candidates, root, task)  # optional; no-op unless embeddings exist for this repo
     ranked, read_first = _select_read_first(candidates, explicit_paths, intent, limit, max_files)
 
