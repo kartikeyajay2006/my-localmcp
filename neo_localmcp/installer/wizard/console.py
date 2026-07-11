@@ -532,8 +532,8 @@ class ConsoleWizard:
         OP_MANAGE_CLIENTS: "Apply",
     }
 
-    def _confirm(self, *, allow_dry_run: bool, default_proceed: bool = True) -> None:
-        # final gate before any change: show chosen actions -> optional dry-run toggle -> yes/no; no -> _Abort
+    def _confirm(self, *, default_proceed: bool = True) -> None:
+        # final gate before any change: show chosen actions -> single yes/no; no -> _Abort
         self._header("Review and confirm")
         self._explain(
             "No changes have been made yet. Your current choices are shown above",
@@ -549,9 +549,6 @@ class ConsoleWizard:
         print(f"   Managed root: {self.detected.managed_root}")
         print()
 
-        if allow_dry_run:
-            self.state.dry_run = self._ask_yesno(
-                "Preview only (dry run - show the plan, change nothing)?", default=False)
         verb = self._CONFIRM_VERBS.get(self.state.operation, "Proceed")
         prompt = "Proceed?" if verb == "Proceed" else f"{verb} as shown?"
         if not self._ask_yesno(prompt, default=default_proceed):
@@ -559,10 +556,7 @@ class ConsoleWizard:
 
     def _phase_confirm(self) -> None:
         default_proceed = not (self.state.operation == OP_UNINSTALL and self.state.full_wipe)
-        self._confirm(
-            allow_dry_run=self.state.operation in {OP_INSTALL, OP_REINSTALL},
-            default_proceed=default_proceed,
-        )
+        self._confirm(default_proceed=default_proceed)
 
     # -- execution -------------------------------------------------------- #
     def _run(self) -> None:
