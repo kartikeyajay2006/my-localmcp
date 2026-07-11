@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Blocks a commit if gitleaks finds a secret or flagged personal identifier
+# (see .gitleaks.toml) in the staged diff.
+#
+# Activation is per-clone (git doesn't auto-run hooks from a repo checkout for
+# security reasons), one command, run once after cloning:
+#   git config core.hooksPath .githooks
+set -euo pipefail
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "pre-commit: gitleaks not found on PATH." >&2
+  echo "  macOS:   brew install gitleaks" >&2
+  echo "  Linux:   download a release binary from https://github.com/gitleaks/gitleaks/releases" >&2
+  echo "  Windows: winget install gitleaks / scoop install gitleaks" >&2
+  echo "Commit blocked until gitleaks is installed." >&2
+  exit 1
+fi
+
+repo_root="$(git rev-parse --show-toplevel)"
+gitleaks protect --staged --config "${repo_root}/.gitleaks.toml" --redact -v

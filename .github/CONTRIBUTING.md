@@ -53,6 +53,24 @@ the parent label. A change can carry more than one area label if it
 genuinely spans areas (e.g. a change touching both the wizard's Ollama
 screen and `ollama_client.py` gets `area:wizard` + `area:ollama`).
 
+## Local dev setup: secret/leak scanning
+
+A `gitleaks` pre-commit hook blocks commits containing secrets or flagged
+personal identifiers (e.g. a Tailscale MagicDNS hostname — see `.gitleaks.toml`
+for the ruleset; it layers project-specific rules onto gitleaks' default
+secret-detection patterns). The hook lives in the repo (`.githooks/pre-commit`)
+so it travels with every clone, but git doesn't auto-activate hooks from a
+checkout for security reasons — **run this once per clone/machine**:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Requires the `gitleaks` binary on `PATH` (`brew install gitleaks` on macOS; see
+`.githooks/pre-commit`'s error message for Linux/Windows install pointers if
+it's missing). To scan the full history manually at any point:
+`gitleaks detect --config .gitleaks.toml -v`.
+
 ## Verification before opening a PR
 
 See `.github/pull_request_template.md` for the actual checklist. Short version:
