@@ -1,0 +1,59 @@
+title = "neo-localmcp gitleaks config"
+
+# Layers gitleaks' built-in secret-detection ruleset (API keys, tokens, private
+# keys, etc.) with project-specific rules below, rather than replacing it.
+[extend]
+useDefault = true
+
+# Caught a real leak (2026-07-11): a developer's personal Tailscale MagicDNS
+# hostname (device.tailnet-name.ts.net) ended up in a committed PROJECT_NOTES.md
+# entry. Not a credential by itself, but it's personal network-topology
+# information that shouldn't land in this repo's public history.
+[[rules]]
+id = "tailscale-magicdns-hostname"
+description = "Tailscale MagicDNS hostname -- personal network topology, not for public docs/commits"
+regex = '''[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.[a-zA-Z0-9-]+\.ts\.net'''
+tags = ["hostname", "personal", "tailscale"]
+
+  [rules.allowlist]
+  regexes = [
+    '''device\.tailnet-name\.ts\.net''',
+  ]
+
+# Tailscale's CGNAT IP range (100.64.0.0/10) is reserved for that purpose only --
+# a literal IP in this range is always someone's real personal device, never a
+# public service or a generic example.
+[[rules]]
+id = "tailscale-cgnat-ip"
+description = "Tailscale CGNAT-range IP address (100.64.0.0/10) -- always a personal device"
+regex = '''\b100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]{1,3}\.[0-9]{1,3}\b'''
+tags = ["ip-address", "personal", "tailscale"]
+
+# Any literal public IPv4 address. Deliberately excludes loopback/private/
+# link-local/multicast/CGNAT ranges (allowlisted below) so this doesn't fire on
+# the routine 127.0.0.1 / 192.168.x.x / 10.x.x.x examples that show up in
+# normal config and docs -- only a real, routable public address trips it.
+[[rules]]
+id = "public-ipv4-address"
+description = "Literal public IPv4 address -- may reveal real infrastructure"
+regex = '''\b(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\b'''
+tags = ["ip-address", "personal"]
+
+  [rules.allowlist]
+  regexes = [
+    '''^127\.''',                                          # loopback
+    '''^0\.0\.0\.0$''',                                     # unspecified
+    '''^10\.''',                                            # RFC1918
+    '''^172\.(1[6-9]|2[0-9]|3[01])\.''',                     # RFC1918
+    '''^192\.168\.''',                                       # RFC1918
+    '''^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.''',    # Tailscale CGNAT (own rule above)
+    '''^169\.254\.''',                                       # link-local
+    '''^(22[4-9]|23[0-9])\.''',                               # multicast
+]
+
+[allowlist]
+description = "Known-safe matches"
+regexes = [
+  # this file's own example/description text above, if ever matched literally
+  '''device\.tailnet-name\.ts\.net''',
+]
