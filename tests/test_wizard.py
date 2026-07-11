@@ -125,3 +125,20 @@ def test_live_backend_apply_ollama_config_uses_shared_helper(isolated_app_home):
     assert outcome.ok
     assert config.load_config()["ollama"]["fast_model"] == "new-fast"
     assert config.load_config()["ollama"]["summary_model"] == "new-summary"
+
+
+def test_isolated_app_home_actually_redirects_in_process_config_writes(isolated_app_home):
+    """Regression: isolated_app_home must isolate in-process config reads/writes,
+    not just the env var for subprocess children. config.py's APP_DIR/CONFIG_PATH
+    are computed once at module import time from NEO_LOCALMCP_HOME and are never
+    re-derived live -- unlike NEO_LOCALMCP_CONFIG, which config_path() does check
+    live. Before this fix, setting only the env var left config.load_config()/
+    save_config() silently resolving to the real ~/.neo-localmcp/config/config.yaml
+    for any in-process caller (e.g. LiveBackend.apply_ollama_config above), which
+    is exactly how a routine test run could stamp this fixture's hardcoded
+    fast_model="new-fast"/summary_model="new-summary" into a real user's config."""
+    from neo_localmcp import config
+
+    resolved = config.config_path()
+    assert str(resolved).startswith(str(isolated_app_home))
+    assert resolved != config._INITIAL_CONFIG_PATH

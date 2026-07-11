@@ -27,8 +27,18 @@ def isolated_app_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
     Installer modules receive this path explicitly. The environment variable is
     also set so subprocess-based tests inherit the same isolation boundary.
+
+    Setting NEO_LOCALMCP_HOME alone is NOT enough for in-process isolation:
+    config.py's APP_DIR/CONFIG_PATH are computed once at module import time
+    from that env var and never re-derived live the way NEO_LOCALMCP_CONFIG
+    is inside config_path() -- so a test that only sets the env var and then
+    calls config.load_config()/save_config() in-process (not via a spawned
+    subprocess) silently falls through to the real ~/.neo-localmcp. Mirror
+    isolated_config's proven pattern and patch the module globals directly too.
     """
 
     app_home = tmp_path / ".neo-localmcp"
     monkeypatch.setenv("NEO_LOCALMCP_HOME", str(app_home))
+    monkeypatch.setattr(config, "APP_DIR", app_home)
+    monkeypatch.setattr(config, "CONFIG_PATH", app_home / "config" / "config.yaml")
     return app_home
