@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import array
 import json
+import math
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -156,6 +157,9 @@ def init_db(conn: sqlite3.Connection) -> None:
     for column, definition in {
         "retrieval_id": "TEXT",
         "term_key": "TEXT",
+        # 12c: paraphrase-matching for retrieval-boost memory -- the query's own embedding, lazy/optional (see get_boost_map)
+        "embed_model": "TEXT",
+        "query_vector": "BLOB",
     }.items():
         if column not in existing_tq_columns:
             conn.execute(f"ALTER TABLE task_queries ADD COLUMN {column} {definition}")
@@ -409,6 +413,18 @@ def index_freshness(repo_root: str | Path | None = None, head_commit: str | None
     return {"indexed_commit": indexed_commit, "head_commit": head, "commits_behind": behind, "fresh": behind == 0}
 
 
+def _cosine(a: list[float], b: list[float]) -> float:
+    # 0.0 on any degenerate input (length mismatch / zero vector) so a bad embedding can't perturb ranking
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(y * y for y in b))
+    if na == 0.0 or nb == 0.0:
+        return 0.0
+    return dot / (na * nb)
+
+
 def _vector_to_blob(vector: list[float]) -> bytes:
     # float list -> packed float32 bytes (compact, deterministic, stdlib-only)
     return array.array("f", [float(x) for x in vector]).tobytes()
@@ -640,9 +656,19 @@ def record_task_query(
     conn = connect()
     rid = upsert_repo(conn, root)
     compact = {"terms": term_key.split("|") if term_key else [], "sections": sections, "tool_version": tool_version}
+    # 12c: lazy, non-blocking query embedding for retrieval-boost paraphrase matching (get_boost_map's fallback path)
+    # embed_model unset -> zero network, same rule as 12b's file embeddings; a failed/down Ollama just leaves the columns NULL
+    embed_model = load_config().get("ollama", {}).get("embed_model")
+    stored_embed_model = None
+    query_vector_blob = None
+    if embed_model:
+        embed_result = ollama_client.embed(query)
+        if embed_result.get("ok") and embed_result.get("vector"):
+            stored_embed_model = str(embed_result.get("model") or embed_model)
+            query_vector_blob = _vector_to_blob(embed_result["vector"])
     conn.execute(
-        "INSERT INTO task_queries(repo_id, query, result_json, retrieval_id, term_key, created_at) VALUES(?, ?, ?, ?, ?, ?)",
-        (rid, query, json.dumps(compact), retrieval_id, term_key, now_iso()),
+        "INSERT INTO task_queries(repo_id, query, result_json, retrieval_id, term_key, embed_model, query_vector, created_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+        (rid, query, json.dumps(compact), retrieval_id, term_key, stored_embed_model, query_vector_blob, now_iso()),
     )
     for section in sections:
         path = section.get("path")
@@ -687,19 +713,15 @@ def record_retrieval_feedback(retrieval_id: str, repo_root: str | Path | None, r
     return {"ok": True, "retrieval_id": retrieval_id, "updates": updates}
 
 
-def get_boost_map(repo_root: str | Path | None, term_key: str, paths: list[str]) -> dict[tuple[str, str], int]:
-    # candidate paths -> {(path, heading): net boost}, only for rows shown >= min_shown times and touched within the retention window (recency gate, not gradual decay)
-    # net evidence (followed - corrected), capped at RETRIEVAL_BOOST_CAP -- can only nudge near-ties, never outrank structural evidence
-    if not paths or not term_key:
-        return {}
-    root = repo_root_or_cwd(repo_root)
-    rid = repo_id(root)
-    conn = connect()
-    mem_cfg = load_config().get("memory", {})
-    retention_days = int(mem_cfg.get("retrieval_boost_retention_days", 90))
-    min_shown = int(mem_cfg.get("retrieval_boost_min_shown", RETRIEVAL_BOOST_MIN_SHOWN))
-    cap = int(mem_cfg.get("retrieval_boost_cap", RETRIEVAL_BOOST_CAP))
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
+# 12c semantic-boost fallback: deliberately high threshold (fallback layer, must be genuinely
+# close) and a fraction well under 1.0 (never full credit for a paraphrase match)
+SEMANTIC_BOOST_THRESHOLD = 0.82
+SEMANTIC_BOOST_DOWNWEIGHT = 0.5
+
+
+def _boost_rows_for_term_key(conn: sqlite3.Connection, rid: str, term_key: str, paths: list[str], min_shown: int, cap: int, cutoff: str) -> dict[tuple[str, str], int]:
+    # exact-term_key net-boost lookup for the given paths; factored out so the 12c semantic
+    # fallback can reuse it (unmodified rules) against a matched OTHER term_key
     placeholders = ",".join("?" for _ in paths)
     rows = conn.execute(
         f"""
@@ -718,6 +740,60 @@ def get_boost_map(repo_root: str | Path | None, term_key: str, paths: list[str])
         if boost:
             out[(str(row["path"]), str(row["heading_name"] or ""))] = boost
     return out
+
+
+def _semantic_boost_fallback(conn: sqlite3.Connection, rid: str, term_key: str, paths: list[str], query: str | None, min_shown: int, cap: int, cutoff: str) -> dict[tuple[str, str], int]:
+    # 12c: only reached when the exact term_key had no boost rows. Embeds the current query,
+    # scans this repo's other stored task-query embeddings for the closest paraphrase, then
+    # applies a down-weighted fraction of THAT term_key's own (already min_shown/cap-gated)
+    # boost -- never full credit, never fires without embed_model configured, never blocks
+    # (ollama_client.embed is bounded and non-raising).
+    embed_model = load_config().get("ollama", {}).get("embed_model")
+    if not embed_model or not query:
+        return {}
+    task_embed = ollama_client.embed(query)
+    if not task_embed.get("ok"):
+        return {}
+    task_vector = task_embed.get("vector") or []
+    if not task_vector:
+        return {}
+    rows = conn.execute(
+        "SELECT term_key, query_vector FROM task_queries WHERE repo_id=? AND term_key != ? AND query_vector IS NOT NULL",
+        (rid, term_key),
+    ).fetchall()
+    best_term_key: str | None = None
+    best_sim = 0.0
+    for row in rows:
+        sim = _cosine(task_vector, _blob_to_vector(row["query_vector"]))
+        if sim > best_sim:
+            best_sim = sim
+            best_term_key = str(row["term_key"])
+    if best_term_key is None or best_sim < SEMANTIC_BOOST_THRESHOLD:
+        return {}
+    matched = _boost_rows_for_term_key(conn, rid, best_term_key, paths, min_shown, cap, cutoff)
+    downweighted = {key: round(val * SEMANTIC_BOOST_DOWNWEIGHT) for key, val in matched.items()}
+    return {key: val for key, val in downweighted.items() if val > 0}
+
+
+def get_boost_map(repo_root: str | Path | None, term_key: str, paths: list[str], query: str | None = None) -> dict[tuple[str, str], int]:
+    # candidate paths -> {(path, heading): net boost}, only for rows shown >= min_shown times and touched within the retention window (recency gate, not gradual decay)
+    # net evidence (followed - corrected), capped at RETRIEVAL_BOOST_CAP -- can only nudge near-ties, never outrank structural evidence
+    # exact term_key match stays the unchanged, zero-cost first path; the 12c semantic fallback
+    # (paraphrase matching, gated on `query` + embed_model) only runs when that returns nothing
+    if not paths or not term_key:
+        return {}
+    root = repo_root_or_cwd(repo_root)
+    rid = repo_id(root)
+    conn = connect()
+    mem_cfg = load_config().get("memory", {})
+    retention_days = int(mem_cfg.get("retrieval_boost_retention_days", 90))
+    min_shown = int(mem_cfg.get("retrieval_boost_min_shown", RETRIEVAL_BOOST_MIN_SHOWN))
+    cap = int(mem_cfg.get("retrieval_boost_cap", RETRIEVAL_BOOST_CAP))
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
+    exact = _boost_rows_for_term_key(conn, rid, term_key, paths, min_shown, cap, cutoff)
+    if exact:
+        return exact
+    return _semantic_boost_fallback(conn, rid, term_key, paths, query, min_shown, cap, cutoff)
 
 
 def find_heading_symbol(path: str, heading: str, repo_root: str | Path | None = None) -> dict[str, Any] | None:
