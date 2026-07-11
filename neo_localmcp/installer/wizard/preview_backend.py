@@ -51,6 +51,15 @@ _FAKE_MODEL_SIZES_RAW = {
     "deepseek-r1:14b": 9_000_000_000,
 }
 _FAKE_INSTALLED_MODELS = tuple(sorted(_FAKE_MODEL_SIZES_RAW))
+# mirrors Ollama's own /api/tags "capabilities" tag per model, so the simulation
+# exercises the same embed-vs-chat awareness the console UI shows for real models
+_FAKE_MODEL_CAPABILITIES: dict[str, tuple[str, ...]] = {
+    "qwen3:8b": ("completion", "tools"),
+    "qwen3-coder:30b": ("completion", "tools"),
+    "llama3.1:8b": ("completion", "tools"),
+    "nomic-embed-text:latest": ("embedding",),
+    "deepseek-r1:14b": ("completion", "thinking"),
+}
 
 _STEP_DELAY = 0.35
 
@@ -236,6 +245,7 @@ class PreviewBackend:
             detail="Simulated `ollama list`: 5 models installed.",
             model_sizes={name: human_size(size) for name, size in _FAKE_MODEL_SIZES_RAW.items()},
             embed_model=self._embed_model,
+            model_capabilities=dict(_FAKE_MODEL_CAPABILITIES),
         )
 
     # -- operations ------------------------------------------------------- #

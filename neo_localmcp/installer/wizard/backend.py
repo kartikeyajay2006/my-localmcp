@@ -82,6 +82,9 @@ class OllamaInfo:
     detail: str = ""
     model_sizes: dict[str, str] = field(default_factory=dict)
     embed_model: str = ""  # optional semantic-rerank embedding model; "" means disabled (the default)
+    # Ollama's own reported capability tags per model (e.g. ("completion", "tools") or
+    # ("embedding",)) from /api/tags -- real model-type info, not a name-based guess.
+    model_capabilities: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
 
 def human_size(num_bytes: float) -> str:

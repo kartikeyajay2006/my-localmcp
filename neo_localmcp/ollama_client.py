@@ -145,6 +145,33 @@ def model_sizes(timeout: float = 5) -> dict[str, int]:
         return {}
 
 
+def model_details(timeout: float = 5) -> dict[str, dict[str, Any]]:
+    # best-effort per-model size/capabilities/family from ONE /api/tags call -- capabilities
+    # (e.g. "completion" vs "embedding") is Ollama's own reported model type, not a name-based
+    # guess, so this is real "what kind of model is this" info at no extra network cost over
+    # model_sizes(). Never raises -- an empty result just means details aren't shown.
+    try:
+        code, tags = _request_json("/api/tags", timeout=timeout)
+        if code != 200:
+            return {}
+        details: dict[str, dict[str, Any]] = {}
+        for item in tags.get("models", []):
+            name = str(item.get("name") or item.get("model") or "")
+            if not name:
+                continue
+            size = item.get("size")
+            info = item.get("details") or {}
+            details[name] = {
+                "size": int(size) if isinstance(size, (int, float)) else None,
+                "capabilities": [str(c) for c in item.get("capabilities") or []],
+                "family": str(info.get("family") or ""),
+                "parameter_size": str(info.get("parameter_size") or ""),
+            }
+        return details
+    except Exception:  # noqa: BLE001 - detail display is a nice-to-have, never fatal
+        return {}
+
+
 def _elapsed(started: float) -> float:
     return round(time.monotonic() - started, 3)
 

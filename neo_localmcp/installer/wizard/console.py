@@ -19,6 +19,7 @@ depended on it, in both directions.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import sys
 import textwrap
@@ -39,6 +40,27 @@ from .backend import (
 
 _WIDTH = 80
 _MAX_TEXT_WIDTH = 100
+
+# scheme://host[:port][/], port 0-99999 (loose -- real callers only ever see a
+# handful of malformed typos, not adversarial input; this just catches those)
+_OLLAMA_URL_RE = re.compile(r"^https?://[^\s/:]+(:[0-9]{1,5})?/?$")
+
+
+def _is_valid_ollama_url(value: str) -> bool:
+    return bool(_OLLAMA_URL_RE.match(value.strip()))
+
+
+def _model_kind_label(capabilities: tuple[str, ...]) -> str:
+    # Ollama's own reported capability tags -> a short display label; "embedding" without
+    # "completion" is an embed-only model (wrong choice for fast/summary), anything with
+    # "completion" is a normal chat/generation model.
+    if not capabilities:
+        return ""
+    if "embedding" in capabilities and "completion" not in capabilities:
+        return "embed"
+    if "completion" in capabilities:
+        return "chat"
+    return "/".join(capabilities)
 
 
 def _clear() -> None:
@@ -374,19 +396,50 @@ class ConsoleWizard:
             "This is the base URL neo-localmcp will talk to Ollama on -- almost",
             "always the local default unless you run Ollama remotely.",
         )
-        self.state.ollama_base_url = self._ask_text("Ollama base URL", info.base_url)
+        current = self.state.ollama_base_url or info.base_url
+        while True:
+            print(f"\n The endpoint URL to use Ollama is: [{current}]\n")
+            if self._ask_yesno("Looks good?", default=True):
+                self.state.ollama_base_url = current
+                return
+            current = self._ask_new_url("Please type the new endpoint", current)
+
+    def _ask_new_url(self, prompt: str, default: str) -> str:
+        # like _ask_text, but loops on a syntactically invalid URL instead of accepting anything
+        hint = f" [Default: {default}]" if default else ""
+        while True:
+            raw = self._input(f" {prompt}{hint} (or b to go back): ")
+            if _is_back(raw):
+                raise _GoBack
+            value = raw or default
+            if _is_valid_ollama_url(value):
+                return value
+            print("   Enter a URL like http://host:port (e.g. http://127.0.0.1:11434).")
+
+    @staticmethod
+    def _format_model_table(models: list[str], info, current: str, start_index: int = 1) -> list[str]:
+        # index) name  size  kind -- kind is Ollama's own reported capability tag ("chat"/
+        # "embed"), not a guess, so a user can't accidentally pick an embed-only model for
+        # fast/summary. The current selection's row is colored (no-op if color is disabled).
+        name_width = max((len(m) for m in models), default=0)
+        rows = []
+        for offset, model in enumerate(models):
+            index = start_index + offset
+            size = info.model_sizes.get(model, "")
+            kind = _model_kind_label(info.model_capabilities.get(model, ()))
+            marker = "  (current)" if model == current else ""
+            line = f"   {index}) {model:<{name_width}}  {size:<9}  {kind:<6}{marker}"
+            rows.append(_ansi.green(line) if model == current else line)
+        return rows
 
     def _pick_model(self, label: str, hint: list[str], info, current: str) -> str:
         self._header(f"Choose the {label}:")
         self._explain(*hint, "Listed below are the models from your `ollama list`,")
         print(" sorted alphabetically:\n")
-        models = info.installed_models
+        models = list(info.installed_models)
         default = models.index(current) + 1 if current in models else 1
-        for index, model in enumerate(models, start=1):
-            size = info.model_sizes.get(model)
-            size_text = f"  ({size})" if size else ""
-            mark = "  (current)" if model == current else ""
-            print(f"   {index}) {model}{size_text}{mark}")
+        for row in self._format_model_table(models, info, current):
+            print(row)
         choice = self._ask_int(1, len(models), default=default)
         return models[choice - 1]
 
@@ -451,13 +504,10 @@ class ConsoleWizard:
         if info.reachable and info.installed_models:
             self._header("Embedding model for the semantic layer (optional):")
             self._explain(*self._EMBED_HINT, "", "Choose 0 to leave it disabled (the default).")
-            models = info.installed_models
+            models = list(info.installed_models)
             print("\n   0) None -- leave the semantic layer disabled")
-            for index, model in enumerate(models, start=1):
-                size = info.model_sizes.get(model)
-                size_text = f"  ({size})" if size else ""
-                mark = "  (current)" if model == current else ""
-                print(f"   {index}) {model}{size_text}{mark}")
+            for row in self._format_model_table(models, info, current, start_index=1):
+                print(row)
             default = models.index(current) + 1 if current in models else 0
             choice = self._ask_int(0, len(models), default=default)
             self.state.embed_model = "" if choice == 0 else models[choice - 1]

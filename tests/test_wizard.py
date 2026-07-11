@@ -60,6 +60,35 @@ def test_preview_backend_ollama_info_reports_simulated_models(tmp_path, monkeypa
     assert set(info.model_sizes) == set(info.installed_models)
 
 
+def test_preview_backend_ollama_info_reports_model_capabilities(tmp_path, monkeypatch):
+    """The simulated model list distinguishes embedding-only models from chat/
+    completion models (real Ollama's own reported capability tags), so the fake
+    matches the real backend's shape closely enough to smoke-test the console UI."""
+    backend = _isolated_preview_backend(tmp_path, monkeypatch)
+    info = backend.ollama_info()
+    assert set(info.model_capabilities) == set(info.installed_models)
+    assert "embedding" in info.model_capabilities["nomic-embed-text:latest"]
+    assert "embedding" not in info.model_capabilities["qwen3:8b"]
+    assert "completion" in info.model_capabilities["qwen3:8b"]
+
+
+def test_live_backend_ollama_info_reports_model_capabilities(isolated_app_home, monkeypatch):
+    from neo_localmcp import ollama_client
+    from neo_localmcp.installer.wizard.live_backend import LiveBackend
+
+    monkeypatch.setattr(ollama_client, "status", lambda: {
+        "state": "ready", "installed_models": ["qwen3:8b", "nomic-embed-text:latest"],
+    })
+    monkeypatch.setattr(ollama_client, "model_details", lambda: {
+        "qwen3:8b": {"size": 5_200_000_000, "capabilities": ["completion", "tools"], "family": "qwen3", "parameter_size": "8.2B"},
+        "nomic-embed-text:latest": {"size": 274_000_000, "capabilities": ["embedding"], "family": "nomic-bert", "parameter_size": "137M"},
+    })
+    info = LiveBackend().ollama_info()
+    assert info.model_capabilities["qwen3:8b"] == ("completion", "tools")
+    assert info.model_capabilities["nomic-embed-text:latest"] == ("embedding",)
+    assert info.model_sizes["qwen3:8b"]  # still human-formatted size, unchanged behavior
+
+
 def test_preview_backend_dry_run_install_makes_no_state_change(tmp_path, monkeypatch):
     backend = _isolated_preview_backend(tmp_path, monkeypatch)
     events = []
@@ -232,3 +261,113 @@ def test_confirm_phase_asks_a_single_default_yes_question_no_dry_run_prompt(tmp_
     assert "dry run" not in prompts[0].lower()
     assert "preview only" not in prompts[0].lower()
     assert wizard.state.dry_run is False
+
+
+# --- Ollama URL validation + model-kind labeling (pure functions) ----------
+
+def test_is_valid_ollama_url_accepts_common_forms():
+    from neo_localmcp.installer.wizard.console import _is_valid_ollama_url
+
+    assert _is_valid_ollama_url("http://127.0.0.1:11434")
+    assert _is_valid_ollama_url("https://ollama.example.com:11434")
+    assert _is_valid_ollama_url("http://neofedora:11434/")
+    assert _is_valid_ollama_url("http://localhost")  # no port is fine
+
+
+def test_is_valid_ollama_url_rejects_malformed_input():
+    from neo_localmcp.installer.wizard.console import _is_valid_ollama_url
+
+    assert not _is_valid_ollama_url("")
+    assert not _is_valid_ollama_url("not a url")
+    assert not _is_valid_ollama_url("ftp://127.0.0.1:11434")  # wrong scheme
+    assert not _is_valid_ollama_url("http://127.0.0.1:999999")  # port out of range
+    assert not _is_valid_ollama_url("127.0.0.1:11434")  # missing scheme
+
+
+def test_model_kind_label_distinguishes_embed_from_chat():
+    from neo_localmcp.installer.wizard.console import _model_kind_label
+
+    assert _model_kind_label(("completion", "tools")) == "chat"
+    assert _model_kind_label(("embedding",)) == "embed"
+    assert _model_kind_label(()) == ""
+
+
+def test_console_baseurl_phase_confirms_default_without_prompting_for_new_value(tmp_path, monkeypatch):
+    """Saying 'yes, looks good' to the shown default must not ask for a new URL."""
+    from neo_localmcp.installer.wizard.console import ConsoleWizard
+
+    backend = _isolated_preview_backend(tmp_path, monkeypatch)
+    wizard = ConsoleWizard(backend, fake=True)
+    wizard.state.configure_ollama = True
+
+    replies = iter([""])  # accept "Looks good?" default (Yes)
+    monkeypatch.setattr(ConsoleWizard, "_input", lambda self, prompt: next(replies))
+    wizard._phase_ollama_baseurl()
+    assert wizard.state.ollama_base_url == backend.ollama_info().base_url
+
+
+def test_console_baseurl_phase_loops_on_invalid_then_accepts_valid(tmp_path, monkeypatch):
+    """Saying 'no' prompts for a new URL, re-asks on an invalid one, then loops
+    back to the confirm question with the new value until accepted."""
+    from neo_localmcp.installer.wizard.console import ConsoleWizard
+
+    backend = _isolated_preview_backend(tmp_path, monkeypatch)
+    wizard = ConsoleWizard(backend, fake=True)
+    wizard.state.configure_ollama = True
+
+    # 1) "no" to the default  2) an invalid URL (re-prompted)  3) a valid URL
+    # 4) "yes" to the new "looks good?" confirmation
+    replies = iter(["n", "not-a-url", "http://192.168.1.50:11434", ""])
+    monkeypatch.setattr(ConsoleWizard, "_input", lambda self, prompt: next(replies))
+    wizard._phase_ollama_baseurl()
+    assert wizard.state.ollama_base_url == "http://192.168.1.50:11434"
+
+
+# --- model table: type awareness + colored current selection ----------------
+
+def test_format_model_table_labels_kind_and_shows_size(tmp_path, monkeypatch):
+    from neo_localmcp.installer.wizard.console import ConsoleWizard
+
+    backend = _isolated_preview_backend(tmp_path, monkeypatch)
+    wizard = ConsoleWizard(backend, fake=True)
+    info = backend.ollama_info()
+    rows = wizard._format_model_table(list(info.installed_models), info, current="qwen3:8b")
+
+    embed_row = next(r for r in rows if "nomic-embed-text:latest" in r)
+    chat_row = next(r for r in rows if "qwen3-coder:30b" in r)
+    assert "embed" in embed_row
+    assert "chat" in chat_row
+    # size is shown (human-formatted, e.g. "5.2 GB")
+    assert any(unit in chat_row for unit in ("GB", "MB"))
+
+
+def test_format_model_table_colors_the_current_row(tmp_path, monkeypatch):
+    from neo_localmcp.installer.wizard import _ansi
+    from neo_localmcp.installer.wizard.console import ConsoleWizard
+
+    monkeypatch.setattr(_ansi, "COLOR_ENABLED", True)
+    backend = _isolated_preview_backend(tmp_path, monkeypatch)
+    wizard = ConsoleWizard(backend, fake=True)
+    info = backend.ollama_info()
+    rows = wizard._format_model_table(list(info.installed_models), info, current="qwen3:8b")
+
+    current_row = next(r for r in rows if "qwen3:8b" in r and "qwen3-coder" not in r)
+    other_row = next(r for r in rows if "qwen3-coder:30b" in r)
+    assert "\033[" in current_row  # ANSI escape present -- colored
+    assert "\033[" not in other_row  # non-current rows stay plain
+
+
+def test_pick_model_uses_the_colored_kind_aware_table(tmp_path, monkeypatch):
+    """Smoke test: _pick_model still returns the chosen model name, now via the
+    table renderer (regression -- picking must still work after the format change)."""
+    from neo_localmcp.installer.wizard.console import ConsoleWizard
+
+    backend = _isolated_preview_backend(tmp_path, monkeypatch)
+    wizard = ConsoleWizard(backend, fake=True)
+    info = backend.ollama_info()
+    target_index = info.installed_models.index("qwen3-coder:30b") + 1
+
+    replies = iter([str(target_index)])
+    monkeypatch.setattr(ConsoleWizard, "_input", lambda self, prompt: next(replies))
+    chosen = wizard._pick_model("fast model", ["hint"], info, current="qwen3:8b")
+    assert chosen == "qwen3-coder:30b"
