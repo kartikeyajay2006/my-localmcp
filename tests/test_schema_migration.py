@@ -35,7 +35,7 @@ pytestmark = pytest.mark.retrieval
 # init_db grows a new additive migration, add its column/table here so this test
 # keeps proving the upgrade preserves data.
 _EXPECTED_FILES_ADDED_COLUMNS = {"summary_source_hash", "summary_model", "summary_prompt_version"}
-_EXPECTED_TASK_QUERIES_ADDED_COLUMNS = {"retrieval_id", "term_key"}
+_EXPECTED_TASK_QUERIES_ADDED_COLUMNS = {"retrieval_id", "term_key", "embed_model", "query_vector"}
 _EXPECTED_ADDED_TABLES = {"retrieval_boost", "section_summaries", "file_embeddings"}
 
 
