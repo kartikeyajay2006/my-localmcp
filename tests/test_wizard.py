@@ -127,6 +127,70 @@ def test_live_backend_apply_ollama_config_uses_shared_helper(isolated_app_home):
     assert config.load_config()["ollama"]["summary_model"] == "new-summary"
 
 
+def test_live_backend_writes_and_disables_embed_model(isolated_app_home):
+    """The wizard's embed phase threads state.embed_model through to config:
+    a model name enables the semantic layer; an empty string (user chose 'None')
+    disables it back to None -- the tri-state configure_models honors."""
+    from neo_localmcp import config
+    from neo_localmcp.installer.wizard.backend import WizardState
+    from neo_localmcp.installer.wizard.live_backend import LiveBackend
+
+    backend = LiveBackend()
+    enable = WizardState(operation="config-ollama", fast_model="f", summary_model="s",
+                         embed_model="nomic-embed-text", ollama_base_url="http://127.0.0.1:11434")
+    assert backend.apply_ollama_config(enable, lambda e: None).ok
+    assert config.load_config()["ollama"]["embed_model"] == "nomic-embed-text"
+
+    disable = WizardState(operation="config-ollama", fast_model="f", summary_model="s",
+                          embed_model="", ollama_base_url="http://127.0.0.1:11434")
+    assert backend.apply_ollama_config(disable, lambda e: None).ok
+    assert config.load_config()["ollama"]["embed_model"] is None  # "" disabled it
+
+
+def test_console_embed_phase_picks_and_disables(tmp_path, monkeypatch):
+    """Smoke the interactive embed phase against the preview backend: choosing a
+    numbered model enables it; choosing 0 leaves the semantic layer disabled."""
+    from neo_localmcp.installer.wizard.console import ConsoleWizard
+
+    backend = _isolated_preview_backend(tmp_path, monkeypatch)
+    wizard = ConsoleWizard(backend, fake=True)
+    wizard.state.configure_ollama = True
+
+    # nomic-embed-text:latest is entry among the fake installed models; drive a pick then a disable.
+    info = backend.ollama_info()
+    embed_index = info.installed_models.index("nomic-embed-text:latest") + 1
+
+    replies = iter([str(embed_index)])
+    monkeypatch.setattr(ConsoleWizard, "_input", lambda self, prompt: next(replies))
+    wizard._phase_ollama_embed()
+    assert wizard.state.embed_model == "nomic-embed-text:latest"
+
+    replies2 = iter(["0"])
+    monkeypatch.setattr(ConsoleWizard, "_input", lambda self, prompt: next(replies2))
+    wizard._phase_ollama_embed()
+    assert wizard.state.embed_model == ""  # 0 -> disabled
+
+
+def test_ollama_info_carries_embed_model(isolated_app_home):
+    from neo_localmcp import config
+    from neo_localmcp.installer.wizard.live_backend import LiveBackend
+
+    cfg = config.load_config(); cfg["ollama"]["embed_model"] = "mxbai-embed-large"; config.save_config(cfg)
+    info = LiveBackend().ollama_info()
+    assert info.embed_model == "mxbai-embed-large"
+
+
+def test_preview_backend_config_ollama_reports_embed(tmp_path, monkeypatch):
+    backend = _isolated_preview_backend(tmp_path, monkeypatch)
+    from neo_localmcp.installer.wizard.backend import WizardState
+    state = WizardState(operation="config-ollama", fast_model="qwen3:8b",
+                        summary_model="qwen3-coder:30b", embed_model="nomic-embed-text:latest")
+    outcome = backend.apply_ollama_config(state, lambda e: None)
+    assert outcome.ok
+    assert any("embed_model" in line and "nomic-embed-text" in line for line in outcome.detail_lines)
+    assert backend.ollama_info().embed_model == "nomic-embed-text:latest"
+
+
 def test_isolated_app_home_actually_redirects_in_process_config_writes(isolated_app_home):
     """Regression: isolated_app_home must isolate in-process config reads/writes,
     not just the env var for subprocess children. config.py's APP_DIR/CONFIG_PATH

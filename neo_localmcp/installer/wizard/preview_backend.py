@@ -67,6 +67,7 @@ _BLANK_STATE: dict[str, Any] = {
     "registered_clients": [],
     "fast_model": "qwen3:8b",
     "summary_model": "qwen3-coder:30b",
+    "embed_model": "",  # optional semantic layer; disabled by default in the simulation
     "base_url": "http://127.0.0.1:11434",
     "prefs": {},
 }
@@ -173,6 +174,7 @@ class PreviewBackend:
         self._registered: list[str] = list(state["registered_clients"])
         self._fast_model: str = state["fast_model"]
         self._summary_model: str = state["summary_model"]
+        self._embed_model: str = state.get("embed_model", "")
         self._base_url: str = state["base_url"]
         self._prefs: dict[str, Any] = dict(state["prefs"])
 
@@ -184,6 +186,7 @@ class PreviewBackend:
             "registered_clients": list(self._registered),
             "fast_model": self._fast_model,
             "summary_model": self._summary_model,
+            "embed_model": self._embed_model,
             "base_url": self._base_url,
             "prefs": dict(self._prefs),
         })
@@ -232,6 +235,7 @@ class PreviewBackend:
             state="ready",
             detail="Simulated `ollama list`: 5 models installed.",
             model_sizes={name: human_size(size) for name, size in _FAKE_MODEL_SIZES_RAW.items()},
+            embed_model=self._embed_model,
         )
 
     # -- operations ------------------------------------------------------- #
@@ -268,8 +272,9 @@ class PreviewBackend:
         if state.configure_ollama:
             self._fast_model = state.fast_model or self._fast_model
             self._summary_model = state.summary_model or self._summary_model
+            self._embed_model = state.embed_model  # "" -> disabled (explicit), a name -> enabled
             emit(StepEvent("action", f"Set Ollama models: fast={self._fast_model}, "
-                                     f"summary={self._summary_model}"))
+                                     f"summary={self._summary_model}, embed={self._embed_model or 'disabled'}"))
 
         clients = ", ".join(self._registered) or "none"
         emit(StepEvent("summary", f"{op} succeeded (simulated)"))
@@ -279,7 +284,8 @@ class PreviewBackend:
             title=f"{op.capitalize()} complete (simulated).",
             detail_lines=(
                 f"Clients connected: {clients}",
-                f"Ollama: fast={self._fast_model}, summary={self._summary_model}",
+                f"Ollama: fast={self._fast_model}, summary={self._summary_model}, "
+                f"embed={self._embed_model or 'disabled'}",
                 "This was a simulation (--preview) - nothing on disk changed.",
             ),
             next_command="neo-localmcp doctor",
@@ -300,6 +306,7 @@ class PreviewBackend:
             # Mirrors a real full wipe: nothing survives, including Ollama config.
             self._fast_model = _BLANK_STATE["fast_model"]
             self._summary_model = _BLANK_STATE["summary_model"]
+            self._embed_model = _BLANK_STATE["embed_model"]
             self._base_url = _BLANK_STATE["base_url"]
             self._prefs = {}
             note = "Full wipe (simulated): all data would be deleted."
@@ -319,6 +326,7 @@ class PreviewBackend:
         time.sleep(_STEP_DELAY)
         self._fast_model = state.fast_model or self._fast_model
         self._summary_model = state.summary_model or self._summary_model
+        self._embed_model = state.embed_model  # "" -> disabled (explicit), a name -> enabled
         emit(StepEvent("action", "Writing config.yaml (simulated)."))
         time.sleep(_STEP_DELAY)
         emit(StepEvent("summary", "Ollama models updated (simulated)"))
@@ -329,6 +337,7 @@ class PreviewBackend:
             detail_lines=(
                 f"fast_model    = {self._fast_model}",
                 f"summary_model = {self._summary_model}",
+                f"embed_model   = {self._embed_model or 'disabled'}",
                 f"base_url      = {self._base_url}",
             ),
             next_command="neo-localmcp ollama status",
