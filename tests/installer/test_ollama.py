@@ -36,3 +36,17 @@ def test_configure_models_with_nothing_given_is_a_noop(isolated_config):
     after = configure_models()
 
     assert after == before
+
+
+def test_configure_models_embed_model_is_tri_state(isolated_config):
+    # None (omitted) -> keep current; a name -> enable; "" -> explicitly disable (store None).
+    assert configure_models()["embed_model"] is None  # default unset
+
+    assert configure_models(embed_model="nomic-embed-text")["embed_model"] == "nomic-embed-text"
+
+    # omitting it keeps the enabled value
+    assert configure_models(fast_model="x")["embed_model"] == "nomic-embed-text"
+
+    # empty string disables it back to None
+    assert configure_models(embed_model="")["embed_model"] is None
+    assert config.load_config()["ollama"]["embed_model"] is None

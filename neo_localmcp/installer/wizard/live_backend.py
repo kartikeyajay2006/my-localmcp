@@ -170,13 +170,14 @@ class LiveBackend:
         base_url = str(cfg.get("base_url", "http://127.0.0.1:11434"))
         fast = str(cfg.get("fast_model", ""))
         summary = str(cfg.get("summary_model", ""))
+        embed = str(cfg.get("embed_model") or "")  # None (disabled) -> ""
         try:
             probe = ollama_client.status()
         except Exception as exc:  # noqa: BLE001
             return OllamaInfo(
                 reachable=False, base_url=base_url, installed_models=(),
                 fast_model=fast, summary_model=summary, state="unreachable",
-                detail=f"Could not probe Ollama: {exc}",
+                detail=f"Could not probe Ollama: {exc}", embed_model=embed,
             )
         state = str(probe.get("state", "unreachable"))
         reachable = state not in {"unreachable", "timed_out", "disabled", "failed"}
@@ -192,7 +193,7 @@ class LiveBackend:
         return OllamaInfo(
             reachable=reachable, base_url=base_url, installed_models=tuple(installed),
             fast_model=fast, summary_model=summary, state=state, detail=detail,
-            model_sizes=sizes,
+            model_sizes=sizes, embed_model=embed,
         )
 
     @staticmethod
@@ -320,14 +321,18 @@ class LiveBackend:
     # -- config-only paths ------------------------------------------------ #
 
     def _write_ollama_config(self, state: WizardState, emit: EmitFn) -> None:
+        # embed_model is passed through as the tri-state configure_models expects: "" (user chose
+        # "None" in the embed phase) explicitly disables the semantic layer; a name enables it.
         ollama_cfg = configure_models(
             base_url=state.ollama_base_url or None,
             fast_model=state.fast_model or None,
             summary_model=state.summary_model or None,
+            embed_model=state.embed_model,
         )
+        embed = ollama_cfg.get("embed_model") or "disabled"
         emit(StepEvent("action",
                        f"Saved Ollama config: fast={ollama_cfg.get('fast_model')}, "
-                       f"summary={ollama_cfg.get('summary_model')}"))
+                       f"summary={ollama_cfg.get('summary_model')}, embed={embed}"))
 
     def apply_ollama_config(self, state: WizardState, emit: EmitFn) -> OperationOutcome:
         try:

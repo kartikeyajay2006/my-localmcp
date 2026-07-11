@@ -433,6 +433,43 @@ class ConsoleWizard:
         self._set_summary(
             "Ollama", f"fast={self.state.fast_model}, summary={self.state.summary_model}")
 
+    _EMBED_HINT = (
+        "OPTIONAL -- leave disabled unless you want the semantic layer.",
+        "An embedding model lets retrieval match by MEANING, not just keywords:",
+        "it recognizes a paraphrased task as the same recurring workflow (e.g.",
+        "'fix login bug' ~ 'debug auth failure') and nudges file ranking by",
+        "similarity. Deterministic keyword ranking is always the primary path and",
+        "works fully without this. Use a dedicated embedding model (e.g.",
+        "nomic-embed-text, mxbai-embed-large), not a chat model.",
+    )
+
+    def _phase_ollama_embed(self) -> None:
+        if not self.state.configure_ollama:
+            raise _Skip
+        info = self.backend.ollama_info()
+        current = self.state.embed_model or info.embed_model  # "" when disabled
+        if info.reachable and info.installed_models:
+            self._header("Embedding model for the semantic layer (optional):")
+            self._explain(*self._EMBED_HINT, "", "Choose 0 to leave it disabled (the default).")
+            models = info.installed_models
+            print("\n   0) None -- leave the semantic layer disabled")
+            for index, model in enumerate(models, start=1):
+                size = info.model_sizes.get(model)
+                size_text = f"  ({size})" if size else ""
+                mark = "  (current)" if model == current else ""
+                print(f"   {index}) {model}{size_text}{mark}")
+            default = models.index(current) + 1 if current in models else 0
+            choice = self._ask_int(0, len(models), default=default)
+            self.state.embed_model = "" if choice == 0 else models[choice - 1]
+        else:
+            self._header("Embedding model for the semantic layer (optional)")
+            self._explain(*self._EMBED_HINT, "", "Leave blank to keep it disabled.")
+            self.state.embed_model = self._ask_text("Embedding model (blank = disabled)", current)
+        self._set_summary(
+            "Ollama",
+            f"fast={self.state.fast_model}, summary={self.state.summary_model}, "
+            f"embed={self.state.embed_model or 'disabled'}")
+
     # -- phase: uninstall ---------------------------------------------------
 
     def _phase_uninstall_mode(self) -> None:
@@ -572,6 +609,7 @@ class ConsoleWizard:
         if self.state.configure_ollama:
             prefs["fast_model"] = self.state.fast_model
             prefs["summary_model"] = self.state.summary_model
+            prefs["embed_model"] = self.state.embed_model
             prefs["base_url"] = self.state.ollama_base_url
         self.backend.save_prefs(prefs)
         self.prefs = prefs
@@ -597,6 +635,7 @@ class ConsoleWizard:
                 self._phase_ollama_baseurl,
                 self._phase_ollama_fast,
                 self._phase_ollama_summary,
+                self._phase_ollama_embed,
                 self._phase_confirm,
             ]
         elif op == OP_REINSTALL:
@@ -609,6 +648,7 @@ class ConsoleWizard:
                 self._phase_ollama_baseurl,
                 self._phase_ollama_fast,
                 self._phase_ollama_summary,
+                self._phase_ollama_embed,
                 self._phase_confirm,
             ]
         elif op == OP_MANAGE_CLIENTS:

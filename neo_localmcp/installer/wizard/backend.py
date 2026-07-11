@@ -81,6 +81,7 @@ class OllamaInfo:
     state: str  # ready / model_cold / model_missing / unreachable / disabled / ...
     detail: str = ""
     model_sizes: dict[str, str] = field(default_factory=dict)
+    embed_model: str = ""  # optional semantic-rerank embedding model; "" means disabled (the default)
 
 
 def human_size(num_bytes: float) -> str:
@@ -120,6 +121,7 @@ class WizardState:
     ollama_base_url: str = ""
     fast_model: str = ""
     summary_model: str = ""
+    embed_model: str = ""  # optional; "" = leave the semantic layer disabled
     full_wipe: bool = False
     dry_run: bool = False
     outcome: OperationOutcome | None = None

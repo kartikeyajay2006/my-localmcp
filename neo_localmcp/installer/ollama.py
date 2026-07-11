@@ -51,8 +51,10 @@ def configure_models(
         ollama_cfg["fast_model"] = fast_model
     if summary_model:
         ollama_cfg["summary_model"] = summary_model
-    if embed_model:
-        ollama_cfg["embed_model"] = embed_model
+    # embed_model is tri-state (it's the one optional/disable-able model): None -> keep current,
+    # "" -> explicitly disable (store None), "name" -> set. fast/summary stay keep-or-set only.
+    if embed_model is not None:
+        ollama_cfg["embed_model"] = embed_model or None
     if num_ctx:
         ollama_cfg["num_ctx"] = int(num_ctx)
     save_config(cfg)
