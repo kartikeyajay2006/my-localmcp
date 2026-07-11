@@ -1,0 +1,23 @@
+title = "neo-localmcp gitleaks config"
+
+# Layers gitleaks' built-in secret-detection ruleset (API keys, tokens, private
+# keys, etc.) with project-specific rules below, rather than replacing it.
+[extend]
+useDefault = true
+
+# Caught a real leak (2026-07-11): a developer's personal Tailscale MagicDNS
+# hostname (device.tailnet-name.ts.net) ended up in a committed PROJECT_NOTES.md
+# entry. Not a credential by itself, but it's personal network-topology
+# information that shouldn't land in this repo's public history.
+[[rules]]
+id = "tailscale-magicdns-hostname"
+description = "Tailscale MagicDNS hostname -- personal network topology, not for public docs/commits"
+regex = '''[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.[a-zA-Z0-9-]+\.ts\.net'''
+tags = ["hostname", "personal", "tailscale"]
+
+[allowlist]
+description = "Known-safe matches"
+regexes = [
+  # this file's own example/description text above, if ever matched literally
+  '''device\.tailnet-name\.ts\.net''',
+]
