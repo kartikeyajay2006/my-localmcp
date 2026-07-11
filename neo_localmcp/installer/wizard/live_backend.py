@@ -182,7 +182,10 @@ class LiveBackend:
         state = str(probe.get("state", "unreachable"))
         reachable = state not in {"unreachable", "timed_out", "disabled", "failed"}
         installed = sorted({str(m) for m in probe.get("installed_models", []) if m})
-        sizes = self._model_sizes() if reachable and installed else {}
+        sizes: dict[str, str] = {}
+        capabilities: dict[str, tuple[str, ...]] = {}
+        if reachable and installed:
+            sizes, capabilities = self._model_details()
         if reachable and installed:
             detail = f"`ollama list`: {len(installed)} model(s) installed at {base_url}."
         elif reachable:
@@ -193,13 +196,16 @@ class LiveBackend:
         return OllamaInfo(
             reachable=reachable, base_url=base_url, installed_models=tuple(installed),
             fast_model=fast, summary_model=summary, state=state, detail=detail,
-            model_sizes=sizes, embed_model=embed,
+            model_sizes=sizes, embed_model=embed, model_capabilities=capabilities,
         )
 
     @staticmethod
-    def _model_sizes() -> dict[str, str]:
-        # ollama_client.model_sizes()'s raw bytes -> human-formatted strings for display; formatting is a wizard-presentation concern, kept here
-        return {name: human_size(size) for name, size in ollama_client.model_sizes().items()}
+    def _model_details() -> tuple[dict[str, str], dict[str, tuple[str, ...]]]:
+        # one ollama_client.model_details() call (one /api/tags) -> (human-formatted sizes, capability tags per model)
+        details = ollama_client.model_details()
+        sizes = {name: human_size(d["size"]) for name, d in details.items() if d.get("size") is not None}
+        capabilities = {name: tuple(d.get("capabilities") or ()) for name, d in details.items()}
+        return sizes, capabilities
 
     # -- operations ------------------------------------------------------- #
 
