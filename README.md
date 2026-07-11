@@ -175,7 +175,7 @@ runtime itself — lifecycle work lives in the checkout's `setup.py`.
 
 ## Install
 
-Requirements: Python 3.12 or newer. Version 1.1.1 supports macOS and Windows;
+Requirements: Python 3.12 or newer. Version 1.2.0 supports macOS and Windows;
 Linux support is deferred.
 
 ### Guided installer (recommended)
