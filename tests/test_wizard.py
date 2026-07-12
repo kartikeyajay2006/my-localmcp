@@ -263,6 +263,61 @@ def test_confirm_phase_asks_a_single_default_yes_question_no_dry_run_prompt(tmp_
     assert wizard.state.dry_run is False
 
 
+def test_path_phase_defaults_to_adding_managed_cli_directory(tmp_path, monkeypatch):
+    from neo_localmcp.installer.wizard.console import ConsoleWizard
+
+    backend = _isolated_preview_backend(tmp_path, monkeypatch)
+    wizard = ConsoleWizard(backend, fake=True)
+    wizard.state.operation = OP_INSTALL
+
+    monkeypatch.setattr(ConsoleWizard, "_input", lambda self, prompt: "")
+    wizard._phase_path()
+
+    assert wizard.state.add_to_path is True
+    assert any(label == "PATH" and "enabled" in value for label, value in wizard.summary)
+
+
+def test_live_backend_updates_path_only_after_successful_opt_in(isolated_app_home, monkeypatch):
+    from neo_localmcp.installer.path import PathUpdate
+    from neo_localmcp.installer.types import Operation, OperationResult, OperationStatus
+
+    backend = live_backend.LiveBackend()
+    updates = []
+    result = OperationResult(Operation.INSTALL, OperationStatus.SUCCEEDED, (), ())
+    monkeypatch.setattr(live_backend, "install", lambda *_args, **_kwargs: result)
+    monkeypatch.setattr(backend, "_build_desktop_bundle", lambda _emit: None)
+    monkeypatch.setattr(
+        live_backend,
+        "add_to_path",
+        lambda paths: updates.append(paths) or PathUpdate(True, paths.home / ".zshrc"),
+    )
+
+    outcome = backend.run_operation(
+        WizardState(operation=OP_INSTALL, add_to_path=True), lambda _event: None,
+    )
+
+    assert outcome.ok is True
+    assert updates == [backend._paths]
+
+
+def test_live_backend_leaves_path_unchanged_when_wizard_opt_outs(isolated_app_home, monkeypatch):
+    from neo_localmcp.installer.types import Operation, OperationResult, OperationStatus
+
+    backend = live_backend.LiveBackend()
+    updates = []
+    result = OperationResult(Operation.INSTALL, OperationStatus.SUCCEEDED, (), ())
+    monkeypatch.setattr(live_backend, "install", lambda *_args, **_kwargs: result)
+    monkeypatch.setattr(backend, "_build_desktop_bundle", lambda _emit: None)
+    monkeypatch.setattr(live_backend, "add_to_path", lambda paths: updates.append(paths))
+
+    outcome = backend.run_operation(
+        WizardState(operation=OP_INSTALL, add_to_path=False), lambda _event: None,
+    )
+
+    assert outcome.ok is True
+    assert updates == []
+
+
 # --- Ollama URL validation + model-kind labeling (pure functions) ----------
 
 def test_is_valid_ollama_url_accepts_common_forms():
