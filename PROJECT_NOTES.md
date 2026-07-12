@@ -1,5 +1,10 @@
 # Project Notes
 
+## 2026-07-12
+
+- **`v1.2.0` shipped** (PR #98 merged to `main` at `87b02f1`, tag pushed). Third tag in this repo's history (`v1.0.10`, `v1.1.1`, `v1.2.0`), first new one since `v1.0.10`.
+- **Planning split: the deferred wizard model-recommendation feature (issue #97) was split into a general and a hardware-aware half, at the owner's request.** `docs/1.2.1_PLAN.md` now covers the **general** version -- the locked-in, approved UI (recommended section + always-shown full installed list + confirm-page pull reminder) driven by a small static curated table, no machine inspection at all. Issue #97 was narrowed to *only* the hardware-detection layer (VRAM/RAM-aware filtering of that same table across NVIDIA/Apple Silicon/AMD/Intel) that can build on top of 1.2.1's data later without touching the UI again. The pre-existing `docs/1.2.1_PLAN.md` (onboarding distribution -- `bootstrap-repo`, single-source agent-integration template) was renamed to `docs/1.2.2_PLAN.md` (`git mv`, phase prefixes `12.1x` -> `12.2x`) to make room, mirroring the `1.2.0_PLAN.md` -> `1.1.1_PLAN.md` rename precedent from 2026-07-06. Owner separately flagged a "brand consistency" item to fold into the new 1.2.1 plan themselves later -- left unfilled rather than guessed at, since there was no prior context establishing what it should cover.
+
 ## 2026-07-11 (4)
 
 - **Default-model-picker bug fixed** (a real one, reproduced live: `summary_model` configured to an uninstalled `qwen3-coder:30b` fell back to whatever sorted first alphabetically -- `bge-m3:latest`, an embed-only model -- with the default row shown with no visual distinction from any other). `_default_model_index()` now walks for the first non-embed-capable installed model instead; `_format_model_table()` marks/colors the actual default row (labeled `(default)`) whenever it differs from the persisted `(current)` value, so the default is never silently unmarked.
