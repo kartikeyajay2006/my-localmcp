@@ -222,6 +222,26 @@ def test_semantic_rerank_falls_back_when_task_embed_unavailable(tmp_path, isolat
     assert result["read_first"]  # still returns deterministic FTS results
 
 
+def test_prepare_context_embeds_task_at_most_once(tmp_path, isolated_config, monkeypatch):
+    """Finding 1 regression: a single prepare_context in a fully-configured repo
+    (embed_model set, file embeddings present) must embed the task string AT MOST
+    ONCE -- the 12b rerank, 12c boost fallback, and 12c query recording all share
+    one embedding rather than each calling embed() independently."""
+    _set_embed_model()
+    calls = {"n": 0}
+
+    def counting_embed(text, model=None):
+        calls["n"] += 1
+        return {"ok": True, "vector": [1.0, 0.0, 0.0], "model": "fake-embed"}
+    monkeypatch.setattr(ollama_client, "embed", counting_embed)
+
+    repo = _write_repo(tmp_path, files=_TWO_FILES)
+    repo_memory.index_repo(repo)  # generates file embeddings (counted, but reset below)
+    calls["n"] = 0  # count only the prepare_context call
+    memory.prepare_context("load_model handle_service_request", str(repo), token_budget=800, max_files=4, output_format="json", record=True)
+    assert calls["n"] <= 1, f"expected <=1 task embed per prepare_context, got {calls['n']}"
+
+
 # --- 12c: semantic matching for retrieval-boost memory ----------------------
 
 def _seed_boost_row(conn, rid, term_key, path, shown, followed, corrected, heading_name=""):
@@ -238,114 +258,91 @@ def _seed_task_query_with_vector(conn, rid, term_key, vector, query="task"):
     )
 
 
-def test_record_task_query_stores_embedding_when_configured(tmp_path, isolated_config, monkeypatch):
+def test_record_task_query_stores_provided_embedding(tmp_path, isolated_config):
+    # record_task_query no longer embeds itself (Finding 1); it stores the vector the caller
+    # (context_prepare's single per-request embed) hands it via task_embed.
     repo = _write_repo(tmp_path)
-    repo_memory.index_repo(repo)  # embed_model unset here: indexing itself must not touch embed()
-    _set_embed_model()
-    monkeypatch.setattr(ollama_client, "embed", lambda text, model=None: {"ok": True, "vector": [1.0, 0.0, 0.0], "model": "fake-embed"})
+    repo_memory.index_repo(repo)
     conn = repo_memory.connect(); rid = repo_memory.upsert_repo(conn, repo)
-    repo_memory.record_task_query("fix login bug", repo, retrieval_id="r1", term_key="bug|fix|login", sections=[], tool_version="x")
+    repo_memory.record_task_query(
+        "fix login bug", repo, retrieval_id="r1", term_key="bug|fix|login", sections=[], tool_version="x",
+        task_embed={"vector": [1.0, 0.0, 0.0], "model": "fake-embed"},
+    )
     row = conn.execute("SELECT embed_model, query_vector FROM task_queries WHERE repo_id=? AND retrieval_id=?", (rid, "r1")).fetchone()
     assert row["embed_model"] == "fake-embed"
     assert repo_memory._blob_to_vector(row["query_vector"]) == pytest.approx([1.0, 0.0, 0.0])
 
 
-def test_record_task_query_stores_no_embedding_when_model_unset(tmp_path, isolated_config, monkeypatch):
+def test_record_task_query_stores_null_when_no_embedding_provided(tmp_path, isolated_config):
+    # task_embed omitted (embed_model unset, or the request's single embed failed / Ollama down ->
+    # context_prepare passes None) -> the row is still recorded, embedding columns stay NULL.
     repo = _write_repo(tmp_path)
     repo_memory.index_repo(repo)
-    monkeypatch.setattr(ollama_client, "embed", lambda *a, **k: (_ for _ in ()).throw(AssertionError("embed must not be called when embed_model unset")))
     conn = repo_memory.connect(); rid = repo_memory.upsert_repo(conn, repo)
     repo_memory.record_task_query("fix login bug", repo, retrieval_id="r2", term_key="bug|fix|login", sections=[], tool_version="x")
-    row = conn.execute("SELECT embed_model, query_vector FROM task_queries WHERE repo_id=? AND retrieval_id=?", (rid, "r2")).fetchone()
+    row = conn.execute("SELECT query, embed_model, query_vector FROM task_queries WHERE repo_id=? AND retrieval_id=?", (rid, "r2")).fetchone()
+    assert row["query"] == "fix login bug"  # the row itself is never blocked by a missing embedding
     assert row["embed_model"] is None
     assert row["query_vector"] is None
 
 
-def test_record_task_query_skips_embedding_gracefully_when_ollama_down(tmp_path, isolated_config, monkeypatch):
+def test_boost_map_exact_match_wins_without_semantic_fallback(tmp_path, isolated_config):
+    """Zero-cost first path: when the exact term_key already has boost rows, get_boost_map
+    returns them directly and never consults the stored cross-term vectors -- even with a
+    task_vector supplied. (get_boost_map itself no longer embeds; that's the caller's job.)"""
     repo = _write_repo(tmp_path)
     repo_memory.index_repo(repo)
-    _set_embed_model()
-    monkeypatch.setattr(ollama_client, "embed", lambda *a, **k: {"ok": False, "state": "unreachable"})
-    conn = repo_memory.connect(); rid = repo_memory.upsert_repo(conn, repo)
-    repo_memory.record_task_query("fix login bug", repo, retrieval_id="r3", term_key="bug|fix|login", sections=[], tool_version="x")
-    row = conn.execute("SELECT query, embed_model, query_vector FROM task_queries WHERE repo_id=? AND retrieval_id=?", (rid, "r3")).fetchone()
-    assert row["query"] == "fix login bug"  # the row itself is never blocked by a failed embed
-    assert row["embed_model"] is None
-    assert row["query_vector"] is None
-
-
-def test_boost_map_exact_match_never_calls_embed(tmp_path, isolated_config, monkeypatch):
-    """Zero-cost first path: when the exact term_key already has boost rows,
-    the semantic fallback must not even probe embed()."""
-    repo = _write_repo(tmp_path)
-    repo_memory.index_repo(repo)
-    _set_embed_model()
-    monkeypatch.setattr(ollama_client, "embed", lambda *a, **k: (_ for _ in ()).throw(AssertionError("embed must not be called when an exact term_key match exists")))
     conn = repo_memory.connect(); rid = repo_memory.upsert_repo(conn, repo)
     _seed_boost_row(conn, rid, "bug|fix|login", "service.py", shown=3, followed=3, corrected=0)
+    # a competing OTHER term_key with a near-identical vector -- must be ignored because the exact match wins
+    _seed_boost_row(conn, rid, "other|term", "service.py", shown=9, followed=9, corrected=0)
+    _seed_task_query_with_vector(conn, rid, "other|term", [1.0, 0.0, 0.0], query="other")
     conn.commit()
-    boost_map = repo_memory.get_boost_map(repo, "bug|fix|login", ["service.py"], query="fix login bug")
-    assert boost_map == {("service.py", ""): 3}
+    boost_map = repo_memory.get_boost_map(repo, "bug|fix|login", ["service.py"], task_vector=[1.0, 0.0, 0.0])
+    assert boost_map == {("service.py", ""): 3}  # exact match's own boost, not the higher cross-term one
 
 
-def test_boost_map_semantic_fallback_matches_paraphrased_task(tmp_path, isolated_config, monkeypatch):
+def test_boost_map_semantic_fallback_matches_paraphrased_task(tmp_path, isolated_config):
     repo = _write_repo(tmp_path)
     repo_memory.index_repo(repo)
-    _set_embed_model()
     conn = repo_memory.connect(); rid = repo_memory.upsert_repo(conn, repo)
     # task A ("fix login bug") built up real boost evidence under its own term_key
     _seed_boost_row(conn, rid, "bug|fix|login", "auth.py", shown=4, followed=4, corrected=0)
     _seed_task_query_with_vector(conn, rid, "bug|fix|login", [1.0, 0.0, 0.0], query="fix login bug")
     conn.commit()
-    # task B ("debug auth failure") is a different term_key with no boost rows of its own,
-    # but its embedding is a near-exact match to task A's
-    monkeypatch.setattr(ollama_client, "embed", lambda text, model=None: {"ok": True, "vector": [0.99, 0.01, 0.0], "model": "fake-embed"})
-    boost_map = repo_memory.get_boost_map(repo, "auth|debug|failure", ["auth.py"], query="debug auth failure")
+    # task B ("debug auth failure"): a different term_key with no boost rows of its own, but its
+    # (caller-provided) vector is a near-exact match to task A's -> shares down-weighted credit
+    boost_map = repo_memory.get_boost_map(repo, "auth|debug|failure", ["auth.py"], task_vector=[0.99, 0.01, 0.0])
     assert boost_map  # nonzero
     assert 0 < boost_map[("auth.py", "")] < 4  # down-weighted, never full credit
 
 
-def test_boost_map_semantic_fallback_ignores_unrelated_task(tmp_path, isolated_config, monkeypatch):
-    repo = _write_repo(tmp_path)
-    repo_memory.index_repo(repo)
-    _set_embed_model()
-    conn = repo_memory.connect(); rid = repo_memory.upsert_repo(conn, repo)
-    _seed_boost_row(conn, rid, "bug|fix|login", "auth.py", shown=4, followed=4, corrected=0)
-    _seed_task_query_with_vector(conn, rid, "bug|fix|login", [1.0, 0.0, 0.0], query="fix login bug")
-    conn.commit()
-    # task C's embedding is orthogonal (cos=0) -- unrelated, must get nothing
-    monkeypatch.setattr(ollama_client, "embed", lambda text, model=None: {"ok": True, "vector": [0.0, 1.0, 0.0], "model": "fake-embed"})
-    boost_map = repo_memory.get_boost_map(repo, "billing|charge|invoice", ["auth.py"], query="charge a customer invoice")
-    assert boost_map == {}
-
-
-def test_boost_map_semantic_fallback_disabled_when_embed_model_unset(tmp_path, isolated_config, monkeypatch):
-    """Regression: even with a stored cross-term_key embedding sitting in the
-    DB (e.g. from a previously-configured session), embed_model unset now
-    must leave get_boost_map's fallback fully inert -- zero network, zero result."""
+def test_boost_map_semantic_fallback_ignores_unrelated_task(tmp_path, isolated_config):
     repo = _write_repo(tmp_path)
     repo_memory.index_repo(repo)
     conn = repo_memory.connect(); rid = repo_memory.upsert_repo(conn, repo)
     _seed_boost_row(conn, rid, "bug|fix|login", "auth.py", shown=4, followed=4, corrected=0)
     _seed_task_query_with_vector(conn, rid, "bug|fix|login", [1.0, 0.0, 0.0], query="fix login bug")
     conn.commit()
-    monkeypatch.setattr(ollama_client, "embed", lambda *a, **k: (_ for _ in ()).throw(AssertionError("embed must not be called when embed_model unset")))
-    boost_map = repo_memory.get_boost_map(repo, "auth|debug|failure", ["auth.py"], query="debug auth failure")
+    # task C's vector is orthogonal (cos=0) -- unrelated, must get nothing
+    boost_map = repo_memory.get_boost_map(repo, "billing|charge|invoice", ["auth.py"], task_vector=[0.0, 1.0, 0.0])
     assert boost_map == {}
 
 
-def test_boost_map_without_query_arg_behaves_exactly_as_before(tmp_path, isolated_config, monkeypatch):
-    """Regression: existing callers that never pass `query` (the pre-12c
-    signature) must be unaffected -- no crash, no embed() call, exact-match-only."""
+def test_boost_map_no_fallback_when_task_vector_absent(tmp_path, isolated_config):
+    """Regression: with no task_vector (embed_model unset, or the request's single embed failed /
+    Ollama down -> context_prepare passes None), the semantic fallback is fully inert even when a
+    stored cross-term_key vector exists -- zero result, exact-match-only."""
     repo = _write_repo(tmp_path)
     repo_memory.index_repo(repo)
-    _set_embed_model()
-    monkeypatch.setattr(ollama_client, "embed", lambda *a, **k: (_ for _ in ()).throw(AssertionError("embed must not be called without a query")))
     conn = repo_memory.connect(); rid = repo_memory.upsert_repo(conn, repo)
     _seed_boost_row(conn, rid, "bug|fix|login", "auth.py", shown=4, followed=4, corrected=0)
+    _seed_task_query_with_vector(conn, rid, "bug|fix|login", [1.0, 0.0, 0.0], query="fix login bug")
     conn.commit()
+    # exact-match path still works for a matching term_key...
     assert repo_memory.get_boost_map(repo, "bug|fix|login", ["auth.py"]) == {("auth.py", ""): 4}
-    assert repo_memory.get_boost_map(repo, "auth|debug|failure", ["auth.py"]) == {}
+    # ...but a different term_key with task_vector=None gets no paraphrase fallback
+    assert repo_memory.get_boost_map(repo, "auth|debug|failure", ["auth.py"], task_vector=None) == {}
 
 
 def test_prepare_context_applies_semantic_boost_to_paraphrased_task(tmp_path, isolated_config, monkeypatch):

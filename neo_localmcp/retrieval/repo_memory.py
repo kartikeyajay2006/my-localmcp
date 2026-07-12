@@ -646,9 +646,12 @@ def record_task_query(
     term_key: str,
     sections: list[dict[str, Any]],
     tool_version: str,
+    task_embed: dict[str, Any] | None = None,
 ) -> None:
     # config-gated (memory.record_context_queries, default on) -> compact metadata insert + bump each shown section's retrieval_boost baseline
     # observational only; this function never changes ranking by itself
+    # 12c: stores the caller-provided task embedding (from context_prepare's single per-request embed) for later
+    # paraphrase matching in get_boost_map; task_embed=None -> columns stay NULL. This function never embeds itself.
     root = repo_root_or_cwd(repo_root)
     cfg = load_config().get("memory", {})
     if not bool(cfg.get("record_context_queries", True)):
@@ -656,16 +659,11 @@ def record_task_query(
     conn = connect()
     rid = upsert_repo(conn, root)
     compact = {"terms": term_key.split("|") if term_key else [], "sections": sections, "tool_version": tool_version}
-    # 12c: lazy, non-blocking query embedding for retrieval-boost paraphrase matching (get_boost_map's fallback path)
-    # embed_model unset -> zero network, same rule as 12b's file embeddings; a failed/down Ollama just leaves the columns NULL
-    embed_model = load_config().get("ollama", {}).get("embed_model")
     stored_embed_model = None
     query_vector_blob = None
-    if embed_model:
-        embed_result = ollama_client.embed(query)
-        if embed_result.get("ok") and embed_result.get("vector"):
-            stored_embed_model = str(embed_result.get("model") or embed_model)
-            query_vector_blob = _vector_to_blob(embed_result["vector"])
+    if task_embed and task_embed.get("vector"):
+        stored_embed_model = str(task_embed.get("model") or "")
+        query_vector_blob = _vector_to_blob(task_embed["vector"])
     conn.execute(
         "INSERT INTO task_queries(repo_id, query, result_json, retrieval_id, term_key, embed_model, query_vector, created_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
         (rid, query, json.dumps(compact), retrieval_id, term_key, stored_embed_model, query_vector_blob, now_iso()),
@@ -742,19 +740,12 @@ def _boost_rows_for_term_key(conn: sqlite3.Connection, rid: str, term_key: str, 
     return out
 
 
-def _semantic_boost_fallback(conn: sqlite3.Connection, rid: str, term_key: str, paths: list[str], query: str | None, min_shown: int, cap: int, cutoff: str) -> dict[tuple[str, str], int]:
-    # 12c: only reached when the exact term_key had no boost rows. Embeds the current query,
-    # scans this repo's other stored task-query embeddings for the closest paraphrase, then
-    # applies a down-weighted fraction of THAT term_key's own (already min_shown/cap-gated)
-    # boost -- never full credit, never fires without embed_model configured, never blocks
-    # (ollama_client.embed is bounded and non-raising).
-    embed_model = load_config().get("ollama", {}).get("embed_model")
-    if not embed_model or not query:
-        return {}
-    task_embed = ollama_client.embed(query)
-    if not task_embed.get("ok"):
-        return {}
-    task_vector = task_embed.get("vector") or []
+def _semantic_boost_fallback(conn: sqlite3.Connection, rid: str, term_key: str, paths: list[str], task_vector: list[float] | None, min_shown: int, cap: int, cutoff: str) -> dict[tuple[str, str], int]:
+    # 12c: only reached when the exact term_key had no boost rows. Scans this repo's other
+    # stored task-query embeddings for the closest paraphrase of the (caller-provided) task
+    # vector, then applies a down-weighted fraction of THAT term_key's own (already min_shown/
+    # cap-gated) boost -- never full credit. task_vector is None when embed_model is unset or
+    # the request's single embed failed/Ollama was down, in which case there is no fallback.
     if not task_vector:
         return {}
     rows = conn.execute(
@@ -775,11 +766,11 @@ def _semantic_boost_fallback(conn: sqlite3.Connection, rid: str, term_key: str, 
     return {key: val for key, val in downweighted.items() if val > 0}
 
 
-def get_boost_map(repo_root: str | Path | None, term_key: str, paths: list[str], query: str | None = None) -> dict[tuple[str, str], int]:
+def get_boost_map(repo_root: str | Path | None, term_key: str, paths: list[str], task_vector: list[float] | None = None) -> dict[tuple[str, str], int]:
     # candidate paths -> {(path, heading): net boost}, only for rows shown >= min_shown times and touched within the retention window (recency gate, not gradual decay)
     # net evidence (followed - corrected), capped at RETRIEVAL_BOOST_CAP -- can only nudge near-ties, never outrank structural evidence
-    # exact term_key match stays the unchanged, zero-cost first path; the 12c semantic fallback
-    # (paraphrase matching, gated on `query` + embed_model) only runs when that returns nothing
+    # exact term_key match stays the unchanged, zero-cost first path (no vector consulted); the 12c semantic
+    # fallback (paraphrase matching against the caller-provided task_vector) only runs when that returns nothing
     if not paths or not term_key:
         return {}
     root = repo_root_or_cwd(repo_root)
@@ -793,7 +784,7 @@ def get_boost_map(repo_root: str | Path | None, term_key: str, paths: list[str],
     exact = _boost_rows_for_term_key(conn, rid, term_key, paths, min_shown, cap, cutoff)
     if exact:
         return exact
-    return _semantic_boost_fallback(conn, rid, term_key, paths, query, min_shown, cap, cutoff)
+    return _semantic_boost_fallback(conn, rid, term_key, paths, task_vector, min_shown, cap, cutoff)
 
 
 def find_heading_symbol(path: str, heading: str, repo_root: str | Path | None = None) -> dict[str, Any] | None:

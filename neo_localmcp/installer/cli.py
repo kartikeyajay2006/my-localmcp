@@ -225,11 +225,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     config_ollama_parser = sub.add_parser(
         "config-ollama",
-        help="Set the Ollama base URL and/or fast/summary models. Omitted flags keep their current value.",
+        help="Set the Ollama base URL and/or fast/summary/embed models. Omitted flags keep their current value.",
     )
     config_ollama_parser.add_argument("--base-url")
     config_ollama_parser.add_argument("--fast-model")
     config_ollama_parser.add_argument("--summary-model")
+    config_ollama_parser.add_argument(
+        "--embed-model",
+        help="Optional embedding model for the semantic layer; pass an empty string to disable it.",
+    )
     config_ollama_parser.set_defaults(operation="config-ollama")
 
     manage_clients_parser = sub.add_parser(
@@ -350,12 +354,15 @@ def _render_result(result: OperationResult, reporter: Reporter) -> int:
 
 
 def _run_config_ollama(args: argparse.Namespace, reporter: Reporter) -> int:
+    # embed_model is tri-state in configure_models: None (flag omitted) keeps current, "" disables, a name enables
     ollama_cfg = configure_models(
         base_url=args.base_url, fast_model=args.fast_model, summary_model=args.summary_model,
+        embed_model=args.embed_model,
     )
     reporter.action(
         f"Saved Ollama config: fast={ollama_cfg.get('fast_model')}, "
-        f"summary={ollama_cfg.get('summary_model')}, base_url={ollama_cfg.get('base_url')}"
+        f"summary={ollama_cfg.get('summary_model')}, "
+        f"embed={ollama_cfg.get('embed_model') or 'disabled'}, base_url={ollama_cfg.get('base_url')}"
     )
     return EXIT_SUCCESS
 

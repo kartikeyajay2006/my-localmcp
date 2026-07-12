@@ -19,6 +19,7 @@ from typing import Any
 
 from .. import __version__
 from .. import ollama_client
+from ..config import load_config
 from ..retrieval import repo_memory
 from ..retrieval.repo_memory import _cosine
 from ..branding import IDENTITY
@@ -614,13 +615,14 @@ def _resolve_explicit_paths(task: str, terms: list[str], indexed_files: list[str
     return explicit_paths
 
 
-def _apply_retrieval_boost(candidates: dict[str, dict[str, Any]], root: Path, interpreted: dict[str, Any], symbol_hits: list[dict[str, Any]], task: str) -> str | None:
+def _apply_retrieval_boost(candidates: dict[str, dict[str, Any]], root: Path, interpreted: dict[str, Any], symbol_hits: list[dict[str, Any]], task_embed: dict[str, Any] | None) -> str | None:
     # pipeline step 4/7: prior sessions' implicit feedback -> small capped nudge on candidate scores
     # runs last, after all structural scoring, and stays well below any structural signal (a milestone match alone is +60) -- can only break near-ties, never override structure
-    # 12c: get_boost_map falls back to paraphrase matching (task text) only when no exact term_key match exists
+    # 12c: get_boost_map falls back to paraphrase matching (the request's shared task vector) only when no exact term_key match exists
     term_key = compute_term_key(interpreted)
     if term_key and candidates:
-        boost_map = repo_memory.get_boost_map(root, term_key, list(candidates.keys()), query=task)
+        task_vector = task_embed.get("vector") if task_embed else None
+        boost_map = repo_memory.get_boost_map(root, term_key, list(candidates.keys()), task_vector=task_vector)
         if boost_map:
             for path, item in candidates.items():
                 section = _best_heading_section(path, symbol_hits, interpreted)
@@ -637,20 +639,30 @@ def _apply_retrieval_boost(candidates: dict[str, dict[str, Any]], root: Path, in
 SEMANTIC_RERANK_WEIGHT = 18
 
 
-def _apply_semantic_rerank(candidates: dict[str, dict[str, Any]], root: Path, task: str) -> None:
+def _embed_task_once(task: str) -> dict[str, Any] | None:
+    # single per-request task embedding, shared by the 12b rerank, 12c boost fallback, and 12c
+    # query recording so one prepare_context makes AT MOST one embed call (Finding 1).
+    # embed_model unset -> None, zero network (byte-identical to pre-semantic behavior);
+    # embed failure / Ollama down -> None (one bounded probe, not three). -> {vector, model} on success.
+    if not load_config().get("ollama", {}).get("embed_model"):
+        return None
+    result = ollama_client.embed(task)
+    if not result.get("ok") or not result.get("vector"):
+        return None
+    return {"vector": result["vector"], "model": result.get("model")}
+
+
+def _apply_semantic_rerank(candidates: dict[str, dict[str, Any]], root: Path, task_embed: dict[str, Any] | None) -> None:
     # optional pipeline step: re-rank ONLY the already-FTS-selected candidates by cosine(task, stored file vector).
-    # gated on embeddings existing (repo_has_embeddings) so embed_model-unset repos are byte-identical to pre-12b, no embed() call.
-    # additive only: no new candidates, no result-set expansion; task-embed failure -> leave FTS order untouched.
-    if not candidates:
+    # gated on embeddings existing (repo_has_embeddings) so embed_model-unset repos are byte-identical to pre-12b.
+    # uses the request's shared task embedding (no embed() of its own); None -> no-op, FTS order untouched.
+    if not candidates or not task_embed:
         return
     conn = repo_memory.connect()
     rid = repo_memory.repo_id(root)
     if not repo_memory.repo_has_embeddings(conn, rid):
         return
-    task_result = ollama_client.embed(task)
-    if not task_result.get("ok"):
-        return
-    task_vector = task_result.get("vector") or []
+    task_vector = task_embed.get("vector") or []
     stored = repo_memory.get_file_embeddings(conn, rid, list(candidates.keys()))
     for path, item in candidates.items():
         entry = stored.get(path)
@@ -798,8 +810,10 @@ def context_prepare(task: str, repo_root: str = "auto", max_files: int | None = 
     for resolved in sorted(explicit_paths):
         _add_candidate(candidates, resolved, "explicit path in task", 120, intent, allow_reason_line_hint=False)
 
-    term_key = _apply_retrieval_boost(candidates, root, interpreted, symbol_hits, task)
-    _apply_semantic_rerank(candidates, root, task)  # optional; no-op unless embeddings exist for this repo
+    # embed the task string at most once per request; shared by boost fallback (12c), rerank (12b), and recording (12c)
+    task_embed = _embed_task_once(task)
+    term_key = _apply_retrieval_boost(candidates, root, interpreted, symbol_hits, task_embed)
+    _apply_semantic_rerank(candidates, root, task_embed)  # optional; no-op unless embeddings exist for this repo
     ranked, read_first = _select_read_first(candidates, explicit_paths, intent, limit, max_files)
 
     symbol_map = repo_memory.symbols_for_files([item["path"] for item in read_first], root, max_per_file=8)
@@ -858,7 +872,7 @@ def context_prepare(task: str, repo_root: str = "auto", max_files: int | None = 
     ranking_result_for_nesting = {**ollama_result, "ollama_status": _slim_status_for_nesting(ranking_full_status)} if ollama_result else ollama_result
     result = {**deterministic, "ollama_requested": bool(use_ollama), "ollama_ranking": ranking_result_for_nesting, "ollama_timing": _format_model_timing(ollama_result), "ollama_status": ranking_full_status}
     if record:
-        repo_memory.record_task_query(task, root, retrieval_id=retrieval_id, term_key=term_key, sections=sections_for_memory, tool_version=__version__)
+        repo_memory.record_task_query(task, root, retrieval_id=retrieval_id, term_key=term_key, sections=sections_for_memory, tool_version=__version__, task_embed=task_embed)
     return _format(result, output_format)
 
 

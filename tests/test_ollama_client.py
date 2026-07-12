@@ -93,3 +93,35 @@ def test_status_resolves_omitted_latest_tag(monkeypatch, isolated_config):
     assert result["state"] == "model_cold"
     assert result["model"] == "qwen3-coder:latest"
     assert result["requested_model"] == "qwen3-coder"
+
+
+def test_model_details_reports_size_capabilities_and_family(monkeypatch, isolated_config):
+    def fake(path, **kwargs):
+        assert path == "/api/tags"
+        return 200, {"models": [
+            {"name": "qwen3:8b", "size": 5_200_000_000,
+             "capabilities": ["completion", "tools"],
+             "details": {"family": "qwen3", "parameter_size": "8.2B"}},
+            {"name": "bge-m3:latest", "size": 1_157_672_605,
+             "capabilities": ["embedding"],
+             "details": {"family": "bert", "parameter_size": "566.70M"}},
+        ]}
+    monkeypatch.setattr(ollama_client, "_request_json", fake)
+    details = ollama_client.model_details()
+    assert details["qwen3:8b"]["size"] == 5_200_000_000
+    assert details["qwen3:8b"]["capabilities"] == ["completion", "tools"]
+    assert details["qwen3:8b"]["family"] == "qwen3"
+    assert details["qwen3:8b"]["parameter_size"] == "8.2B"
+    assert details["bge-m3:latest"]["capabilities"] == ["embedding"]
+
+
+def test_model_details_never_raises_on_failure(monkeypatch, isolated_config):
+    def fake(path, **kwargs):
+        raise ConnectionError("down")
+    monkeypatch.setattr(ollama_client, "_request_json", fake)
+    assert ollama_client.model_details() == {}
+
+
+def test_model_details_never_raises_on_non_200(monkeypatch, isolated_config):
+    monkeypatch.setattr(ollama_client, "_request_json", lambda path, **kw: (500, {"error": "boom"}))
+    assert ollama_client.model_details() == {}
