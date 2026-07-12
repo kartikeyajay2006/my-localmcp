@@ -127,6 +127,7 @@ class WizardState:
     embed_model: str = ""  # optional; "" = leave the semantic layer disabled
     add_to_path: bool = False
     full_wipe: bool = False
+    client_detach_only: bool = False
     dry_run: bool = False
     outcome: OperationOutcome | None = None
 
@@ -136,6 +137,7 @@ class WizardState:
         self.configure_ollama = False
         self.add_to_path = False
         self.full_wipe = False
+        self.client_detach_only = False
         self.dry_run = False
         self.outcome = None
 

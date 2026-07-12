@@ -279,6 +279,8 @@ class PreviewBackend:
             self._installed = True
             self._installed_version = _SOURCE_VERSION
             self._registered = list(state.selected_clients)
+        elif op == OP_REINSTALL:
+            self._registered = list(state.selected_clients)
         if state.configure_ollama:
             self._fast_model = state.fast_model or self._fast_model
             self._summary_model = state.summary_model or self._summary_model
@@ -303,6 +305,23 @@ class PreviewBackend:
 
     def _simulate_uninstall(self, state: WizardState, emit: EmitFn) -> OperationOutcome:
         # emits the uninstall (or full-wipe) plan steps, then resets simulated install state; full_wipe additionally resets Ollama config/prefs
+        if state.client_detach_only:
+            for step in _PLAN[OP_UNINSTALL]:
+                emit(StepEvent("action", step))
+                time.sleep(_STEP_DELAY)
+            detached = list(state.selected_clients)
+            self._registered = [c for c in self._registered if c not in detached]
+            emit(StepEvent("summary", "client detach succeeded (simulated)"))
+            self._persist()
+            return OperationOutcome(
+                ok=True, status="succeeded",
+                title="Client detach complete (simulated).",
+                detail_lines=(
+                    f"Detached: {', '.join(detached) or 'none'}",
+                    "Runtime and durable data preserved (simulated).",
+                    "This was a simulation (--preview).",
+                ),
+            )
         steps = (
             _PLAN["uninstall-wipe"] if state.full_wipe else _PLAN[OP_UNINSTALL]
         )
