@@ -17,6 +17,14 @@ from . import config
 from .config import load_config, ollama_base_url
 
 
+def _ollama_env() -> dict[str, str]:
+    # explicit copy of the current process's env, read live (not cached) at spawn
+    # time -- passed as Popen(..., env=...) rather than relying on ambient
+    # inheritance, since some launch ancestries (e.g. Claude Desktop's extension
+    # host) don't reliably pass OLLAMA_MODELS/OLLAMA_HOST through otherwise (#68)
+    return dict(os.environ)
+
+
 def _state_path() -> Path:
     return config.cache_path("ollama", "supervisor.json")
 
@@ -250,7 +258,10 @@ def start_service() -> dict[str, Any]:
     executable = shutil.which("ollama")
     if not executable:
         return _result(False, current, error="ollama executable was not found on PATH", action="start_failed")
-    kwargs: dict[str, Any] = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+    kwargs: dict[str, Any] = {
+        "stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL,
+        "env": _ollama_env(),
+    }
     if os.name == "nt":
         kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
     else:
