@@ -33,6 +33,7 @@ from .. import (
 )
 from .. import clients as clients_mod
 from ..mcpb import build_mcpb
+from ..model_recommendations import recommend_models
 from ..path import add_to_path, path_hint
 from .backend import (
     CLIENT_KEYS,
@@ -187,6 +188,10 @@ class LiveBackend:
         capabilities: dict[str, tuple[str, ...]] = {}
         if reachable and installed:
             sizes, capabilities = self._model_details()
+        recommendations = {
+            role: tuple((r.name, r.installed) for r in recommend_models(role, installed))
+            for role in ("fast", "summary", "embed")
+        }
         if reachable and installed:
             detail = f"`ollama list`: {len(installed)} model(s) installed at {base_url}."
         elif reachable:
@@ -198,6 +203,7 @@ class LiveBackend:
             reachable=reachable, base_url=base_url, installed_models=tuple(installed),
             fast_model=fast, summary_model=summary, state=state, detail=detail,
             model_sizes=sizes, embed_model=embed, model_capabilities=capabilities,
+            recommendations=recommendations,
         )
 
     @staticmethod
