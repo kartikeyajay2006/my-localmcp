@@ -115,6 +115,52 @@ def test_install_rejects_unknown_client() -> None:
     assert result.returncode == 2
 
 
+@pytest.mark.parametrize("operation", ["install", "reinstall"])
+def test_install_like_commands_accept_explicit_add_to_path_flag(operation: str) -> None:
+    from neo_localmcp.installer.cli import build_parser
+
+    args = build_parser().parse_args([operation, "--add-to-path"])
+
+    assert args.add_to_path is True
+
+
+@pytest.mark.parametrize("operation", ["install", "reinstall"])
+@pytest.mark.parametrize("add_to_path", [False, True])
+def test_successful_install_like_operation_prints_hint_and_only_updates_path_when_requested(
+    tmp_path: Path, monkeypatch, capsys, operation: str, add_to_path: bool,
+) -> None:
+    from neo_localmcp.installer import cli
+    from neo_localmcp.installer.operations import OperationContext
+    from neo_localmcp.installer.output import Reporter
+    from neo_localmcp.installer.path import PathUpdate
+    from neo_localmcp.installer.paths import ManagedPaths
+    from neo_localmcp.installer.types import Operation, OperationResult, OperationStatus
+
+    paths = ManagedPaths(
+        root=tmp_path / ".neo-localmcp", platform="posix", home=tmp_path,
+        allow_test_root=True,
+    )
+    context = OperationContext(
+        paths=paths, source_root=REPO_ROOT, python_executable=Path(sys.executable),
+        reporter=Reporter(), source_version="test",
+    )
+    result = OperationResult(Operation(operation), OperationStatus.SUCCEEDED, (), ())
+    updates: list[ManagedPaths] = []
+    monkeypatch.setattr(cli, "build_context", lambda reporter: context)
+    monkeypatch.setattr(cli, operation, lambda *_args, **_kwargs: result)
+    def record_update(received: ManagedPaths) -> PathUpdate:
+        updates.append(received)
+        return PathUpdate(changed=True, target=received.home / ".zshrc")
+
+    monkeypatch.setattr(cli, "add_to_path", record_update)
+
+    argv = [operation, *( ["--add-to-path"] if add_to_path else [])]
+    assert cli.main(argv) == 0
+
+    assert f'export PATH="{paths.executable_dir}:$PATH"' in capsys.readouterr().out
+    assert updates == ([paths] if add_to_path else [])
+
+
 # --------------------------------------------------------------------------- #
 # Step 2: Python-floor bootstrap
 # --------------------------------------------------------------------------- #

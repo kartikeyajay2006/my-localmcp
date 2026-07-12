@@ -125,6 +125,7 @@ class WizardState:
     fast_model: str = ""
     summary_model: str = ""
     embed_model: str = ""  # optional; "" = leave the semantic layer disabled
+    add_to_path: bool = False
     full_wipe: bool = False
     dry_run: bool = False
     outcome: OperationOutcome | None = None
@@ -133,6 +134,7 @@ class WizardState:
         self.operation = ""
         self.selected_clients = []
         self.configure_ollama = False
+        self.add_to_path = False
         self.full_wipe = False
         self.dry_run = False
         self.outcome = None
