@@ -1,5 +1,15 @@
 # Project Notes
 
+## 2026-07-12 (2)
+
+- **1.2.1's remaining three issues (#103, #68, #101) implemented overnight, unattended, each merged into `dev/v1.2.1_implementation` via its own PR (#106, #107, #108) — no merge to `main`, per explicit owner instruction.** Picked up from a Codex handoff that had committed only #103's non-wizard half (`556a49f`).
+  - **#103 finished**: wizard gained `_phase_clients` for Reinstall (previously silently kept the on-disk snapshot) and a new Uninstall scope screen ("Uninstall" vs. "Detach specific clients only", the latter skipping the runtime-only/full-wipe questions entirely) so a partial client detach is reachable without the CLI. `LiveBackend`/`PreviewBackend` wired through with `client_selection_explicit` semantics matching the CLI's existing `--client` behavior.
+  - **#68 fixed**: `ollama_client.start_service()` now builds `env=` explicitly (`_ollama_env()`, read live from `os.environ` at spawn time) instead of relying on `Popen`'s default ambient inheritance. Verified with a real sanitized-subprocess repro harness, not just a mocked-`Popen` assertion.
+  - **#101 implemented**: `installer/model_recommendations.py` (`recommend_models(role, installed_models)`, hardware-blind per the plan, reuses `ollama_client._resolve_installed_model` for tag matching). Wizard picker pages render a RECOMMENDED FOR YOUR SETUP section above the always-unabridged installed list, one continuous numbered sequence; confirm page shows an `ollama pull <model>` warning for anything selected-but-not-pulled, never blocking. Recommendation table matches `docs/1.2.1_MANUAL_OS_TESTING.md`'s pre-recorded spec exactly (`qwen3.5:4b`/`qwen3.5:9b` fast, `gemma4:12b`/`qwen3:8b` summary, `bge-m3:latest`/`mxbai-embed-large:latest` embed) rather than a freehand table, once that doc's existing content was noticed.
+  - **Recurring stale-`.mcpb`-bundle issue hit twice more this session** (`test_distribution.py::test_built_mcpb_embeds_current_package_bytes`), same class CLAUDE.md already flags as having broken CI twice historically — `build_mcpb`'s "never overwrite, always suffix `-N`" policy means every source change to `neo_localmcp/**` needs the stale bundle(s) deleted and rebuilt in place before committing, including across a `git rebase` (binary-file conflict, resolved by deleting and rebuilding rather than picking either side). Worth a lint/pre-commit check going forward rather than remembering by hand each time.
+  - All three PRs' CI (macOS + Windows, all named jobs + `ci-gate`) confirmed green before merging into the integration branch; full local suite green throughout (444 passed / 4 skipped on the final state).
+  - **Deliberately not done tonight, reserved for the owner**: manual macOS/Windows hands-on pass (`docs/1.2.1_MANUAL_OS_TESTING.md`, all four issues' checkpoints), 12.1g's version bump/tag/final `dev -> main` PR and merge.
+
 ## 2026-07-12
 
 - **`v1.2.0` shipped** (PR #98 merged to `main` at `87b02f1`, tag pushed). Third tag in this repo's history (`v1.0.10`, `v1.1.1`, `v1.2.0`), first new one since `v1.0.10`.
