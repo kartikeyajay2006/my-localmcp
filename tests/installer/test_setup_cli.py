@@ -124,6 +124,15 @@ def test_install_like_commands_accept_explicit_add_to_path_flag(operation: str) 
     assert args.add_to_path is True
 
 
+@pytest.mark.parametrize("operation", ["reinstall", "uninstall"])
+def test_reinstall_and_uninstall_accept_repeatable_client_selection(operation: str) -> None:
+    from neo_localmcp.installer.cli import build_parser
+
+    args = build_parser().parse_args([operation, "--client", "codex", "--client", "claude-code"])
+
+    assert args.client == ["codex", "claude-code"]
+
+
 @pytest.mark.parametrize("operation", ["install", "reinstall"])
 @pytest.mark.parametrize("add_to_path", [False, True])
 def test_successful_install_like_operation_prints_hint_and_only_updates_path_when_requested(

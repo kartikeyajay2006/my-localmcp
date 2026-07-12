@@ -205,6 +205,23 @@ def test_remove_active_registrations_dry_run_mutates_nothing(client_home, tmp_pa
     assert codex.read_text(encoding="utf-8") == before
 
 
+def test_remove_active_registrations_can_forget_only_a_selected_subset(client_home, tmp_path, monkeypatch):
+    paths = _paths(tmp_path)
+    clients.record_selection(paths, ["claude-code", "codex"])
+    removed = []
+    monkeypatch.setattr(
+        clients.client_setup, "remove_client",
+        lambda client, apply=True: removed.append(client) or {"client": client, "ok": True},
+    )
+
+    clients.remove_active_registrations(
+        paths, selected_clients=("codex",), forget=True,
+    )
+
+    assert removed == ["codex"]
+    assert [record.client for record in clients.read_registrations(paths)] == ["claude-code"]
+
+
 def test_restore_points_registrations_at_new_launcher(client_home, tmp_path):
     paths = _paths(tmp_path)
     old_launcher = tmp_path / "old" / "venv" / "bin" / "neo-localmcp-server"
