@@ -85,6 +85,9 @@ class OllamaInfo:
     # Ollama's own reported capability tags per model (e.g. ("completion", "tools") or
     # ("embedding",)) from /api/tags -- real model-type info, not a name-based guess.
     model_capabilities: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    # #101: per-role (name, installed) pairs from the curated recommendation table,
+    # best-first, up to 2 per role ("fast"/"summary"/"embed"); no hardware inspection.
+    recommendations: dict[str, tuple[tuple[str, bool], ...]] = field(default_factory=dict)
 
 
 def human_size(num_bytes: float) -> str:

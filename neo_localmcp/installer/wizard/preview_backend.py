@@ -21,6 +21,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from ..model_recommendations import recommend_models
 from .backend import (
     CLIENT_KEYS,
     CLIENT_LABELS,
@@ -235,6 +236,11 @@ class PreviewBackend:
         return options
 
     def ollama_info(self) -> OllamaInfo:
+        installed = list(_FAKE_INSTALLED_MODELS)
+        recommendations = {
+            role: tuple((r.name, r.installed) for r in recommend_models(role, installed))
+            for role in ("fast", "summary", "embed")
+        }
         return OllamaInfo(
             reachable=True,
             base_url=self._base_url,
@@ -246,6 +252,7 @@ class PreviewBackend:
             model_sizes={name: human_size(size) for name, size in _FAKE_MODEL_SIZES_RAW.items()},
             embed_model=self._embed_model,
             model_capabilities=dict(_FAKE_MODEL_CAPABILITIES),
+            recommendations=recommendations,
         )
 
     # -- operations ------------------------------------------------------- #

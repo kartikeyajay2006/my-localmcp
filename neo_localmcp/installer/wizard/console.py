@@ -456,17 +456,35 @@ class ConsoleWizard:
                 return offset + 1
         return 1  # only embed-only models installed -- nothing better to offer
 
-    def _pick_model(self, label: str, hint: list[str], info, current: str) -> str:
+    @staticmethod
+    def _print_recommended_section(recs: list[tuple[str, bool]]) -> None:
+        # "RECOMMENDED FOR YOUR SETUP" -- one numbered line per candidate (1..len(recs)),
+        # green + [x] available when installed, red_bold + [ ] not pulled otherwise
+        print("\n   RECOMMENDED FOR YOUR SETUP\n")
+        for index, (name, installed) in enumerate(recs, start=1):
+            marker = "[x] available" if installed else "[ ] not pulled"
+            line = f"   {index}) {name}  ({marker})"
+            print(_ansi.green(line) if installed else _ansi.red_bold(line))
+        print()
+        print("   " + "-" * 24)
+        print("   ALL INSTALLED MODELS\n")
+
+    def _pick_model(self, label: str, hint: list[str], info, current: str, role: str) -> str:
         self._header(f"Choose the {label}:")
         self._explain(*hint, "Listed below are the models from your `ollama list`,")
         print(" sorted alphabetically:\n")
         models = list(info.installed_models)
+        recs = list(info.recommendations.get(role, ()))
+        if recs:
+            self._print_recommended_section(recs)
+        start_index = len(recs) + 1
         default = self._default_model_index(models, info, current)
         default_model = models[default - 1] if models else None
-        for row in self._format_model_table(models, info, current, default_model=default_model):
+        for row in self._format_model_table(models, info, current, start_index=start_index, default_model=default_model):
             print(row)
-        choice = self._ask_int(1, len(models), default=default)
-        return models[choice - 1]
+        combined_names = [name for name, _installed in recs] + models
+        choice = self._ask_int(1, len(combined_names), default=start_index - 1 + default)
+        return combined_names[choice - 1]
 
     def _phase_ollama_fast(self) -> None:
         if not self.state.configure_ollama:
@@ -481,7 +499,7 @@ class ConsoleWizard:
                     "bug', it decides which files are probably relevant. A smaller,",
                     "faster model is best here; you don't need a large coder model.",
                 ],
-                info, self.state.fast_model or info.fast_model)
+                info, self.state.fast_model or info.fast_model, role="fast")
         else:
             self._header("Fast model (ranking)")
             self._explain(
@@ -500,7 +518,7 @@ class ConsoleWizard:
                 "summary model (file summaries)",
                 ["Used to write file/section summaries on request. A larger,",
                  "code-capable model gives better summaries than the fast model."],
-                info, self.state.summary_model or info.summary_model)
+                info, self.state.summary_model or info.summary_model, role="summary")
         else:
             self._header("Summary model (file summaries)")
             self._explain(
@@ -530,12 +548,18 @@ class ConsoleWizard:
             self._header("Embedding model for the semantic layer (optional):")
             self._explain(*self._EMBED_HINT, "", "Choose 0 to leave it disabled (the default).")
             models = list(info.installed_models)
+            recs = list(info.recommendations.get("embed", ()))
             print("\n   0) None -- leave the semantic layer disabled")
-            for row in self._format_model_table(models, info, current, start_index=1):
+            if recs:
+                self._print_recommended_section(recs)
+            start_index = len(recs) + 1
+            for row in self._format_model_table(models, info, current, start_index=start_index):
                 print(row)
+            combined_names = [name for name, _installed in recs] + models
             default = models.index(current) + 1 if current in models else 0
-            choice = self._ask_int(0, len(models), default=default)
-            self.state.embed_model = "" if choice == 0 else models[choice - 1]
+            default_display = 0 if default == 0 else start_index - 1 + default
+            choice = self._ask_int(0, len(combined_names), default=default_display)
+            self.state.embed_model = "" if choice == 0 else combined_names[choice - 1]
         else:
             self._header("Embedding model for the semantic layer (optional)")
             self._explain(*self._EMBED_HINT, "", "Leave blank to keep it disabled.")
@@ -641,6 +665,18 @@ class ConsoleWizard:
         OP_MANAGE_CLIENTS: "Apply",
     }
 
+    def _missing_pull_models(self) -> list[str]:
+        # #101: selected fast/summary/embed models that aren't in `ollama list` yet, in a
+        # stable order, deduplicated; [] whenever Ollama configuration wasn't touched this run
+        if not self.state.configure_ollama:
+            return []
+        installed = set(self.backend.ollama_info().installed_models)
+        missing: list[str] = []
+        for name in (self.state.fast_model, self.state.summary_model, self.state.embed_model):
+            if name and name not in installed and name not in missing:
+                missing.append(name)
+        return missing
+
     def _confirm(self, *, default_proceed: bool = True) -> None:
         # final gate before any change: show chosen actions -> single yes/no; no -> _Abort
         self._header("Review and confirm")
@@ -657,6 +693,17 @@ class ConsoleWizard:
             print()
         print(f"   Managed root: {self.detected.managed_root}")
         print()
+
+        missing = self._missing_pull_models()
+        if missing:
+            for line in _wrap(
+                "The following selected model(s) are not pulled yet -- neo-localmcp "
+                "never auto-downloads a model, so run these yourself:", indent=" ",
+            ):
+                print(_ansi.red_bold(line))
+            for name in missing:
+                print(_ansi.red_bold(f"   ollama pull {name}"))
+            print()
 
         verb = self._CONFIRM_VERBS.get(self.state.operation, "Proceed")
         prompt = "Proceed?" if verb == "Proceed" else f"{verb} as shown?"
