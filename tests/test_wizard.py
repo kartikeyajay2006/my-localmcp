@@ -3,6 +3,7 @@ from __future__ import annotations
 from neo_localmcp.installer.wizard import live_backend, preview_backend
 from neo_localmcp.installer.wizard.backend import (
     OP_INSTALL,
+    OP_REINSTALL,
     OP_UNINSTALL,
     WizardBackend,
     WizardState,
@@ -235,6 +236,175 @@ def test_isolated_app_home_actually_redirects_in_process_config_writes(isolated_
     resolved = config.config_path()
     assert str(resolved).startswith(str(isolated_app_home))
     assert resolved != config._INITIAL_CONFIG_PATH
+
+
+# --- #103: client-selection parity across install/reinstall/uninstall ------
+
+def test_reinstall_now_offers_its_own_client_phase(tmp_path, monkeypatch):
+    """Reinstall used to skip client selection entirely ('kept as-is'); it now
+    gets the same _phase_clients screen as Install/Manage-clients, defaulted
+    to the currently-registered set."""
+    from neo_localmcp.installer.wizard.console import ConsoleWizard
+
+    monkeypatch.setenv("NEO_LOCALMCP_WIZARD_PREVIEW_STATE", "healthy")
+    backend = _isolated_preview_backend(tmp_path, monkeypatch)
+    backend._registered = ["claude-code"]
+    wizard = ConsoleWizard(backend, fake=True)
+    wizard.state.operation = OP_REINSTALL
+
+    monkeypatch.setattr(ConsoleWizard, "_input", lambda self, prompt: "")  # accept default
+    wizard._phase_clients()
+
+    assert wizard.state.selected_clients == ["claude-code"]
+    assert wizard._clients_chosen is True
+
+
+def test_uninstall_client_phase_skipped_unless_detach_only(tmp_path, monkeypatch):
+    import pytest
+
+    from neo_localmcp.installer.wizard.console import ConsoleWizard, _Skip
+
+    backend = _isolated_preview_backend(tmp_path, monkeypatch)
+    wizard = ConsoleWizard(backend, fake=True)
+    wizard.state.operation = OP_UNINSTALL
+    wizard.state.client_detach_only = False
+
+    called = []
+    monkeypatch.setattr(ConsoleWizard, "_input", lambda self, prompt: called.append(prompt) or "")
+    with pytest.raises(_Skip):
+        wizard._phase_clients()
+
+    assert called == []
+    assert wizard.state.selected_clients == []
+
+
+def test_uninstall_scope_phase_sets_detach_only(tmp_path, monkeypatch):
+    from neo_localmcp.installer.wizard.console import ConsoleWizard
+
+    backend = _isolated_preview_backend(tmp_path, monkeypatch)
+    wizard = ConsoleWizard(backend, fake=True)
+    wizard.state.operation = OP_UNINSTALL
+
+    monkeypatch.setattr(ConsoleWizard, "_input", lambda self, prompt: "2")  # detach-only
+    wizard._phase_uninstall_scope()
+    assert wizard.state.client_detach_only is True
+
+
+def test_uninstall_mode_and_wipe_confirm_skipped_when_detach_only(tmp_path, monkeypatch):
+    import pytest
+
+    from neo_localmcp.installer.wizard.console import ConsoleWizard, _Skip
+
+    backend = _isolated_preview_backend(tmp_path, monkeypatch)
+    wizard = ConsoleWizard(backend, fake=True)
+    wizard.state.operation = OP_UNINSTALL
+    wizard.state.client_detach_only = True
+
+    prompts = []
+    monkeypatch.setattr(ConsoleWizard, "_input", lambda self, prompt: prompts.append(prompt) or "")
+    with pytest.raises(_Skip):
+        wizard._phase_uninstall_mode()
+    with pytest.raises(_Skip):
+        wizard._phase_uninstall_wipe_confirm()
+
+    assert prompts == []
+    assert wizard.state.full_wipe is False
+
+
+def test_uninstall_detach_only_selects_subset_and_preserves_runtime(tmp_path, monkeypatch):
+    """End-to-end preview walk of the new detach-only uninstall path: choosing
+    a client subset must not remove the runtime, only the selected clients."""
+    from neo_localmcp.installer.wizard.console import ConsoleWizard
+
+    monkeypatch.setenv("NEO_LOCALMCP_WIZARD_PREVIEW_STATE", "healthy")
+    backend = _isolated_preview_backend(tmp_path, monkeypatch)
+    backend._registered = ["claude-code", "codex"]
+    wizard = ConsoleWizard(backend, fake=True)
+    wizard.state.operation = OP_UNINSTALL
+
+    wizard.state.client_detach_only = True
+    codex_index = next(
+        i for i, o in enumerate(backend.client_options(), 1) if o.key == "codex"
+    )
+    monkeypatch.setattr(ConsoleWizard, "_input", lambda self, prompt: str(codex_index))
+    wizard._phase_clients()
+
+    assert wizard.state.selected_clients == ["codex"]
+
+    outcome = backend.run_operation(wizard.state, lambda _event: None)
+    assert outcome.ok is True
+    assert backend._registered == ["claude-code"]
+    assert backend.detect().is_installed  # runtime preserved
+
+
+def test_live_backend_reinstall_marks_client_selection_explicit(isolated_app_home, monkeypatch):
+    from neo_localmcp.installer.wizard import live_backend
+    from neo_localmcp.installer.types import Operation, OperationResult, OperationStatus
+
+    backend = live_backend.LiveBackend()
+    captured = {}
+
+    def fake_reinstall(context):
+        captured["selected_clients"] = list(context.selected_clients)
+        captured["explicit"] = context.client_selection_explicit
+        return OperationResult(Operation.REINSTALL, OperationStatus.SUCCEEDED, (), ())
+
+    monkeypatch.setattr(live_backend, "reinstall", fake_reinstall)
+    monkeypatch.setattr(backend, "_build_desktop_bundle", lambda _emit: None)
+
+    outcome = backend.run_operation(
+        WizardState(operation=OP_REINSTALL, selected_clients=["codex"]), lambda _event: None,
+    )
+
+    assert outcome.ok is True
+    assert captured == {"selected_clients": ["codex"], "explicit": True}
+
+
+def test_live_backend_uninstall_detach_only_marks_explicit_selection(isolated_app_home, monkeypatch):
+    from neo_localmcp.installer.wizard import live_backend
+    from neo_localmcp.installer.types import Operation, OperationResult, OperationStatus
+
+    backend = live_backend.LiveBackend()
+    captured = {}
+
+    def fake_uninstall(context, **kwargs):
+        captured["selected_clients"] = list(context.selected_clients)
+        captured["explicit"] = context.client_selection_explicit
+        return OperationResult(Operation.UNINSTALL, OperationStatus.SUCCEEDED, (), ())
+
+    monkeypatch.setattr(live_backend, "uninstall", fake_uninstall)
+
+    outcome = backend.run_operation(
+        WizardState(
+            operation=OP_UNINSTALL, client_detach_only=True, selected_clients=["claude-code"],
+        ),
+        lambda _event: None,
+    )
+
+    assert outcome.ok is True
+    assert captured == {"selected_clients": ["claude-code"], "explicit": True}
+
+
+def test_live_backend_full_uninstall_does_not_mark_explicit_selection(isolated_app_home, monkeypatch):
+    from neo_localmcp.installer.wizard import live_backend
+    from neo_localmcp.installer.types import Operation, OperationResult, OperationStatus
+
+    backend = live_backend.LiveBackend()
+    captured = {}
+
+    def fake_uninstall(context, **kwargs):
+        captured["selected_clients"] = list(context.selected_clients)
+        captured["explicit"] = context.client_selection_explicit
+        return OperationResult(Operation.UNINSTALL, OperationStatus.SUCCEEDED, (), ())
+
+    monkeypatch.setattr(live_backend, "uninstall", fake_uninstall)
+
+    outcome = backend.run_operation(
+        WizardState(operation=OP_UNINSTALL, client_detach_only=False), lambda _event: None,
+    )
+
+    assert outcome.ok is True
+    assert captured == {"selected_clients": [], "explicit": False}
 
 
 def test_confirm_phase_asks_a_single_default_yes_question_no_dry_run_prompt(tmp_path, monkeypatch):

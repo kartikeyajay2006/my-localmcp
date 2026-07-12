@@ -263,17 +263,24 @@ def record_selection(
 
 
 def remove_active_registrations(
-    paths: ManagedPaths, *, apply: bool = True
+    paths: ManagedPaths, *, apply: bool = True,
+    selected_clients: Sequence[str] | None = None, forget: bool = False,
 ) -> tuple[dict[str, Any], ...]:
-    # removes only the live registrations; the records themselves stay on disk so a later reinstall can reconnect the same surfaces
+    # selected subset -> remove only those registrations; forget=True drops them from records for a client-only detach
     results: list[dict[str, Any]] = []
-    for record in read_registrations(paths):
+    selected = set(selected_clients) if selected_clients is not None else None
+    records = read_registrations(paths)
+    for record in records:
+        if selected is not None and record.client not in selected:
+            continue
         if record.client == CLAUDE_DESKTOP:
             results.append(client_setup.remove_claude_desktop(apply=apply))
             continue
         if not record.active:
             continue
         results.append(client_setup.remove_client(record.client, apply=apply))
+    if apply and forget and selected is not None:
+        write_registrations(paths, tuple(record for record in records if record.client not in selected))
     return tuple(results)
 
 

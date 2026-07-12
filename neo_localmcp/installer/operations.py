@@ -136,6 +136,7 @@ class OperationContext:
     reporter: Reporter
     source_version: str
     selected_clients: list[str] = field(default_factory=list)
+    client_selection_explicit: bool = False
     process_provider: Any | None = None
     clock: Callable[[], float] = time.time
     confirm: Callable[..., bool] = confirm_full_wipe
@@ -151,6 +152,7 @@ class OperationContext:
     record_selection_fn: Callable[[ManagedPaths, list[str]], tuple] = clients_mod.record_selection
     remove_active_registrations_fn: Callable[..., tuple] = clients_mod.remove_active_registrations
     restore_clients_fn: Callable[..., tuple] = clients_mod.restore_recorded_registrations
+    apply_client_selection_fn: Callable[..., Any] = clients_mod.apply_client_selection
     delete_registrations_fn: Callable[[ManagedPaths], None] = clients_mod.delete_registrations
     plan_migration_fn: Callable[[ManagedPaths], Any] = migration_mod.plan_migration
     apply_migration_fn: Callable[..., Any] = migration_mod.apply_migration
@@ -222,12 +224,15 @@ def _run_migration(ctx: OperationContext, actions: list[str], warnings: list[str
 
 
 def _remove_active_clients(
-    ctx: OperationContext, actions: list[str], warnings: list[str]
+    ctx: OperationContext, actions: list[str], warnings: list[str],
+    *, selected_clients: Sequence[str] | None = None, forget: bool = False,
 ) -> bool:
     # removes automated registrations; an automated failure stops the lifecycle before runtime/root removal
     # Claude Desktop is intentionally manual-only -- its result is a visible warning, never a blocking failure
     try:
-        results = ctx.remove_active_registrations_fn(ctx.paths)
+        results = ctx.remove_active_registrations_fn(
+            ctx.paths, selected_clients=selected_clients, forget=forget,
+        )
     except Exception as exc:  # noqa: BLE001 - convert cleanup crashes to lifecycle failure
         message = f"Client registration removal failed: {exc}"
         warnings.append(message)
@@ -299,12 +304,20 @@ def _restore_and_verify(
     # restore failure -> runtime is kept (not rolled back), operation fails visibly with recovery instructions
     server_command = ctx.paths.server_executable
     try:
-        ctx.restore_clients_fn(
-            ctx.paths,
-            server_command=server_command,
-            neo_config_path=_neo_config_path(ctx.paths),
-        )
-        actions.append("restored-clients")
+        if ctx.client_selection_explicit:
+            outcome = ctx.apply_client_selection_fn(
+                ctx.paths, ctx.selected_clients, server_command=server_command,
+            )
+            if not outcome.ok:
+                raise RuntimeError("; ".join(outcome.failures) or "client reconciliation failed")
+            actions.append("reconciled-client-selection")
+        else:
+            ctx.restore_clients_fn(
+                ctx.paths,
+                server_command=server_command,
+                neo_config_path=_neo_config_path(ctx.paths),
+            )
+            actions.append("restored-clients")
     except Exception as exc:  # noqa: BLE001 - restore failure is a recoverable, visible failure
         message = f"Client registration restore failed after runtime promotion: {exc}"
         ctx.reporter.error(message)
@@ -354,7 +367,7 @@ def _record_client_intent(
     ctx: OperationContext, state: DetectedState, *, fresh: bool
 ) -> None:
     # fresh/clean install (or an absent root) -> record the explicit selection; else -> snapshot whatever's already registered on disk
-    if fresh or state.kind is InstallStateKind.ABSENT:
+    if ctx.client_selection_explicit or fresh or state.kind is InstallStateKind.ABSENT:
         ctx.record_selection_fn(ctx.paths, list(ctx.selected_clients))
     else:
         ctx.snapshot_clients_fn(ctx.paths)
@@ -482,6 +495,18 @@ def uninstall(
     # default: removes venv/ only, after client cleanup; preserves all durable data, does not recreate
     # delete_memory=True: full wipe of the entire validated root (gated behind confirmation), no reinstall
     ctx = context
+    if ctx.client_selection_explicit and ctx.selected_clients:
+        actions: list[str] = []
+        warnings: list[str] = []
+        if not _remove_active_clients(
+            ctx, actions, warnings, selected_clients=ctx.selected_clients, forget=True,
+        ):
+            return _result(Operation.UNINSTALL, OperationStatus.FAILED, actions, warnings)
+        ctx.reporter.summary(
+            "client detach succeeded",
+            {"clients": ", ".join(ctx.selected_clients), "note": "runtime and durable memory/data preserved"},
+        )
+        return _result(Operation.UNINSTALL, OperationStatus.SUCCEEDED, actions, warnings)
     if delete_memory:
         if not ctx.confirm(ctx.paths, assume_yes=assume_yes):
             ctx.reporter.warn("Full wipe cancelled; no data was deleted.")
