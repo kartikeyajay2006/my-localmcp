@@ -229,9 +229,15 @@ class LiveBackend:
         try:
             context = self._build_context(emit)
             if state.operation == OP_UNINSTALL:
-                context.selected_clients = []
+                if state.client_detach_only:
+                    context.selected_clients = list(state.selected_clients)
+                    context.client_selection_explicit = True
+                else:
+                    context.selected_clients = []
                 result = uninstall(context, delete_memory=state.full_wipe, assume_yes=True)
             elif state.operation == "reinstall":
+                context.selected_clients = list(state.selected_clients)
+                context.client_selection_explicit = True
                 result = reinstall(context)
             else:  # install
                 context.selected_clients = list(state.selected_clients)
