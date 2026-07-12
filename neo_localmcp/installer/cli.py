@@ -211,6 +211,10 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Add the managed CLI directory to the current user's PATH after success.",
     )
+    reinstall_parser.add_argument(
+        "--client", action="append", choices=("claude-code", "codex", "claude-desktop"),
+        default=[], help="Client to keep connected after reinstall. Repeatable; omit to keep the current set.",
+    )
     reinstall_parser.set_defaults(operation="reinstall")
 
     uninstall_parser = sub.add_parser(
@@ -231,6 +235,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run",
         action="store_true",
         help="Print the detected state and the ordered action plan; make no changes.",
+    )
+    uninstall_parser.add_argument(
+        "--client", action="append", choices=("claude-code", "codex", "claude-desktop"),
+        default=[], help="Detach only these clients and retain the runtime and durable data.",
     )
     uninstall_parser.set_defaults(operation="uninstall")
 
@@ -436,8 +444,9 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_USAGE_OR_REFUSAL
 
     context = build_context(reporter)
-    if args.operation == "install":
+    if args.operation in {"install", "reinstall", "uninstall"}:
         context.selected_clients = list(args.client)
+        context.client_selection_explicit = args.operation == "install" or bool(args.client)
 
     if args.operation == "config-ollama":
         return _run_config_ollama(args, reporter)
