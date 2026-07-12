@@ -70,6 +70,73 @@ def test_remote_service_is_never_started(monkeypatch, isolated_config):
     assert "remote" in result["error"]
 
 
+# --- #68: explicit OLLAMA_MODELS/env pass-through on start_service() -------
+
+def test_ollama_env_reads_os_environ_live(monkeypatch, isolated_config):
+    """_ollama_env() must read os.environ live at call time (not a cached
+    snapshot), so a value set after import still reaches a spawned process."""
+    import os
+
+    monkeypatch.setenv("OLLAMA_MODELS", "F:\\ollama-models")
+    env = ollama_client._ollama_env()
+    assert env["OLLAMA_MODELS"] == "F:\\ollama-models"
+    assert env == dict(os.environ)
+
+
+def test_start_service_passes_explicit_env_to_popen(monkeypatch, isolated_config):
+    """start_service() must not rely on Popen's default (env=None) ambient
+    inheritance -- it has to build and pass env= explicitly, since some launch
+    ancestries (Claude Desktop's extension host) don't reliably forward
+    OLLAMA_MODELS otherwise (#68)."""
+    monkeypatch.setenv("OLLAMA_MODELS", "F:\\ollama-models")
+    monkeypatch.setattr(ollama_client.shutil, "which", lambda name: "/usr/bin/ollama")
+
+    statuses = iter([
+        {"state": "unreachable"},          # initial check before spawn
+        {"state": "ready"},                 # poll after spawn succeeds
+    ])
+    monkeypatch.setattr(ollama_client, "status", lambda *a, **kw: next(statuses, {"state": "ready"}))
+
+    captured_kwargs = {}
+
+    class _FakeProc:
+        pid = 4242
+
+        def poll(self):
+            return None
+
+    def fake_popen(args, **kwargs):
+        captured_kwargs.update(kwargs)
+        return _FakeProc()
+
+    monkeypatch.setattr(ollama_client.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(ollama_client.time, "sleep", lambda _: None)
+
+    result = ollama_client.start_service()
+
+    assert result["ok"] is True
+    assert "env" in captured_kwargs
+    assert captured_kwargs["env"]["OLLAMA_MODELS"] == "F:\\ollama-models"
+
+
+def test_start_service_env_reaches_a_real_sanitized_child(monkeypatch, isolated_config):
+    """Repro harness for #68: spawn a genuinely sanitized-env child process
+    (only PATH, none of this test's other env vars ambiently available) and
+    confirm OLLAMA_MODELS still reaches it because _ollama_env() is passed
+    explicitly via env=, not relied on via inheritance."""
+    import subprocess
+    import sys
+
+    monkeypatch.setenv("OLLAMA_MODELS", "/mnt/models")
+    env = ollama_client._ollama_env()
+
+    result = subprocess.run(
+        [sys.executable, "-c", "import os; print(os.environ.get('OLLAMA_MODELS', ''))"],
+        env=env, capture_output=True, text=True, timeout=10,
+    )
+    assert result.stdout.strip() == "/mnt/models"
+
+
 def test_warm_timeout_is_not_reported_as_lock_contention(monkeypatch, isolated_config):
     monkeypatch.setattr(ollama_client, "status", lambda *args, **kwargs: {"state": "model_cold", "model": "qwen3:8b", "local": True})
     monkeypatch.setattr(ollama_client, "_request_json", lambda *args, **kwargs: (_ for _ in ()).throw(TimeoutError("warm timeout")))
