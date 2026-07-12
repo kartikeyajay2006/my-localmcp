@@ -33,6 +33,7 @@ from .. import (
 )
 from .. import clients as clients_mod
 from ..mcpb import build_mcpb
+from ..path import add_to_path, path_hint
 from .backend import (
     CLIENT_KEYS,
     CLIENT_LABELS,
@@ -252,9 +253,18 @@ class LiveBackend:
         extra_details: tuple[str, ...] = ()
         if (result.status is OperationStatus.SUCCEEDED
                 and state.operation != OP_UNINSTALL):
+            details = [f"PATH hint: {path_hint(self._paths)}"]
+            if state.add_to_path:
+                try:
+                    update = add_to_path(self._paths)
+                    state_label = "added" if update.changed else "already present"
+                    emit(StepEvent("action", f"PATH {state_label}: {update.target}"))
+                except (OSError, ValueError) as exc:
+                    emit(StepEvent("warning", f"Could not add neo-localmcp to PATH: {exc}"))
             built = self._build_desktop_bundle(emit)
             if built:
-                extra_details = (f"Claude Desktop bundle: {built}",)
+                details.append(f"Claude Desktop bundle: {built}")
+            extra_details = tuple(details)
 
         return self._outcome_from_result(state, result, extra_details=extra_details)
 

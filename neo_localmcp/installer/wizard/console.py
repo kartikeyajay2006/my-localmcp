@@ -542,6 +542,21 @@ class ConsoleWizard:
             f"fast={self.state.fast_model}, summary={self.state.summary_model}, "
             f"embed={self.state.embed_model or 'disabled'}")
 
+    # -- phase: PATH --------------------------------------------------------
+
+    def _phase_path(self) -> None:
+        # wizard choice only -> the live backend updates PATH after a successful install/reinstall
+        self._header("Add neo-localmcp to PATH")
+        self._explain(
+            "Add the managed neo-localmcp command to your user PATH so new terminals",
+            "can run it directly. This can be removed later from your shell profile or user PATH.",
+        )
+        self.state.add_to_path = self._ask_yesno(
+            "Add neo-localmcp to PATH?", default=True,
+        )
+        state = "enabled" if self.state.add_to_path else "manual setup"
+        self._set_summary("PATH", state)
+
     # -- phase: uninstall ---------------------------------------------------
 
     def _phase_uninstall_mode(self) -> None:
@@ -702,12 +717,13 @@ class ConsoleWizard:
                 self._phase_ollama_fast,
                 self._phase_ollama_summary,
                 self._phase_ollama_embed,
+                self._phase_path,
                 self._phase_confirm,
             ]
         elif op == OP_REINSTALL:
             existing = ", ".join(self.detected.registered_clients) or "none"
             self._set_summary("Clients", f"kept as-is ({existing})")
-            phases = [self._phase_confirm]
+            phases = [self._phase_path, self._phase_confirm]
         elif op == OP_CONFIG_OLLAMA:
             phases = [
                 self._phase_ollama_yesno,
