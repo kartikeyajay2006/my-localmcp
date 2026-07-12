@@ -417,28 +417,50 @@ class ConsoleWizard:
             print("   Enter a URL like http://host:port (e.g. http://127.0.0.1:11434).")
 
     @staticmethod
-    def _format_model_table(models: list[str], info, current: str, start_index: int = 1) -> list[str]:
+    def _format_model_table(models: list[str], info, current: str, start_index: int = 1, default_model: str | None = None) -> list[str]:
         # index) name  size  kind -- kind is Ollama's own reported capability tag ("chat"/
         # "embed"), not a guess, so a user can't accidentally pick an embed-only model for
-        # fast/summary. The current selection's row is colored (no-op if color is disabled).
+        # fast/summary. Both the persisted "current" value and (if different -- e.g. current
+        # isn't actually installed) the row Enter will pick are marked and colored, so the
+        # default is never silently unmarked. (No-op coloring if color is disabled.)
         name_width = max((len(m) for m in models), default=0)
         rows = []
         for offset, model in enumerate(models):
             index = start_index + offset
             size = info.model_sizes.get(model, "")
             kind = _model_kind_label(info.model_capabilities.get(model, ()))
-            marker = "  (current)" if model == current else ""
+            markers = []
+            if model == current:
+                markers.append("current")
+            if model == default_model and model != current:
+                markers.append("default")
+            marker = f"  ({', '.join(markers)})" if markers else ""
             line = f"   {index}) {model:<{name_width}}  {size:<9}  {kind:<6}{marker}"
-            rows.append(_ansi.green(line) if model == current else line)
+            highlight = model == current or model == default_model
+            rows.append(_ansi.green(line) if highlight else line)
         return rows
+
+    @staticmethod
+    def _default_model_index(models: list[str], info, current: str) -> int:
+        # current installed -> its own position; else -> the first non-embed-only model, so a
+        # stale/uninstalled configured model never silently defaults to whatever sorts first
+        # alphabetically even if that happens to be an embedding-only model (a real bug found
+        # in practice: bge-m3 sorts before every chat model on a typical install).
+        if current in models:
+            return models.index(current) + 1
+        for offset, model in enumerate(models):
+            if _model_kind_label(info.model_capabilities.get(model, ())) != "embed":
+                return offset + 1
+        return 1  # only embed-only models installed -- nothing better to offer
 
     def _pick_model(self, label: str, hint: list[str], info, current: str) -> str:
         self._header(f"Choose the {label}:")
         self._explain(*hint, "Listed below are the models from your `ollama list`,")
         print(" sorted alphabetically:\n")
         models = list(info.installed_models)
-        default = models.index(current) + 1 if current in models else 1
-        for row in self._format_model_table(models, info, current):
+        default = self._default_model_index(models, info, current)
+        default_model = models[default - 1] if models else None
+        for row in self._format_model_table(models, info, current, default_model=default_model):
             print(row)
         choice = self._ask_int(1, len(models), default=default)
         return models[choice - 1]

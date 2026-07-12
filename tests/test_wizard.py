@@ -371,3 +371,59 @@ def test_pick_model_uses_the_colored_kind_aware_table(tmp_path, monkeypatch):
     monkeypatch.setattr(ConsoleWizard, "_input", lambda self, prompt: next(replies))
     chosen = wizard._pick_model("fast model", ["hint"], info, current="qwen3:8b")
     assert chosen == "qwen3-coder:30b"
+
+
+def _custom_ollama_info(**overrides):
+    from neo_localmcp.installer.wizard.backend import OllamaInfo
+    defaults = dict(
+        reachable=True, base_url="http://127.0.0.1:11434",
+        installed_models=("bge-m3:latest", "gemma3:12b", "qwen3:8b"),
+        fast_model="qwen3:8b", summary_model="qwen3-coder:30b",
+        state="ready",
+        model_sizes={"bge-m3:latest": "1.1 GB", "gemma3:12b": "7.6 GB", "qwen3:8b": "4.9 GB"},
+        model_capabilities={
+            "bge-m3:latest": ("embedding",),
+            "gemma3:12b": ("completion",),
+            "qwen3:8b": ("completion", "tools"),
+        },
+    )
+    defaults.update(overrides)
+    return OllamaInfo(**defaults)
+
+
+def test_pick_model_default_skips_embed_only_model_when_current_not_installed(tmp_path, monkeypatch):
+    """Regression: bge-m3:latest sorts alphabetically first but is embed-only.
+    When the configured model (qwen3-coder:30b) isn't in the installed list,
+    the default choice must not silently fall back to it."""
+    from neo_localmcp.installer.wizard.console import ConsoleWizard
+
+    backend = _isolated_preview_backend(tmp_path, monkeypatch)
+    wizard = ConsoleWizard(backend, fake=True)
+    info = _custom_ollama_info()
+
+    replies = iter([""])  # accept whatever the default is
+    monkeypatch.setattr(ConsoleWizard, "_input", lambda self, prompt: next(replies))
+    chosen = wizard._pick_model("summary model", ["hint"], info, current="qwen3-coder:30b")
+    assert chosen != "bge-m3:latest"
+    assert "embedding" not in info.model_capabilities.get(chosen, ())
+
+
+def test_format_model_table_marks_the_default_row_when_not_current(tmp_path, monkeypatch):
+    """When the default selection differs from the persisted 'current' value
+    (e.g. current isn't installed), that row must still be visually distinct
+    -- not just silently unmarked -- so the user can see what Enter will pick."""
+    from neo_localmcp.installer.wizard import _ansi
+    from neo_localmcp.installer.wizard.console import ConsoleWizard
+
+    monkeypatch.setattr(_ansi, "COLOR_ENABLED", True)
+    backend = _isolated_preview_backend(tmp_path, monkeypatch)
+    wizard = ConsoleWizard(backend, fake=True)
+    info = _custom_ollama_info()
+
+    rows = wizard._format_model_table(
+        list(info.installed_models), info, current="qwen3-coder:30b", default_model="gemma3:12b")
+    default_row = next(r for r in rows if "gemma3:12b" in r)
+    embed_row = next(r for r in rows if "bge-m3:latest" in r)
+    assert "\033[" in default_row  # colored
+    assert "default" in default_row.lower()
+    assert "\033[" not in embed_row
