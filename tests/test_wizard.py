@@ -188,7 +188,9 @@ def test_console_embed_phase_picks_and_disables(tmp_path, monkeypatch):
 
     # nomic-embed-text:latest is entry among the fake installed models; drive a pick then a disable.
     info = backend.ollama_info()
-    embed_index = info.installed_models.index("nomic-embed-text:latest") + 1
+    combined = [name for name, _installed in info.recommendations.get("embed", ())]
+    combined += list(info.installed_models)
+    embed_index = combined.index("nomic-embed-text:latest") + 1
 
     replies = iter([str(embed_index)])
     monkeypatch.setattr(ConsoleWizard, "_input", lambda self, prompt: next(replies))
@@ -433,6 +435,65 @@ def test_confirm_phase_asks_a_single_default_yes_question_no_dry_run_prompt(tmp_
     assert wizard.state.dry_run is False
 
 
+# --- #101: confirm-page pull reminder for not-yet-installed models --------
+
+def test_confirm_shows_no_pull_warning_when_all_selected_models_installed(tmp_path, monkeypatch, capsys):
+    from neo_localmcp.installer.wizard.console import ConsoleWizard
+
+    backend = _isolated_preview_backend(tmp_path, monkeypatch)
+    wizard = ConsoleWizard(backend, fake=True)
+    wizard.state.operation = OP_INSTALL
+    wizard.state.configure_ollama = True
+    wizard.state.fast_model = "qwen3:8b"
+    wizard.state.summary_model = "qwen3-coder:30b"
+    wizard.state.embed_model = ""  # disabled
+
+    monkeypatch.setattr(ConsoleWizard, "_input", lambda self, prompt: "")
+    wizard._phase_confirm()
+
+    out = capsys.readouterr().out
+    assert "ollama pull" not in out
+    assert "not pulled" not in out.lower()
+
+
+def test_confirm_shows_pull_warning_listing_exactly_the_missing_models(tmp_path, monkeypatch, capsys):
+    from neo_localmcp.installer.wizard.console import ConsoleWizard
+
+    backend = _isolated_preview_backend(tmp_path, monkeypatch)
+    wizard = ConsoleWizard(backend, fake=True)
+    wizard.state.operation = OP_INSTALL
+    wizard.state.configure_ollama = True
+    wizard.state.fast_model = "qwen3:8b"  # installed in the fake list
+    wizard.state.summary_model = "brand-new-model:latest"  # not installed
+    wizard.state.embed_model = "another-missing-model"  # not installed
+
+    monkeypatch.setattr(ConsoleWizard, "_input", lambda self, prompt: "")
+    wizard._phase_confirm()
+
+    out = capsys.readouterr().out
+    assert "ollama pull qwen3:8b" not in out
+    assert "ollama pull brand-new-model:latest" in out
+    assert "ollama pull another-missing-model" in out
+
+
+def test_confirm_pull_warning_absent_when_ollama_config_untouched(tmp_path, monkeypatch, capsys):
+    """configure_ollama False -> _missing_pull_models() must return [] even if
+    stale fast/summary/embed_model values happen to be set on state."""
+    from neo_localmcp.installer.wizard.console import ConsoleWizard
+
+    backend = _isolated_preview_backend(tmp_path, monkeypatch)
+    wizard = ConsoleWizard(backend, fake=True)
+    wizard.state.operation = OP_INSTALL
+    wizard.state.configure_ollama = False
+    wizard.state.fast_model = "brand-new-model:latest"
+
+    monkeypatch.setattr(ConsoleWizard, "_input", lambda self, prompt: "")
+    wizard._phase_confirm()
+
+    out = capsys.readouterr().out
+    assert "ollama pull" not in out
+
+
 def test_path_phase_defaults_to_adding_managed_cli_directory(tmp_path, monkeypatch):
     from neo_localmcp.installer.wizard.console import ConsoleWizard
 
@@ -590,11 +651,13 @@ def test_pick_model_uses_the_colored_kind_aware_table(tmp_path, monkeypatch):
     backend = _isolated_preview_backend(tmp_path, monkeypatch)
     wizard = ConsoleWizard(backend, fake=True)
     info = backend.ollama_info()
-    target_index = info.installed_models.index("qwen3-coder:30b") + 1
+    combined = [name for name, _installed in info.recommendations.get("fast", ())]
+    combined += list(info.installed_models)
+    target_index = combined.index("qwen3-coder:30b") + 1
 
     replies = iter([str(target_index)])
     monkeypatch.setattr(ConsoleWizard, "_input", lambda self, prompt: next(replies))
-    chosen = wizard._pick_model("fast model", ["hint"], info, current="qwen3:8b")
+    chosen = wizard._pick_model("fast model", ["hint"], info, current="qwen3:8b", role="fast")
     assert chosen == "qwen3-coder:30b"
 
 
@@ -628,7 +691,7 @@ def test_pick_model_default_skips_embed_only_model_when_current_not_installed(tm
 
     replies = iter([""])  # accept whatever the default is
     monkeypatch.setattr(ConsoleWizard, "_input", lambda self, prompt: next(replies))
-    chosen = wizard._pick_model("summary model", ["hint"], info, current="qwen3-coder:30b")
+    chosen = wizard._pick_model("summary model", ["hint"], info, current="qwen3-coder:30b", role="summary")
     assert chosen != "bge-m3:latest"
     assert "embedding" not in info.model_capabilities.get(chosen, ())
 
@@ -652,3 +715,73 @@ def test_format_model_table_marks_the_default_row_when_not_current(tmp_path, mon
     assert "\033[" in default_row  # colored
     assert "default" in default_row.lower()
     assert "\033[" not in embed_row
+
+
+# --- #101: recommended-models section on the model-picker pages ------------
+
+def test_fast_model_picker_shows_recommended_section_with_markers(tmp_path, monkeypatch, capsys):
+    """The RECOMMENDED FOR YOUR SETUP section must appear above ALL INSTALLED
+    MODELS, marking each candidate installed ([x] available) or not ([ ] not
+    pulled), while the full installed list stays unabridged below it."""
+    from neo_localmcp.installer.wizard.console import ConsoleWizard
+
+    backend = _isolated_preview_backend(tmp_path, monkeypatch)
+    wizard = ConsoleWizard(backend, fake=True)
+    info = backend.ollama_info()
+    recs = info.recommendations["fast"]
+    assert recs, "fixture must exercise a role with at least one recommendation"
+
+    monkeypatch.setattr(ConsoleWizard, "_input", lambda self, prompt: "1")
+    wizard._pick_model("fast model", ["hint"], info, current="qwen3:8b", role="fast")
+
+    out = capsys.readouterr().out
+    assert "RECOMMENDED FOR YOUR SETUP" in out
+    assert "ALL INSTALLED MODELS" in out
+    assert out.index("RECOMMENDED FOR YOUR SETUP") < out.index("ALL INSTALLED MODELS")
+    for name, installed in recs:
+        assert name in out
+        marker = "[x] available" if installed else "[ ] not pulled"
+        assert marker in out
+    # the full installed list stays unabridged below the recommended section
+    for model in info.installed_models:
+        assert model in out
+
+
+def test_embed_model_picker_shows_recommended_section_before_installed_list(tmp_path, monkeypatch, capsys):
+    from neo_localmcp.installer.wizard.console import ConsoleWizard
+
+    backend = _isolated_preview_backend(tmp_path, monkeypatch)
+    wizard = ConsoleWizard(backend, fake=True)
+    wizard.state.configure_ollama = True
+    info = backend.ollama_info()
+    recs = info.recommendations["embed"]
+    assert recs
+
+    monkeypatch.setattr(ConsoleWizard, "_input", lambda self, prompt: "0")
+    wizard._phase_ollama_embed()
+
+    out = capsys.readouterr().out
+    assert "RECOMMENDED FOR YOUR SETUP" in out
+    assert "ALL INSTALLED MODELS" in out
+    for model in info.installed_models:
+        assert model in out
+
+
+def test_pick_model_recommended_choice_can_select_an_uninstalled_candidate(tmp_path, monkeypatch):
+    """A recommended-but-not-installed candidate must still be selectable by its
+    numbered choice, even though it never appears in installed_models."""
+    from neo_localmcp.installer.wizard.console import ConsoleWizard
+
+    backend = _isolated_preview_backend(tmp_path, monkeypatch)
+    wizard = ConsoleWizard(backend, fake=True)
+    info = backend.ollama_info()
+    recs = info.recommendations["embed"]  # mxbai-embed-large isn't in the fake installed list
+    not_installed_index = next(
+        i for i, (_name, installed) in enumerate(recs, start=1) if not installed
+    )
+    expected_name = recs[not_installed_index - 1][0]
+    assert expected_name not in info.installed_models
+
+    monkeypatch.setattr(ConsoleWizard, "_input", lambda self, prompt: str(not_installed_index))
+    chosen = wizard._pick_model("embedding model", ["hint"], info, current="", role="embed")
+    assert chosen == expected_name
