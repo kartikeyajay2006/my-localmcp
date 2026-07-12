@@ -19,6 +19,7 @@ depended on it, in both directions.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import sys
 import textwrap
@@ -39,6 +40,27 @@ from .backend import (
 
 _WIDTH = 80
 _MAX_TEXT_WIDTH = 100
+
+# scheme://host[:port][/], port 0-99999 (loose -- real callers only ever see a
+# handful of malformed typos, not adversarial input; this just catches those)
+_OLLAMA_URL_RE = re.compile(r"^https?://[^\s/:]+(:[0-9]{1,5})?/?$")
+
+
+def _is_valid_ollama_url(value: str) -> bool:
+    return bool(_OLLAMA_URL_RE.match(value.strip()))
+
+
+def _model_kind_label(capabilities: tuple[str, ...]) -> str:
+    # Ollama's own reported capability tags -> a short display label; "embedding" without
+    # "completion" is an embed-only model (wrong choice for fast/summary), anything with
+    # "completion" is a normal chat/generation model.
+    if not capabilities:
+        return ""
+    if "embedding" in capabilities and "completion" not in capabilities:
+        return "embed"
+    if "completion" in capabilities:
+        return "chat"
+    return "/".join(capabilities)
 
 
 def _clear() -> None:
@@ -374,19 +396,72 @@ class ConsoleWizard:
             "This is the base URL neo-localmcp will talk to Ollama on -- almost",
             "always the local default unless you run Ollama remotely.",
         )
-        self.state.ollama_base_url = self._ask_text("Ollama base URL", info.base_url)
+        current = self.state.ollama_base_url or info.base_url
+        while True:
+            print(f"\n The endpoint URL to use Ollama is: [{current}]\n")
+            if self._ask_yesno("Looks good?", default=True):
+                self.state.ollama_base_url = current
+                return
+            current = self._ask_new_url("Please type the new endpoint", current)
+
+    def _ask_new_url(self, prompt: str, default: str) -> str:
+        # like _ask_text, but loops on a syntactically invalid URL instead of accepting anything
+        hint = f" [Default: {default}]" if default else ""
+        while True:
+            raw = self._input(f" {prompt}{hint} (or b to go back): ")
+            if _is_back(raw):
+                raise _GoBack
+            value = raw or default
+            if _is_valid_ollama_url(value):
+                return value
+            print("   Enter a URL like http://host:port (e.g. http://127.0.0.1:11434).")
+
+    @staticmethod
+    def _format_model_table(models: list[str], info, current: str, start_index: int = 1, default_model: str | None = None) -> list[str]:
+        # index) name  size  kind -- kind is Ollama's own reported capability tag ("chat"/
+        # "embed"), not a guess, so a user can't accidentally pick an embed-only model for
+        # fast/summary. Both the persisted "current" value and (if different -- e.g. current
+        # isn't actually installed) the row Enter will pick are marked and colored, so the
+        # default is never silently unmarked. (No-op coloring if color is disabled.)
+        name_width = max((len(m) for m in models), default=0)
+        rows = []
+        for offset, model in enumerate(models):
+            index = start_index + offset
+            size = info.model_sizes.get(model, "")
+            kind = _model_kind_label(info.model_capabilities.get(model, ()))
+            markers = []
+            if model == current:
+                markers.append("current")
+            if model == default_model and model != current:
+                markers.append("default")
+            marker = f"  ({', '.join(markers)})" if markers else ""
+            line = f"   {index}) {model:<{name_width}}  {size:<9}  {kind:<6}{marker}"
+            highlight = model == current or model == default_model
+            rows.append(_ansi.green(line) if highlight else line)
+        return rows
+
+    @staticmethod
+    def _default_model_index(models: list[str], info, current: str) -> int:
+        # current installed -> its own position; else -> the first non-embed-only model, so a
+        # stale/uninstalled configured model never silently defaults to whatever sorts first
+        # alphabetically even if that happens to be an embedding-only model (a real bug found
+        # in practice: bge-m3 sorts before every chat model on a typical install).
+        if current in models:
+            return models.index(current) + 1
+        for offset, model in enumerate(models):
+            if _model_kind_label(info.model_capabilities.get(model, ())) != "embed":
+                return offset + 1
+        return 1  # only embed-only models installed -- nothing better to offer
 
     def _pick_model(self, label: str, hint: list[str], info, current: str) -> str:
         self._header(f"Choose the {label}:")
         self._explain(*hint, "Listed below are the models from your `ollama list`,")
         print(" sorted alphabetically:\n")
-        models = info.installed_models
-        default = models.index(current) + 1 if current in models else 1
-        for index, model in enumerate(models, start=1):
-            size = info.model_sizes.get(model)
-            size_text = f"  ({size})" if size else ""
-            mark = "  (current)" if model == current else ""
-            print(f"   {index}) {model}{size_text}{mark}")
+        models = list(info.installed_models)
+        default = self._default_model_index(models, info, current)
+        default_model = models[default - 1] if models else None
+        for row in self._format_model_table(models, info, current, default_model=default_model):
+            print(row)
         choice = self._ask_int(1, len(models), default=default)
         return models[choice - 1]
 
@@ -432,6 +507,40 @@ class ConsoleWizard:
             self.state.summary_model = self._ask_text("Summary model", info.summary_model)
         self._set_summary(
             "Ollama", f"fast={self.state.fast_model}, summary={self.state.summary_model}")
+
+    _EMBED_HINT = (
+        "OPTIONAL -- leave disabled unless you want the semantic layer.",
+        "An embedding model lets retrieval match by MEANING, not just keywords:",
+        "it recognizes a paraphrased task as the same recurring workflow (e.g.",
+        "'fix login bug' ~ 'debug auth failure') and nudges file ranking by",
+        "similarity. Deterministic keyword ranking is always the primary path and",
+        "works fully without this. Use a dedicated embedding model (e.g.",
+        "nomic-embed-text, mxbai-embed-large), not a chat model.",
+    )
+
+    def _phase_ollama_embed(self) -> None:
+        if not self.state.configure_ollama:
+            raise _Skip
+        info = self.backend.ollama_info()
+        current = self.state.embed_model or info.embed_model  # "" when disabled
+        if info.reachable and info.installed_models:
+            self._header("Embedding model for the semantic layer (optional):")
+            self._explain(*self._EMBED_HINT, "", "Choose 0 to leave it disabled (the default).")
+            models = list(info.installed_models)
+            print("\n   0) None -- leave the semantic layer disabled")
+            for row in self._format_model_table(models, info, current, start_index=1):
+                print(row)
+            default = models.index(current) + 1 if current in models else 0
+            choice = self._ask_int(0, len(models), default=default)
+            self.state.embed_model = "" if choice == 0 else models[choice - 1]
+        else:
+            self._header("Embedding model for the semantic layer (optional)")
+            self._explain(*self._EMBED_HINT, "", "Leave blank to keep it disabled.")
+            self.state.embed_model = self._ask_text("Embedding model (blank = disabled)", current)
+        self._set_summary(
+            "Ollama",
+            f"fast={self.state.fast_model}, summary={self.state.summary_model}, "
+            f"embed={self.state.embed_model or 'disabled'}")
 
     # -- phase: uninstall ---------------------------------------------------
 
@@ -495,8 +604,8 @@ class ConsoleWizard:
         OP_MANAGE_CLIENTS: "Apply",
     }
 
-    def _confirm(self, *, allow_dry_run: bool, default_proceed: bool = True) -> None:
-        # final gate before any change: show chosen actions -> optional dry-run toggle -> yes/no; no -> _Abort
+    def _confirm(self, *, default_proceed: bool = True) -> None:
+        # final gate before any change: show chosen actions -> single yes/no; no -> _Abort
         self._header("Review and confirm")
         self._explain(
             "No changes have been made yet. Your current choices are shown above",
@@ -512,9 +621,6 @@ class ConsoleWizard:
         print(f"   Managed root: {self.detected.managed_root}")
         print()
 
-        if allow_dry_run:
-            self.state.dry_run = self._ask_yesno(
-                "Preview only (dry run - show the plan, change nothing)?", default=False)
         verb = self._CONFIRM_VERBS.get(self.state.operation, "Proceed")
         prompt = "Proceed?" if verb == "Proceed" else f"{verb} as shown?"
         if not self._ask_yesno(prompt, default=default_proceed):
@@ -522,10 +628,7 @@ class ConsoleWizard:
 
     def _phase_confirm(self) -> None:
         default_proceed = not (self.state.operation == OP_UNINSTALL and self.state.full_wipe)
-        self._confirm(
-            allow_dry_run=self.state.operation in {OP_INSTALL, OP_REINSTALL},
-            default_proceed=default_proceed,
-        )
+        self._confirm(default_proceed=default_proceed)
 
     # -- execution -------------------------------------------------------- #
     def _run(self) -> None:
@@ -572,6 +675,7 @@ class ConsoleWizard:
         if self.state.configure_ollama:
             prefs["fast_model"] = self.state.fast_model
             prefs["summary_model"] = self.state.summary_model
+            prefs["embed_model"] = self.state.embed_model
             prefs["base_url"] = self.state.ollama_base_url
         self.backend.save_prefs(prefs)
         self.prefs = prefs
@@ -597,6 +701,7 @@ class ConsoleWizard:
                 self._phase_ollama_baseurl,
                 self._phase_ollama_fast,
                 self._phase_ollama_summary,
+                self._phase_ollama_embed,
                 self._phase_confirm,
             ]
         elif op == OP_REINSTALL:
@@ -609,6 +714,7 @@ class ConsoleWizard:
                 self._phase_ollama_baseurl,
                 self._phase_ollama_fast,
                 self._phase_ollama_summary,
+                self._phase_ollama_embed,
                 self._phase_confirm,
             ]
         elif op == OP_MANAGE_CLIENTS:

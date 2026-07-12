@@ -118,7 +118,7 @@ cached by source hash so it's only regenerated when the file changes.
 | `serve` | Run the MCP server over stdio (what clients actually launch). |
 | `servers` | List running neo-localmcp servers registered under this app home. |
 | `stop [--pid \| --all] [--match-executable] [--timeout] [--no-force]` | Ask running server(s) to exit gracefully; force only as a last resort. |
-| `set-ollama --base-url --fast-model --summary-model --num-ctx` | Set Ollama endpoint/model defaults. |
+| `set-ollama --base-url --fast-model --summary-model --embed-model --num-ctx` | Set Ollama endpoint/model defaults. `--embed-model` is optional and enables the semantic layer (an empty string disables it). |
 | `model status` | Show configured Ollama models and which are actually reachable. |
 | `benchmark <group...> [--repo-root] [--out] [--queries]` | Repeatable local token-reduction benchmark (`sys`/`mem`/`ollama`/`full`). Never modifies existing repository memory, never calls an external LLM API. |
 
@@ -175,7 +175,7 @@ runtime itself — lifecycle work lives in the checkout's `setup.py`.
 
 ## Install
 
-Requirements: Python 3.12 or newer. Version 1.1.1 supports macOS and Windows;
+Requirements: Python 3.12 or newer. Version 1.2.0 supports macOS and Windows;
 Linux support is deferred.
 
 ### Guided installer (recommended)
@@ -303,6 +303,8 @@ neo-localmcp ollama ensure
 ```
 
 Ranking uses `fast_model`, an 8K context, and a 60-second inference limit. Summarization uses `summary_model`, the configured larger context, and a 200-second limit.
+
+An optional `embed_model` turns on the semantic layer: when set (via `set-ollama --embed-model <name>`, `setup.py config-ollama --embed-model <name>`, or the setup wizard's Ollama step), retrieval additionally re-ranks candidates by embedding similarity and can recognize a paraphrased task as the same recurring workflow. It defaults to unset — deterministic keyword ranking is always the primary path and works fully without it; if Ollama is unreachable or the model is unset, ranking silently falls back with no blocking. Use a dedicated embedding model such as `nomic-embed-text` or `mxbai-embed-large`, and pass an empty string to disable it again.
 
 Before inference, neo-localmcp checks Ollama version, installed models, and running models. A cold model is warmed with a 30-minute keep-alive. A missing model is never downloaded automatically. Localhost may be started automatically with `ollama serve`; remote services are never started or stopped by neo-localmcp.
 
