@@ -1,5 +1,102 @@
 # Project Notes
 
+## 2026-07-21 (3)
+
+- **A third client-registration bug, found by explicitly testing the full lifecycle
+  instead of trusting install-in-isolation testing.** Asked directly "how sure are you
+  that install/reinstall/uninstall->install all work and produce the same output" —
+  the honest answer was that reinstall and uninstall->install had never actually been
+  tested in this session (only install had). Ran all three for real (live sandboxed
+  `$HOME`, real venv builds, real `claude mcp` writes): install and reinstall passed,
+  but **uninstall -> install failed** — `Installation verification failed:
+  client-targets`, empty `~/.claude/commands/neo-localmcp`. Root cause: a default
+  uninstall deliberately keeps the `registrations.json` record for a client (so a later
+  reinstall can restore it) while removing the *live* registration. `apply_client_selection`
+  diffed the new selection against that stale record, saw the client as "already
+  current," and never called `setup_client()` — same bug family as #114/#112's second
+  layer, different trigger. Fixed in `neo_localmcp/installer/clients.py`:
+  `apply_client_selection` now always (re)connects every client in the target
+  selection instead of only ones missing from the record (`setup_client` is already
+  idempotent/cheap when genuinely still connected, so this is safe). New regression
+  test confirmed failing without the fix, passing with it; reran the full
+  install -> reinstall -> uninstall -> install sequence live and all four steps now
+  succeed. Not filed as a separate GitHub issue — found, fixed, and verified within the
+  same 12.1h pass. Full suite green (448 passed / 4 skipped) after every fix in this
+  session; `.mcpb` rebuilt in place each time source changed. See `docs/1.2.1_PLAN.md`'s
+  12.1h entry for full detail. **Lesson for future testing in this repo**: testing
+  "install" alone is not sufficient evidence that "reinstall" and "uninstall then
+  reinstall/install" behave the same way, even when they share most of their code path
+  — the divergence lives in exactly the kind of stale-state interaction that only shows
+  up when the full realistic sequence is actually run, not reasoned about from the code
+  alone.
+
+## 2026-07-21 (2)
+
+- **12.1h's manual verification pass was executed for real, not just planned** — asked to
+  run everything short of the Claude Desktop `.mcpb` GUI install. While building the
+  real end-to-end harness (driving `LiveBackend.run_operation()` for real, sandboxed
+  `$HOME`/`NEO_LOCALMCP_HOME`, not mocked), the #114 fix alone turned out insufficient:
+  a genuinely fresh install still failed installation verification with zero clients
+  connected. Root-caused a **second, deeper bug** in the same area: `_install_like()`
+  pre-writes `registrations.json` with the exact target selection (via
+  `_record_client_intent`) *before* `_restore_and_verify()` calls `apply_client_selection`,
+  whose own diff-against-`registrations.json` logic then sees the just-selected client as
+  "already current" and never calls `setup_client()` — a real explicit-selection install
+  silently connects nothing while still reporting success. This is not wizard-specific: the
+  CLI install path has unconditionally set `client_selection_explicit=True` since #103 (PR
+  #106), so this likely affected real CLI installs in production too, undetected because
+  the unit suite's `Recorder` fakes mock `record_selection_fn`/`apply_client_selection_fn`
+  as independent seams that can never see them interact. Fixed by only pre-writing intent
+  when `not client_selection_explicit` (the explicit path already computes its own diff and
+  writes the authoritative record itself). New semi-integration test
+  (`test_explicit_install_actually_connects_the_client_end_to_end`, wired to real
+  `clients.py`, not the `Recorder`) confirmed failing without the fix, passing with it.
+  Live confirmation: sandboxed `claude mcp list` reported `neo-localmcp: ... - Connected`
+  after the fix, in both the localhost-Ollama and NeoRyzen-Ollama passes, and in a
+  deliberately-reconstructed exact-bug-precondition repro (root exists, registration
+  evidence wiped). NeoRyzen's Tailscale host is reachable but Ollama itself isn't currently
+  listening there (port 11434 connection timed out) — config write still succeeded
+  (never blocks on reachability, by design), but no live NeoRyzen inference round-trip was
+  exercised. Codex's `CODEX_HOME` fix (#113) verified both set and unset. Full suite green,
+  `.mcpb` rebuilt in place; every sandboxed test home and incidental duplicate `.mcpb`
+  build artifact was deleted afterward. See `docs/1.2.1_PLAN.md`'s 12.1h entry for full
+  detail. Only the real Claude Desktop `.mcpb` GUI install was left for the owner, as asked.
+
+## 2026-07-21
+
+- **Folded #114/#112/#113 into the 1.2.1 plan as phase 12.1h and fixed all
+  three**, in response to the owner's manual OS testing pass on
+  `dev/v1.2.1_implementation` (9 findings filed as #109-#117; owner asked to
+  defer the 7 UX/transparency ones and fix the 2 real registration bugs now).
+  Root-caused rather than patched blind: #112 ("Claude Code registration
+  silently failed on a real Windows fresh install," empty `~/.claude/commands`,
+  no `claude mcp list` entry) turned out to be a direct consequence of #114
+  (`LiveBackend.run_operation()`'s install branch never set
+  `context.client_selection_explicit = True`, unlike reinstall/uninstall) --
+  masked on a truly empty `~/.neo-localmcp` by the `InstallStateKind.ABSENT`
+  fallback, but the owner's testing session ran several issues back-to-back
+  on the same machine, so by the time client registration was tested a
+  managed root already existed and `_record_client_intent` fell through to a
+  disk snapshot that found nothing yet registered -- writing an empty
+  `registrations.json` that `_restore_and_verify` then dutifully "restored"
+  (i.e. connected nothing), all while still reporting install success. Fixed
+  by setting `client_selection_explicit = True` in the install branch too,
+  so a wizard install always takes the same `apply_client_selection_fn`
+  reconciliation path the CLI install path already used unconditionally --
+  no separate fix needed for #112 itself once traced to this. #113 (Codex
+  ignoring `CODEX_HOME`) was a much more direct fix:
+  `_codex_cli_config_path()` now reads `CODEX_HOME` before falling back to
+  `~/.codex`, matching a comment that already claimed this was the shared
+  behavior across Codex CLI/app/IDE. TDD: `test_live_backend_install_marks_client_selection_explicit`
+  (mirrors existing reinstall/uninstall coverage) plus two `CODEX_HOME`
+  tests in `tests/test_client_removal.py`. Full suite green (447 passed / 4
+  skipped) + compileall; `.mcpb` rebuilt in place (stale-bundle class of
+  failure CLAUDE.md already flags, caught immediately by
+  `test_built_mcpb_embeds_current_package_bytes`). Next: a two-environment
+  manual verification pass (localhost Ollama on the MacBook Pro, remote
+  Ollama on NeoRyzen) scoped to client-registration behavior only, not a
+  full re-test of everything already verified in 12.1a-f.
+
 ## 2026-07-12 (2)
 
 - **1.2.1's remaining three issues (#103, #68, #101) implemented overnight, unattended, each merged into `dev/v1.2.1_implementation` via its own PR (#106, #107, #108) — no merge to `main`, per explicit owner instruction.** Picked up from a Codex handoff that had committed only #103's non-wizard half (`556a49f`).

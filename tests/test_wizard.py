@@ -339,6 +339,33 @@ def test_uninstall_detach_only_selects_subset_and_preserves_runtime(tmp_path, mo
     assert backend.detect().is_installed  # runtime preserved
 
 
+def test_live_backend_install_marks_client_selection_explicit(isolated_app_home, monkeypatch):
+    # regression for #114/#112: an install-branch omission left client_selection_explicit
+    # False, so a wizard install with any leftover managed-root state silently snapshot
+    # whatever was already on disk (nothing, on a broken/partial prior install) instead of
+    # actually registering the user's chosen clients.
+    from neo_localmcp.installer.wizard import live_backend
+    from neo_localmcp.installer.types import Operation, OperationResult, OperationStatus
+
+    backend = live_backend.LiveBackend()
+    captured = {}
+
+    def fake_install(context, **kwargs):
+        captured["selected_clients"] = list(context.selected_clients)
+        captured["explicit"] = context.client_selection_explicit
+        return OperationResult(Operation.INSTALL, OperationStatus.SUCCEEDED, (), ())
+
+    monkeypatch.setattr(live_backend, "install", fake_install)
+    monkeypatch.setattr(backend, "_build_desktop_bundle", lambda _emit: None)
+
+    outcome = backend.run_operation(
+        WizardState(operation=OP_INSTALL, selected_clients=["claude-code"]), lambda _event: None,
+    )
+
+    assert outcome.ok is True
+    assert captured == {"selected_clients": ["claude-code"], "explicit": True}
+
+
 def test_live_backend_reinstall_marks_client_selection_explicit(isolated_app_home, monkeypatch):
     from neo_localmcp.installer.wizard import live_backend
     from neo_localmcp.installer.types import Operation, OperationResult, OperationStatus

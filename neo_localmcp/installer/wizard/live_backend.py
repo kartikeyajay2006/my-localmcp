@@ -247,6 +247,7 @@ class LiveBackend:
                 result = reinstall(context)
             else:  # install
                 context.selected_clients = list(state.selected_clients)
+                context.client_selection_explicit = True
                 result = install(context, clean=False)
         except Exception as exc:  # noqa: BLE001 - never crash the UI on a lifecycle error
             emit(StepEvent("error", f"Operation raised: {exc}"))

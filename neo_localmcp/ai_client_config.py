@@ -251,7 +251,10 @@ def setup_claude_desktop(apply: bool = True) -> dict[str, Any]:
 
 
 def _codex_cli_config_path() -> Path:
-    return Path.home() / ".codex" / "config.toml"
+    # honor CODEX_HOME (codex app/CLI/IDE all resolve config.toml from it) before the ~/.codex default
+    codex_home = os.environ.get("CODEX_HOME")
+    base = Path(codex_home) if codex_home else Path.home() / ".codex"
+    return base / "config.toml"
 
 
 def _codex_desktop_config_path() -> Path:
