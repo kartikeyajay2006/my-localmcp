@@ -31,6 +31,18 @@ def test_strip_marked_block_without_markers_is_noop():
     assert client_setup._strip_marked_block(untouched) == untouched
 
 
+def test_codex_config_path_honors_codex_home(tmp_path, monkeypatch):
+    custom_home = tmp_path / "custom-codex-home"
+    monkeypatch.setenv("CODEX_HOME", str(custom_home))
+    assert client_setup._codex_cli_config_path() == custom_home / "config.toml"
+
+
+def test_codex_config_path_falls_back_to_home_dot_codex_when_unset(tmp_path, monkeypatch):
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    monkeypatch.setattr(client_setup.Path, "home", staticmethod(lambda: tmp_path))
+    assert client_setup._codex_cli_config_path() == tmp_path / ".codex" / "config.toml"
+
+
 def test_setup_then_remove_codex_roundtrips_config(tmp_path, monkeypatch):
     cfg = tmp_path / "config.toml"
     cfg.write_text('[existing]\nkey = "value"\n', encoding="utf-8")

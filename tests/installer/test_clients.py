@@ -389,3 +389,32 @@ def test_apply_client_selection_with_no_changes_still_records_target(client_home
     assert outcome.ok
     assert outcome.added == ()
     assert outcome.removed == ()
+
+
+def test_apply_client_selection_reconnects_a_client_still_recorded_but_no_longer_live(
+    client_home, tmp_path, monkeypatch
+):
+    # Regression, found running a real install -> reinstall -> uninstall -> install
+    # sequence end to end: a default uninstall deliberately keeps the registrations.json
+    # record (so a later reinstall can restore it) while removing the *live*
+    # registration. If apply_client_selection's target vs. record diff treats a still-
+    # recorded client as "already current," a subsequent install/reinstall with that
+    # same client selected would see nothing to add and never call setup_client --
+    # silently leaving the live registration missing even though the record claims
+    # it's active.
+    from neo_localmcp.installer import clients
+
+    paths = ManagedPaths.from_environment()
+    # Simulates post-uninstall state: record present and "active", but nothing live.
+    clients.record_selection(paths, ["claude-code"])
+
+    calls: list[str] = []
+    monkeypatch.setattr(
+        clients.client_setup, "setup_client",
+        lambda client, apply=True, **kw: calls.append(client) or {"client": client, "ok": True},
+    )
+
+    outcome = clients.apply_client_selection(paths, ["claude-code"], server_command="neo-localmcp-server")
+
+    assert outcome.ok
+    assert calls == ["claude-code"]

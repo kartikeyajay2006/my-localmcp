@@ -427,8 +427,18 @@ def _install_like(
             now=ctx.clock(),
         )
 
-    # Client records: explicit selection for fresh/clean, snapshot otherwise.
-    _record_client_intent(ctx, state, fresh=clean)
+    # Client records: only pre-seed registrations.json for the restore_clients_fn
+    # path (restore_recorded_registrations, which needs *something* to iterate).
+    # The explicit path (_restore_and_verify's apply_client_selection_fn branch)
+    # takes ctx.selected_clients directly and diffs it against whatever was
+    # already recorded -- pre-writing the same target here would make every
+    # newly-selected client look already-current to that diff, so
+    # apply_client_selection would see nothing to add and silently connect
+    # nothing (confirmed live: real end-to-end run, verify_installation then
+    # failed on "client-targets" with an empty slash-commands folder despite
+    # registrations.json claiming the client was "selected").
+    if not ctx.client_selection_explicit:
+        _record_client_intent(ctx, state, fresh=clean)
 
     # Migrate a recognized legacy layout (no-op otherwise). Never on a clean root.
     if not clean and not _run_migration(ctx, actions, warnings):
