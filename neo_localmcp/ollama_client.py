@@ -376,8 +376,13 @@ def unload(model: str | None = None, purpose: str = "ranking") -> dict[str, Any]
     return unload_model(chosen)
 
 
-def chat(prompt: str, model: str | None = None, purpose: str = "summary", num_predict: int | None = None) -> dict[str, Any]:
+def chat(prompt: str, model: str | None = None, purpose: str = "summary", num_predict: int | None = None, think: bool | None = None) -> dict[str, Any]:
     # ensure model ready -> not ready -> fail fast with readiness's own error/state; else -> /api/generate, retrying once on a 503
+    # think: None -> omit the field (default Ollama behavior); False -> suppress a reasoning-capable
+    # model's internal thinking trace, so a num_predict cap bounds the real answer instead of being
+    # exhausted by invisible reasoning tokens first (confirmed live: a "thinking" summary model burned
+    # its full num_predict on reasoning and returned an empty response). No-ops harmlessly on a model
+    # without thinking capability -- verified live, no error, field simply ignored.
     cfg = _cfg()
     chosen = _model_for(purpose, model)
     readiness = ensure(chosen, purpose)
@@ -389,11 +394,13 @@ def chat(prompt: str, model: str | None = None, purpose: str = "summary", num_pr
     if num_predict is not None:
         # bounds worst-case generation length/latency if the model ignores a prompt length instruction (e.g. "at most 8 keywords")
         options["num_predict"] = int(num_predict)
-    body = {
+    body: dict[str, Any] = {
         "model": chosen, "prompt": prompt, "stream": False,
         "options": options,
         "keep_alive": str(cfg.get("keep_alive", "30m")),
     }
+    if think is not None:
+        body["think"] = think
     started = time.monotonic()
     try:
         code, payload = _request_json("/api/generate", method="POST", body=body, timeout=timeout_seconds)

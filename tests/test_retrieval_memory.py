@@ -318,7 +318,7 @@ def test_section_summary_cache_miss_calls_ollama_and_stores_result(tmp_path, iso
     _seed_repo(repo)
     repo_memory.index_repo(str(repo), force=True)
 
-    def fake_chat(prompt, model=None, purpose="summary", num_predict=None):
+    def fake_chat(prompt, model=None, purpose="summary", num_predict=None, think=None):
         assert "m9.2" in prompt
         return {"ok": True, "response": "summary: covers beta widget rollup mechanics.\nkeywords: beta, widget, rollup", "model": "fake-model"}
 
@@ -343,7 +343,7 @@ def test_section_summary_never_overrides_heading_boundaries(tmp_path, isolated_c
     repo_memory.index_repo(str(repo), force=True)
     before = repo_memory.find_heading_symbol("docs/plan.md", "m9.2 beta widget rollup", repo)
 
-    def fake_chat(prompt, model=None, purpose="summary", num_predict=None):
+    def fake_chat(prompt, model=None, purpose="summary", num_predict=None, think=None):
         return {"ok": True, "response": "summary: x.\nkeywords: y", "model": "fake-model"}
 
     monkeypatch.setattr(editing, "chat", fake_chat)
@@ -373,7 +373,7 @@ def test_whole_file_summarize_path_is_unaffected_by_heading_param(tmp_path, isol
     repo.mkdir()
     _seed_repo(repo)
 
-    def fake_chat(prompt, model=None, purpose="summary", num_predict=None):
+    def fake_chat(prompt, model=None, purpose="summary", num_predict=None, think=None):
         return {"ok": True, "response": "purpose: a plan doc", "model": "fake-model"}
 
     monkeypatch.setattr(editing, "chat", fake_chat)
@@ -391,7 +391,7 @@ def test_ollama_unavailable_leaves_deterministic_retrieval_fully_functional(tmp_
 
     repo_memory.index_repo(str(repo), force=True)
 
-    def down_chat(prompt, model=None, purpose="summary", num_predict=None):
+    def down_chat(prompt, model=None, purpose="summary", num_predict=None, think=None):
         return {"ok": False, "error": "connection refused", "state": "unreachable"}
 
     monkeypatch.setattr(editing, "chat", down_chat)
@@ -413,7 +413,7 @@ def test_num_predict_is_sent_on_the_outgoing_request(tmp_path, isolated_config, 
     repo_memory.index_repo(str(repo), force=True)
     captured = {}
 
-    def fake_chat(prompt, model=None, purpose="summary", num_predict=None):
+    def fake_chat(prompt, model=None, purpose="summary", num_predict=None, think=None):
         captured["num_predict"] = num_predict
         captured["purpose"] = purpose
         return {"ok": True, "response": "summary: x.\nkeywords: y", "model": "fake-model"}
@@ -466,7 +466,7 @@ def test_runaway_response_is_flagged_truncated_and_not_cached(tmp_path, isolated
     repo_memory.index_repo(str(repo), force=True)
     cap = 400
 
-    def runaway_chat(prompt, model=None, purpose="summary", num_predict=None):
+    def runaway_chat(prompt, model=None, purpose="summary", num_predict=None, think=None):
         assert num_predict == cap
         garbage = ", ".join(f"term{i}" for i in range(500))
         return {
@@ -495,7 +495,7 @@ def test_well_behaved_response_is_not_flagged_truncated(tmp_path, isolated_confi
     _seed_repo(repo)
     repo_memory.index_repo(str(repo), force=True)
 
-    def fake_chat(prompt, model=None, purpose="summary", num_predict=None):
+    def fake_chat(prompt, model=None, purpose="summary", num_predict=None, think=None):
         return {"ok": True, "response": "summary: x.\nkeywords: a, b, c", "model": "fake-model", "raw": {"eval_count": 42}}
 
     monkeypatch.setattr(editing, "chat", fake_chat)
@@ -514,7 +514,7 @@ def test_keywords_capped_by_term_count_even_under_the_generation_cap(tmp_path, i
     repo_memory.index_repo(str(repo), force=True)
     many_terms = ", ".join(f"kw{i}" for i in range(50))
 
-    def fake_chat(prompt, model=None, purpose="summary", num_predict=None):
+    def fake_chat(prompt, model=None, purpose="summary", num_predict=None, think=None):
         return {"ok": True, "response": f"summary: x.\nkeywords: {many_terms}", "model": "fake-model", "raw": {"eval_count": 60}}
 
     monkeypatch.setattr(editing, "chat", fake_chat)
@@ -531,7 +531,7 @@ def test_ollama_status_is_not_duplicated_in_section_summary_response(tmp_path, i
     repo_memory.index_repo(str(repo), force=True)
     full_status = {"state": "ready", "model": "fake-model", "installed_models": ["a", "b", "c", "d", "e"]}
 
-    def fake_chat(prompt, model=None, purpose="summary", num_predict=None):
+    def fake_chat(prompt, model=None, purpose="summary", num_predict=None, think=None):
         return {"ok": True, "response": "summary: x.\nkeywords: y", "model": "fake-model", "raw": {"eval_count": 10}, "ollama_status": full_status}
 
     monkeypatch.setattr(editing, "chat", fake_chat)
@@ -549,7 +549,7 @@ def test_ollama_status_is_not_duplicated_in_whole_file_summary_response(tmp_path
     _seed_repo(repo)
     full_status = {"state": "ready", "model": "fake-model", "installed_models": ["a", "b", "c"]}
 
-    def fake_chat(prompt, model=None, purpose="summary", num_predict=None):
+    def fake_chat(prompt, model=None, purpose="summary", num_predict=None, think=None):
         return {"ok": True, "response": "purpose: x", "model": "fake-model", "ollama_status": full_status}
 
     monkeypatch.setattr(editing, "chat", fake_chat)
@@ -565,7 +565,7 @@ def test_ollama_status_is_not_duplicated_in_context_prepare_ranking_response(tmp
     _seed_repo(repo)
     full_status = {"state": "ready", "model": "fake-model", "installed_models": ["a", "b"]}
 
-    def fake_chat(prompt, model=None, purpose="ranking", num_predict=None):
+    def fake_chat(prompt, model=None, purpose="ranking", num_predict=None, think=None):
         return {"ok": True, "response": "Recommended read order\n1. docs/plan.md", "model": "fake-model", "ollama_status": full_status}
 
     monkeypatch.setattr(memory, "chat", fake_chat)

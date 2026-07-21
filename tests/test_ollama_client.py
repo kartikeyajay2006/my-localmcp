@@ -47,6 +47,37 @@ def test_ranking_uses_fast_model_and_small_context(monkeypatch, isolated_config)
     assert captured["options"]["num_ctx"] == 8192
 
 
+def test_chat_omits_think_field_by_default(monkeypatch, isolated_config):
+    # think=None (the default) must not add the field at all -- preserves prior request shape
+    # for existing callers (ranking, the "test" smoke action) that never asked for it.
+    captured = {}
+    monkeypatch.setattr(ollama_client, "ensure", lambda *args, **kwargs: {"ok": True, "state": "ready"})
+
+    def fake(path, **kwargs):
+        captured.update(kwargs.get("body") or {})
+        return 200, {"response": "ranked", "eval_count": 1}
+
+    monkeypatch.setattr(ollama_client, "_request_json", fake)
+    ollama_client.chat("rank this", purpose="ranking")
+    assert "think" not in captured
+
+
+def test_chat_passes_think_false_when_requested(monkeypatch, isolated_config):
+    # think=False: suppresses a reasoning-capable model's internal thinking trace so a
+    # num_predict cap bounds the real answer instead of being exhausted by invisible
+    # reasoning tokens first (confirmed live against gemma4:12b).
+    captured = {}
+    monkeypatch.setattr(ollama_client, "ensure", lambda *args, **kwargs: {"ok": True, "state": "ready"})
+
+    def fake(path, **kwargs):
+        captured.update(kwargs.get("body") or {})
+        return 200, {"response": "summary", "eval_count": 1}
+
+    monkeypatch.setattr(ollama_client, "_request_json", fake)
+    ollama_client.chat("summarize this", purpose="summary", think=False)
+    assert captured["think"] is False
+
+
 def test_busy_is_retried_once_then_reported(monkeypatch, isolated_config):
     calls = 0
     monkeypatch.setattr(ollama_client, "ensure", lambda *args, **kwargs: {"ok": True, "state": "ready"})
