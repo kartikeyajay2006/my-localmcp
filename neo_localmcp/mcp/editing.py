@@ -65,7 +65,9 @@ Section text:
 {section_text}
 """.strip()
     num_predict = int(load_config().get("ollama", {}).get("section_summary_num_predict", 400))
-    result = chat(prompt, model=model, purpose="summary", num_predict=num_predict)
+    # think=False: a reasoning-capable summary model can otherwise burn the whole num_predict
+    # budget on its internal reasoning trace and return an empty response (confirmed live).
+    result = chat(prompt, model=model, purpose="summary", num_predict=num_predict, think=False)
     eval_count = (result.get("raw") or {}).get("eval_count")
     # Ollama stops generation at exactly num_predict tokens when the cap is what ended
     # the response rather than the model choosing to stop -- a reliable runaway signal.
@@ -109,7 +111,9 @@ File context:
 Current source file:
 {text}
 """.strip()
-    result = chat(prompt, model=model, purpose="summary")
+    # think=False: matches _summarize_section -- a summary task doesn't need a reasoning trace,
+    # and suppressing it avoids spending generation time/tokens on invisible thinking.
+    result = chat(prompt, model=model, purpose="summary", think=False)
     if result.get("ok") and result.get("response"):
         repo_memory.store_summary(rel(p, root), result["response"], str(result.get("model") or model or ""), "file-summary-v1", root)
     full_status = result.get("ollama_status")
