@@ -1,5 +1,36 @@
 # Project Notes
 
+## 2026-07-21 (4)
+
+- **Security fix: `.env` file content was being indexed into the shared sqlite memory** (found
+  during the real-machine 12.1h verification pass — a real neo-notion-agent `.env` got indexed
+  during Phase 4). Root cause: `.env` was literally in `config.py`'s `TEXT_EXTENSIONS`/default
+  `repo.include_extensions`, matched via the filename-equals check (`path.name in includes`), not
+  a real extension. Fixed immediately: removed `.env` from the default; made `include_extensions`
+  code-owned (rebuilt from the code default on every `load_config()`, unioned with a new
+  `repo.extra_include_extensions` user surface) so the fix reaches every existing install
+  automatically, not just fresh ones — same precedent as #41's `exclude_dirs` fix. The
+  already-leaked content was purged directly from the real live DB (`files`/`symbols`/
+  `repo_fts`/`section_summaries` rows for that path deleted), and the real local install was
+  reinstalled from the patched source so the running system stopped being vulnerable immediately,
+  not just the next fresh install. New regression tests in `tests/test_repo_utils.py`
+  (`test_dotenv_file_is_not_indexed`, `test_stale_persisted_include_extensions_cannot_reintroduce_dotenv`,
+  `test_extra_include_extensions_are_added_to_code_owned_extensions`). Full suite green
+  (452 passed / 4 skipped), `.mcpb` rebuilt, live fix confirmed via a real forced `refresh` on
+  neo-notion-agent that no longer picks up `.env`.
+- **Filed #118** for a separate, lower-severity finding from the same testing pass:
+  `record_change` unconditionally `force=True` re-indexes every listed path, which wipes cached
+  summaries even when content is byte-identical — correct behavior for its real intended use (a
+  genuine edit just happened), a real gap only when called speculatively. Deferred, not
+  release-blocking.
+- **Investigated a third finding (heading-scoped `summarize` truncating to an empty response on a
+  "thinking"-capable summary model, e.g. `gemma4:12b`)**: confirmed live that Ollama's `/api/generate`
+  accepts a top-level `"think": false` field that suppresses the model's internal reasoning trace —
+  tested directly against the local Ollama instance, produced a complete, correct answer in 16
+  tokens with `done_reason: "stop"` instead of exhausting the 400-token `section_summary_num_predict`
+  cap on invisible reasoning. `ollama_client.chat()` doesn't currently pass `think` at all. Fix
+  identified and verified, not yet implemented — pending owner decision on scope/timing.
+
 ## 2026-07-21 (3)
 
 - **A third client-registration bug, found by explicitly testing the full lifecycle
