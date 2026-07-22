@@ -68,7 +68,7 @@ neo-localmcp context "debug repository indexing: index_repo, refresh" --repo-roo
 - **Version is defined once**, in `neo_localmcp/__init__.py`'s `__version__`. Every
   release bumps it in lockstep with `pyproject.toml`'s `version` and
   `packages/claude-desktop/mcpb/manifest.json` — the three must always match.
-- **macOS and Windows are the supported 1.0.10 platforms.** `setup.py` is the sole
+- **macOS and Windows are the currently supported platforms.** `setup.py` is the sole
   lifecycle policy surface. Linux support is deferred.
 - **Repository memory is centralized, not per-repo.** All indexed repos share one
   `~/.neo-localmcp/repo-context.sqlite`, distinguished internally by `repo_id`
@@ -146,10 +146,6 @@ noise. Use longer comments only for genuinely tricky concepts.
 ## Known gaps (see `PROJECT_STATUS.md` for the current authoritative list)
 
 - Linux setup lifecycle and CI evidence are deferred beyond 1.0.10.
-- `ollama_client.py`'s `start_service()` doesn't reliably inherit a custom
-  `OLLAMA_MODELS` env var under some process ancestries (e.g. spawned under Claude
-  Desktop's extension host) — falls back to the default models path silently instead
-  of erroring.
 - Section-summary cache is keyed on source-file content hash only, not code version —
   a cache entry from a buggy older release isn't invalidated by fixing the bug, only
   by the source file changing or a manual cache clear.
