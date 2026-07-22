@@ -111,16 +111,17 @@ cached by source hash so it's only regenerated when the file changes.
 | `status` | Fast status: config, repo index counts, Git, Ollama reachability. |
 | `doctor` | Full health check: config, DB, Ollama, repo index, running servers. |
 | `where` | Show install/config paths and the repo currently being analyzed. |
-| `config` | Print the config file path. |
-| `clients` | Show detected Claude/Codex config paths and the MCP block that would be written. |
-| `setup [--client ...] [--dry-run]` | Install MCP config + slash commands for Claude Code, Claude Desktop, Codex CLI/Desktop. |
-| `remove-client [--client ...] [--dry-run]` | Deregister neo-localmcp from supported clients (inverse of `setup`). |
+| `config` | Print the config file path, or manage client configuration (see below). |
+| `config clients setup [--client ...]` | Install MCP config + slash commands for Claude Code, Claude Desktop, Codex CLI/Desktop. |
+| `config clients remove [--client ...]` | Deregister neo-localmcp from supported clients (inverse of `setup`). |
+| `config clients status` / `clients` | Show detected Claude/Codex config paths and the MCP block that would be written. `clients` is a shortcut alias for `config clients status`. |
+| `remove-client [--client ...] [--dry-run]` | Deprecated one-release compatibility alias for `config clients remove`. |
 | `serve` | Run the MCP server over stdio (what clients actually launch). |
 | `servers` | List running neo-localmcp servers registered under this app home. |
 | `stop [--pid \| --all] [--match-executable] [--timeout] [--no-force]` | Ask running server(s) to exit gracefully; force only as a last resort. |
 | `set-ollama --base-url --fast-model --summary-model --embed-model --num-ctx` | Set Ollama endpoint/model defaults. `--embed-model` is optional and enables the semantic layer (an empty string disables it). |
 | `model status` | Show configured Ollama models and which are actually reachable. |
-| `benchmark <group...> [--repo-root] [--out] [--queries]` | Repeatable local token-reduction benchmark (`sys`/`mem`/`ollama`/`full`). Never modifies existing repository memory, never calls an external LLM API. |
+| `benchmark <group...> [--repo-root] [--out] [--queries]` | Repeatable local token-reduction benchmark (`sys`/`mem`/`full`). Never modifies existing repository memory, never calls an external LLM API. |
 
 ### CLI — repository indexing and queries (`--repo-root` on all of these)
 
@@ -175,7 +176,7 @@ runtime itself — lifecycle work lives in the checkout's `setup.py`.
 
 ## Install
 
-Requirements: Python 3.12 or newer. Version 1.2.0 supports macOS and Windows;
+Requirements: Python 3.12 or newer. Version 1.2.1 supports macOS and Windows;
 Linux support is deferred.
 
 ### Guided installer (recommended)
@@ -184,8 +185,13 @@ The friendliest way to install is the terminal wizard — a plain full-screen
 numbered menu. It clears the screen, shows a running summary of your answers as
 you go, and asks one numbered question at a time. It walks you through install /
 reinstall / uninstall, choosing which AI clients to connect (with the exact
-config path shown for your OS), and picking Ollama models from those you actually
-have installed. It drives the same lifecycle as `setup.py` under the hood.
+config path shown for your OS, and the same client-selection screen offered
+consistently across install, reinstall, and uninstall), and picking Ollama
+models from those you actually have installed — with a curated
+**recommended-for-your-role** shortlist shown above the full installed list,
+and a warning on the confirm screen for anything selected but not yet pulled.
+It drives the same lifecycle as `setup.py` under the hood. On success it
+offers to add the managed `neo-localmcp` command to your PATH.
 
 ```bash
 pip install -e ".[wizard]"      # only needs psutil (already a base dependency)
@@ -219,19 +225,25 @@ Run the shared lifecycle from a local checkout:
 ```bash
 python3 setup.py install --client codex --client claude-code
 python3 setup.py install --clean --yes             # full wipe + fresh install
-python3 setup.py reinstall                         # replace runtime; preserve durable data
+python3 setup.py reinstall                         # replace runtime; preserve durable data + current clients
+python3 setup.py reinstall --client claude-code    # replace runtime; also change the connected client set
 python3 setup.py uninstall                         # remove runtime; preserve durable data
+python3 setup.py uninstall --client codex          # detach only the listed client(s); runtime/data untouched
 python3 setup.py uninstall --delete-memory --yes   # full wipe, no reinstall
 python3 setup.py config-ollama --fast-model qwen2.5:3b --summary-model qwen2.5-coder:7b
 python3 setup.py manage-clients --client claude-code --client codex   # disconnects any client not listed
 python3 setup.py install --dry-run                 # preview only
 ```
 
-Every subcommand supports `-h`/`--help`. `--clean` and `--delete-memory` are
-destructive (they delete the entire managed root) and require interactive
-confirmation or the explicit `--yes` flag; running one non-interactively
-without `--yes` is a safety refusal (exit code 2) before anything is touched.
-Omit `--client` to register no client surfaces. Repeat it for any combination of
+`install`, `reinstall`, and `uninstall` all accept the same repeatable
+`--client` flag with identical semantics — an explicit selection always wins,
+never silently replaced by whatever was previously on disk. Every subcommand
+supports `-h`/`--help`. `--clean` and `--delete-memory` are destructive (they
+delete the entire managed root) and require interactive confirmation or the
+explicit `--yes` flag; running one non-interactively without `--yes` is a
+safety refusal (exit code 2) before anything is touched. Omit `--client` on
+`install` to register no client surfaces; omit it on `reinstall`/`uninstall`
+to keep/remove the currently-registered set. Repeat it for any combination of
 `claude-code`, `codex`, and `claude-desktop`.
 
 ## Quickstart: fresh repo (little or no code yet)
@@ -283,12 +295,14 @@ instruction persists across sessions instead of being repeated by hand.
 
 - Claude Code is configured using `claude mcp add` and receives `/neo-localmcp:*` command templates.
 - Claude Desktop uses the versioned package generated at `packages/claude-desktop/neo-localmcp-v<version>.mcpb`. Running `setup.py install`/`reinstall` from a source checkout rebuilds it automatically; install it through Settings > Extensions > Advanced settings.
-- Codex app, CLI, and IDE share `~/.codex/config.toml`; setup writes one marked, replaceable block there.
+- Codex app, CLI, and IDE share one `config.toml`, resolved via `CODEX_HOME` when set (falling back to `~/.codex/config.toml` otherwise); setup writes one marked, replaceable block there.
 - MCP calls use a client workspace root when available. If none or several are exposed, pass `repo_root` explicitly or set `NEO_LOCALMCP_REPO`; the server refuses ambiguous automatic scope.
 
 ## Repository indexing
 
 The first context request creates a complete index automatically. Later requests compare path, size, and modification time before hashing. Complete refreshes transactionally prune deleted and renamed files. Capped indexes explicitly report `index_complete=false` with both `indexed_files` and `eligible_files`.
+
+`repo.include_extensions` (the set of file types actually indexed) is code-owned — rebuilt from the current default on every load, the same rule `exclude_dirs` already follows — so a security-relevant change to that default (e.g. `.env` was removed after being found to leak real secret content into the shared index) reaches every existing install automatically, not just fresh ones. Add your own extensions on top via `repo.extra_include_extensions`.
 
 Repository identity includes the canonical root and Git remote, keeping clones and worktrees separate. Summaries are stored with source hash, model, and prompt version and are replaced—not duplicated—when regenerated.
 

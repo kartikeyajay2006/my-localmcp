@@ -1,5 +1,11 @@
 # Project Notes
 
+## 2026-07-21 (5)
+
+- **1.2.1 integration (12.1g) complete on `dev/v1.2.1_implementation`, pending only the `main` merge/tag.** Version bumped to `1.2.1` in lockstep (`neo_localmcp/__init__.py`, `pyproject.toml`, `packages/claude-desktop/mcpb/manifest.json`); `.mcpb` rebuilt (`neo-localmcp-v1.2.1.mcpb`, verified byte-identical to source via `test_distribution.py`), `v1.2.0.mcpb` kept alongside it per the established keep-prior-bundles convention. Full suite green (454 passed / 4 skipped), compileall clean.
+- **Documentation audit for 1.2.1, per owner request to bring every document up to date.** Beyond the version bump itself: `README.md`'s CLI reference table had drifted from actual `runtime_cli.py` behavior (still describing a bare `setup`/`remove-client`/`clients` shape that predates the `config clients setup/remove/status` reorg) — fixed to match reality, plus added the 1.2.1-relevant behavior (PATH-add-on-install, model recommendations, `--client` parity across install/reinstall/uninstall, `CODEX_HOME`, the `.env` exclusion). `CLAUDE.md`'s "Known gaps" section still listed the `OLLAMA_MODELS` env-inheritance issue as unresolved even though #68 fixed it weeks ago — removed. `.github/CONTRIBUTING.md` directly contradicted this repo's own actually-practiced convention, instructing `git rm` of the previous version's `.mcpb` on a version bump when every real past release (1.0.10 -> 1.1.0 -> 1.1.1 -> 1.2.0, see this file's own history) kept it instead — fixed to match practice, not the other way around.
+- **Independent final audit ("Opus's final pass" per `docs/1.2.1_PLAN.md`'s 12.1g) run before opening the `main` PR**, in an isolated worktree, re-running the full test suite independently and reviewing the three-stacked-bug fix site (`operations.py`/`clients.py`), the new code-owned `include_extensions` logic, and every `chat()` call site for the `think` parameter addition, plus a fresh read of the manual testing record for gaps the implementing session might have missed.
+
 ## 2026-07-21 (4)
 
 - **Security fix: `.env` file content was being indexed into the shared sqlite memory** (found
