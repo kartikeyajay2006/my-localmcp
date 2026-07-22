@@ -138,7 +138,7 @@ class Recorder:
         self.recorded_selection = tuple(clients)
         return ()
 
-    def remove_active_registrations(self, paths: ManagedPaths, *, apply: bool = True) -> tuple:
+    def remove_active_registrations(self, paths: ManagedPaths, *, apply: bool = True, **_kwargs) -> tuple:
         self.record("remove_active_registrations")
         self.active_removed = True
         return self.client_removal_results
@@ -149,6 +149,17 @@ class Recorder:
             raise RuntimeError("client restore boom")
         self.restored = True
         return ()
+
+    def apply_client_selection(self, paths, target, *, server_command, **_kwargs):
+        self.record("apply_client_selection")
+        self.recorded_selection = tuple(target)
+
+        @dataclass(frozen=True)
+        class _Outcome:
+            ok: bool = True
+            failures: tuple = ()
+
+        return _Outcome()
 
     def delete_registrations(self, paths: ManagedPaths) -> None:
         self.record("delete_registrations")
@@ -251,6 +262,7 @@ def _context(
         record_selection_fn=recorder.record_selection,
         remove_active_registrations_fn=recorder.remove_active_registrations,
         restore_clients_fn=recorder.restore_clients,
+        apply_client_selection_fn=recorder.apply_client_selection,
         delete_registrations_fn=recorder.delete_registrations,
         plan_migration_fn=recorder.plan_migration,
         apply_migration_fn=recorder.apply_migration,
@@ -350,6 +362,51 @@ def test_matrix_reinstall(tmp_path, state):
     assert recorder.restored  # clients restored
 
 
+def test_install_records_explicit_client_selection_over_existing_state(tmp_path):
+    recorder = Recorder(state=InstallStateKind.HEALTHY)
+    ctx = _context(tmp_path, recorder, selected_clients=("codex",))
+    ctx.client_selection_explicit = True
+
+    result = install(ctx)
+
+    assert result.status is OperationStatus.SUCCEEDED
+    assert recorder.recorded_selection == ("codex",)
+    assert "snapshot_clients" not in recorder.calls
+
+
+def test_explicit_install_actually_connects_the_client_end_to_end(tmp_path, monkeypatch):
+    # Regression, found via a real (non-mocked) end-to-end run while validating #114/#112:
+    # the Recorder fakes above mock record_selection_fn and apply_client_selection_fn as two
+    # independent seams, so they can never see the real bug -- _record_client_intent used to
+    # pre-write registrations.json with the exact target selection *before*
+    # apply_client_selection ran, so apply_client_selection's own diff (recorded "current"
+    # clients vs. target) saw the just-selected client as already-current and never called
+    # setup_client at all. A real explicit-selection install silently registered nothing
+    # while still reporting success. This test wires in the real neo_localmcp.installer.clients
+    # orchestration (registrations.json read/write, the real diff) instead of the Recorder, so
+    # the interaction between the two seams is actually exercised.
+    from neo_localmcp.installer import clients as clients_mod
+
+    connected: list[str] = []
+    monkeypatch.setattr(
+        clients_mod.client_setup, "setup_client",
+        lambda client, apply=True, **kw: connected.append(client) or {"client": client, "ok": True},
+    )
+
+    recorder = Recorder(state=InstallStateKind.HEALTHY)
+    ctx = _context(tmp_path, recorder, selected_clients=("claude-code",))
+    ctx.client_selection_explicit = True
+    ctx.record_selection_fn = clients_mod.record_selection
+    ctx.snapshot_clients_fn = clients_mod.snapshot_clients
+    ctx.apply_client_selection_fn = clients_mod.apply_client_selection
+    ctx.restore_clients_fn = clients_mod.restore_recorded_registrations
+
+    result = install(ctx)
+
+    assert result.status is OperationStatus.SUCCEEDED
+    assert connected == ["claude-code"]
+
+
 @pytest.mark.parametrize("state", _ALL_STATES)
 def test_matrix_uninstall(tmp_path, state):
     recorder = Recorder(state=state)
@@ -363,6 +420,19 @@ def test_matrix_uninstall(tmp_path, state):
     assert not recorder.root_deleted  # preserves durable data
     assert recorder.active_removed  # clients removed
     assert not recorder.restored
+
+
+def test_partial_uninstall_detaches_selected_client_without_removing_runtime(tmp_path):
+    recorder = Recorder(state=InstallStateKind.HEALTHY)
+    ctx = _context(tmp_path, recorder, selected_clients=("codex",))
+    ctx.client_selection_explicit = True
+
+    result = uninstall(ctx)
+
+    assert result.status is OperationStatus.SUCCEEDED
+    assert recorder.active_removed
+    assert not recorder.venv_removed
+    assert not recorder.root_deleted
 
 
 @pytest.mark.parametrize("state", _ALL_STATES)

@@ -33,6 +33,8 @@ from .. import (
 )
 from .. import clients as clients_mod
 from ..mcpb import build_mcpb
+from ..model_recommendations import recommend_models
+from ..path import add_to_path, path_hint
 from .backend import (
     CLIENT_KEYS,
     CLIENT_LABELS,
@@ -186,6 +188,10 @@ class LiveBackend:
         capabilities: dict[str, tuple[str, ...]] = {}
         if reachable and installed:
             sizes, capabilities = self._model_details()
+        recommendations = {
+            role: tuple((r.name, r.installed) for r in recommend_models(role, installed))
+            for role in ("fast", "summary", "embed")
+        }
         if reachable and installed:
             detail = f"`ollama list`: {len(installed)} model(s) installed at {base_url}."
         elif reachable:
@@ -197,6 +203,7 @@ class LiveBackend:
             reachable=reachable, base_url=base_url, installed_models=tuple(installed),
             fast_model=fast, summary_model=summary, state=state, detail=detail,
             model_sizes=sizes, embed_model=embed, model_capabilities=capabilities,
+            recommendations=recommendations,
         )
 
     @staticmethod
@@ -228,12 +235,19 @@ class LiveBackend:
         try:
             context = self._build_context(emit)
             if state.operation == OP_UNINSTALL:
-                context.selected_clients = []
+                if state.client_detach_only:
+                    context.selected_clients = list(state.selected_clients)
+                    context.client_selection_explicit = True
+                else:
+                    context.selected_clients = []
                 result = uninstall(context, delete_memory=state.full_wipe, assume_yes=True)
             elif state.operation == "reinstall":
+                context.selected_clients = list(state.selected_clients)
+                context.client_selection_explicit = True
                 result = reinstall(context)
             else:  # install
                 context.selected_clients = list(state.selected_clients)
+                context.client_selection_explicit = True
                 result = install(context, clean=False)
         except Exception as exc:  # noqa: BLE001 - never crash the UI on a lifecycle error
             emit(StepEvent("error", f"Operation raised: {exc}"))
@@ -252,9 +266,18 @@ class LiveBackend:
         extra_details: tuple[str, ...] = ()
         if (result.status is OperationStatus.SUCCEEDED
                 and state.operation != OP_UNINSTALL):
+            details = [f"PATH hint: {path_hint(self._paths)}"]
+            if state.add_to_path:
+                try:
+                    update = add_to_path(self._paths)
+                    state_label = "added" if update.changed else "already present"
+                    emit(StepEvent("action", f"PATH {state_label}: {update.target}"))
+                except (OSError, ValueError) as exc:
+                    emit(StepEvent("warning", f"Could not add neo-localmcp to PATH: {exc}"))
             built = self._build_desktop_bundle(emit)
             if built:
-                extra_details = (f"Claude Desktop bundle: {built}",)
+                details.append(f"Claude Desktop bundle: {built}")
+            extra_details = tuple(details)
 
         return self._outcome_from_result(state, result, extra_details=extra_details)
 

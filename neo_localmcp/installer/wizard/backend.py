@@ -85,6 +85,9 @@ class OllamaInfo:
     # Ollama's own reported capability tags per model (e.g. ("completion", "tools") or
     # ("embedding",)) from /api/tags -- real model-type info, not a name-based guess.
     model_capabilities: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    # #101: per-role (name, installed) pairs from the curated recommendation table,
+    # best-first, up to 2 per role ("fast"/"summary"/"embed"); no hardware inspection.
+    recommendations: dict[str, tuple[tuple[str, bool], ...]] = field(default_factory=dict)
 
 
 def human_size(num_bytes: float) -> str:
@@ -125,7 +128,9 @@ class WizardState:
     fast_model: str = ""
     summary_model: str = ""
     embed_model: str = ""  # optional; "" = leave the semantic layer disabled
+    add_to_path: bool = False
     full_wipe: bool = False
+    client_detach_only: bool = False
     dry_run: bool = False
     outcome: OperationOutcome | None = None
 
@@ -133,7 +138,9 @@ class WizardState:
         self.operation = ""
         self.selected_clients = []
         self.configure_ollama = False
+        self.add_to_path = False
         self.full_wipe = False
+        self.client_detach_only = False
         self.dry_run = False
         self.outcome = None
 

@@ -332,19 +332,22 @@ class ConsoleWizard:
 
     def _phase_clients(self) -> None:
         # default selection: this-session pick (if revisited via "back") -> else currently-registered (manage mode) -> else last_clients pref (install mode)
+        if self.state.operation == OP_UNINSTALL and not self.state.client_detach_only:
+            raise _Skip
         manage = self._clients_manage_mode
+        defaults_to_registered = manage or self.state.operation in {OP_REINSTALL, OP_UNINSTALL}
         options = self.backend.client_options()
         registered = {opt.key for opt in options if opt.registered}
         if self.state.selected_clients:
             default_keys = set(self.state.selected_clients)
-        elif manage:
+        elif defaults_to_registered:
             default_keys = registered
         else:
             default_keys = set(self.prefs.get("last_clients") or [])
         default_indices = [i for i, o in enumerate(options, 1) if o.key in default_keys]
 
         prompt = ("Which clients should stay connected?"
-                  if manage else "Which clients should connect to neo-localmcp?")
+                  if defaults_to_registered else "Which clients should connect to neo-localmcp?")
         self._header(prompt)
         self._explain(
             "neo-localmcp registers itself with each AI client you pick so that",
@@ -453,17 +456,35 @@ class ConsoleWizard:
                 return offset + 1
         return 1  # only embed-only models installed -- nothing better to offer
 
-    def _pick_model(self, label: str, hint: list[str], info, current: str) -> str:
+    @staticmethod
+    def _print_recommended_section(recs: list[tuple[str, bool]]) -> None:
+        # "RECOMMENDED FOR YOUR SETUP" -- one numbered line per candidate (1..len(recs)),
+        # green + [x] available when installed, red_bold + [ ] not pulled otherwise
+        print("\n   RECOMMENDED FOR YOUR SETUP\n")
+        for index, (name, installed) in enumerate(recs, start=1):
+            marker = "[x] available" if installed else "[ ] not pulled"
+            line = f"   {index}) {name}  ({marker})"
+            print(_ansi.green(line) if installed else _ansi.red_bold(line))
+        print()
+        print("   " + "-" * 24)
+        print("   ALL INSTALLED MODELS\n")
+
+    def _pick_model(self, label: str, hint: list[str], info, current: str, role: str) -> str:
         self._header(f"Choose the {label}:")
         self._explain(*hint, "Listed below are the models from your `ollama list`,")
         print(" sorted alphabetically:\n")
         models = list(info.installed_models)
+        recs = list(info.recommendations.get(role, ()))
+        if recs:
+            self._print_recommended_section(recs)
+        start_index = len(recs) + 1
         default = self._default_model_index(models, info, current)
         default_model = models[default - 1] if models else None
-        for row in self._format_model_table(models, info, current, default_model=default_model):
+        for row in self._format_model_table(models, info, current, start_index=start_index, default_model=default_model):
             print(row)
-        choice = self._ask_int(1, len(models), default=default)
-        return models[choice - 1]
+        combined_names = [name for name, _installed in recs] + models
+        choice = self._ask_int(1, len(combined_names), default=start_index - 1 + default)
+        return combined_names[choice - 1]
 
     def _phase_ollama_fast(self) -> None:
         if not self.state.configure_ollama:
@@ -478,7 +499,7 @@ class ConsoleWizard:
                     "bug', it decides which files are probably relevant. A smaller,",
                     "faster model is best here; you don't need a large coder model.",
                 ],
-                info, self.state.fast_model or info.fast_model)
+                info, self.state.fast_model or info.fast_model, role="fast")
         else:
             self._header("Fast model (ranking)")
             self._explain(
@@ -497,7 +518,7 @@ class ConsoleWizard:
                 "summary model (file summaries)",
                 ["Used to write file/section summaries on request. A larger,",
                  "code-capable model gives better summaries than the fast model."],
-                info, self.state.summary_model or info.summary_model)
+                info, self.state.summary_model or info.summary_model, role="summary")
         else:
             self._header("Summary model (file summaries)")
             self._explain(
@@ -527,12 +548,18 @@ class ConsoleWizard:
             self._header("Embedding model for the semantic layer (optional):")
             self._explain(*self._EMBED_HINT, "", "Choose 0 to leave it disabled (the default).")
             models = list(info.installed_models)
+            recs = list(info.recommendations.get("embed", ()))
             print("\n   0) None -- leave the semantic layer disabled")
-            for row in self._format_model_table(models, info, current, start_index=1):
+            if recs:
+                self._print_recommended_section(recs)
+            start_index = len(recs) + 1
+            for row in self._format_model_table(models, info, current, start_index=start_index):
                 print(row)
+            combined_names = [name for name, _installed in recs] + models
             default = models.index(current) + 1 if current in models else 0
-            choice = self._ask_int(0, len(models), default=default)
-            self.state.embed_model = "" if choice == 0 else models[choice - 1]
+            default_display = 0 if default == 0 else start_index - 1 + default
+            choice = self._ask_int(0, len(combined_names), default=default_display)
+            self.state.embed_model = "" if choice == 0 else combined_names[choice - 1]
         else:
             self._header("Embedding model for the semantic layer (optional)")
             self._explain(*self._EMBED_HINT, "", "Leave blank to keep it disabled.")
@@ -542,9 +569,43 @@ class ConsoleWizard:
             f"fast={self.state.fast_model}, summary={self.state.summary_model}, "
             f"embed={self.state.embed_model or 'disabled'}")
 
+    # -- phase: PATH --------------------------------------------------------
+
+    def _phase_path(self) -> None:
+        # wizard choice only -> the live backend updates PATH after a successful install/reinstall
+        self._header("Add neo-localmcp to PATH")
+        self._explain(
+            "Add the managed neo-localmcp command to your user PATH so new terminals",
+            "can run it directly. This can be removed later from your shell profile or user PATH.",
+        )
+        self.state.add_to_path = self._ask_yesno(
+            "Add neo-localmcp to PATH?", default=True,
+        )
+        state = "enabled" if self.state.add_to_path else "manual setup"
+        self._set_summary("PATH", state)
+
     # -- phase: uninstall ---------------------------------------------------
 
+    def _phase_uninstall_scope(self) -> None:
+        self._header("Uninstall neo-localmcp")
+        self._explain(
+            "Choose the scope. A full uninstall removes the runtime (optionally",
+            "wiping all data) and disconnects every client. Detaching specific",
+            "clients only removes those clients' registrations, keeping the",
+            "runtime and all data untouched.",
+        )
+        self._print_options([
+            ("Uninstall", "remove the runtime; choose runtime-only or full wipe next"),
+            ("Detach specific clients only", "keep the runtime and all data"),
+        ])
+        choice = self._ask_int(1, 2, default=1)
+        self.state.client_detach_only = choice == 2
+        if self.state.client_detach_only:
+            self._set_summary("Mode", "detach clients only (runtime/data preserved)")
+
     def _phase_uninstall_mode(self) -> None:
+        if self.state.client_detach_only:
+            raise _Skip
         self._header("Uninstall neo-localmcp")
         self._explain(
             "Choose how much to remove. 'Runtime only' disconnects clients and",
@@ -560,7 +621,7 @@ class ConsoleWizard:
         self._set_summary("Mode", "full wipe" if self.state.full_wipe else "runtime only")
 
     def _phase_uninstall_wipe_confirm(self) -> None:
-        if not self.state.full_wipe:
+        if self.state.client_detach_only or not self.state.full_wipe:
             raise _Skip
         self._header("Confirm full wipe")
         for line in _wrap("A full wipe permanently deletes everything under:", indent=" "):
@@ -604,6 +665,18 @@ class ConsoleWizard:
         OP_MANAGE_CLIENTS: "Apply",
     }
 
+    def _missing_pull_models(self) -> list[str]:
+        # #101: selected fast/summary/embed models that aren't in `ollama list` yet, in a
+        # stable order, deduplicated; [] whenever Ollama configuration wasn't touched this run
+        if not self.state.configure_ollama:
+            return []
+        installed = set(self.backend.ollama_info().installed_models)
+        missing: list[str] = []
+        for name in (self.state.fast_model, self.state.summary_model, self.state.embed_model):
+            if name and name not in installed and name not in missing:
+                missing.append(name)
+        return missing
+
     def _confirm(self, *, default_proceed: bool = True) -> None:
         # final gate before any change: show chosen actions -> single yes/no; no -> _Abort
         self._header("Review and confirm")
@@ -620,6 +693,17 @@ class ConsoleWizard:
             print()
         print(f"   Managed root: {self.detected.managed_root}")
         print()
+
+        missing = self._missing_pull_models()
+        if missing:
+            for line in _wrap(
+                "The following selected model(s) are not pulled yet -- neo-localmcp "
+                "never auto-downloads a model, so run these yourself:", indent=" ",
+            ):
+                print(_ansi.red_bold(line))
+            for name in missing:
+                print(_ansi.red_bold(f"   ollama pull {name}"))
+            print()
 
         verb = self._CONFIRM_VERBS.get(self.state.operation, "Proceed")
         prompt = "Proceed?" if verb == "Proceed" else f"{verb} as shown?"
@@ -702,12 +786,11 @@ class ConsoleWizard:
                 self._phase_ollama_fast,
                 self._phase_ollama_summary,
                 self._phase_ollama_embed,
+                self._phase_path,
                 self._phase_confirm,
             ]
         elif op == OP_REINSTALL:
-            existing = ", ".join(self.detected.registered_clients) or "none"
-            self._set_summary("Clients", f"kept as-is ({existing})")
-            phases = [self._phase_confirm]
+            phases = [self._phase_clients, self._phase_path, self._phase_confirm]
         elif op == OP_CONFIG_OLLAMA:
             phases = [
                 self._phase_ollama_yesno,
@@ -721,6 +804,8 @@ class ConsoleWizard:
             phases = [self._phase_clients, self._phase_confirm]
         elif op == OP_UNINSTALL:
             phases = [
+                self._phase_uninstall_scope,
+                self._phase_clients,
                 self._phase_uninstall_mode,
                 self._phase_uninstall_wipe_confirm,
                 self._phase_confirm,

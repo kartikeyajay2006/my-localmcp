@@ -62,6 +62,7 @@ from .clients import apply_client_selection  # noqa: E402
 from .ollama import configure_models  # noqa: E402
 from .operations import OperationContext, install, reinstall, uninstall  # noqa: E402
 from .output import Reporter, confirm_full_wipe, operation_explanation  # noqa: E402
+from .path import add_to_path, path_hint  # noqa: E402
 from .paths import ManagedPaths  # noqa: E402
 from .state import detect_state  # noqa: E402
 from .types import Operation, OperationResult, OperationStatus  # noqa: E402
@@ -189,6 +190,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         help="Register this client after a fresh/clean install. Repeat for multiple clients; omit to register none.",
     )
+    install_parser.add_argument(
+        "--add-to-path",
+        action="store_true",
+        help="Add the managed CLI directory to the current user's PATH after success.",
+    )
     install_parser.set_defaults(operation="install")
 
     reinstall_parser = sub.add_parser(
@@ -199,6 +205,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run",
         action="store_true",
         help="Print the detected state and the ordered action plan; make no changes.",
+    )
+    reinstall_parser.add_argument(
+        "--add-to-path",
+        action="store_true",
+        help="Add the managed CLI directory to the current user's PATH after success.",
+    )
+    reinstall_parser.add_argument(
+        "--client", action="append", choices=("claude-code", "codex", "claude-desktop"),
+        default=[], help="Client to keep connected after reinstall. Repeatable; omit to keep the current set.",
     )
     reinstall_parser.set_defaults(operation="reinstall")
 
@@ -220,6 +235,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run",
         action="store_true",
         help="Print the detected state and the ordered action plan; make no changes.",
+    )
+    uninstall_parser.add_argument(
+        "--client", action="append", choices=("claude-code", "codex", "claude-desktop"),
+        default=[], help="Detach only these clients and retain the runtime and durable data.",
     )
     uninstall_parser.set_defaults(operation="uninstall")
 
@@ -353,6 +372,25 @@ def _render_result(result: OperationResult, reporter: Reporter) -> int:
     return _STATUS_EXIT_CODES[result.status]
 
 
+def _report_path_setup(
+    args: argparse.Namespace, context: OperationContext, result: OperationResult, reporter: Reporter,
+) -> None:
+    # successful install/reinstall -> always show the exact manual PATH command; --add-to-path persists it explicitly
+    if result.status is not OperationStatus.SUCCEEDED:
+        return
+    reporter.info("To use neo-localmcp in a new terminal, add this to your PATH:")
+    reporter.info(path_hint(context.paths))
+    if not args.add_to_path:
+        return
+    try:
+        update = add_to_path(context.paths)
+    except (OSError, ValueError) as exc:
+        reporter.warn(f"Could not add neo-localmcp to PATH: {exc}")
+        return
+    state = "added" if update.changed else "already present"
+    reporter.action(f"PATH {state}: {update.target}")
+
+
 def _run_config_ollama(args: argparse.Namespace, reporter: Reporter) -> int:
     # embed_model is tri-state in configure_models: None (flag omitted) keeps current, "" disables, a name enables
     ollama_cfg = configure_models(
@@ -406,8 +444,9 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_USAGE_OR_REFUSAL
 
     context = build_context(reporter)
-    if args.operation == "install":
+    if args.operation in {"install", "reinstall", "uninstall"}:
         context.selected_clients = list(args.client)
+        context.client_selection_explicit = args.operation == "install" or bool(args.client)
 
     if args.operation == "config-ollama":
         return _run_config_ollama(args, reporter)
@@ -430,6 +469,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"Unknown operation: {args.operation}")
         return EXIT_USAGE_OR_REFUSAL
 
+    if args.operation in {"install", "reinstall"}:
+        _report_path_setup(args, context, result, reporter)
     return _render_result(result, reporter)
 
 

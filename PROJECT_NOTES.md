@@ -1,5 +1,149 @@
 # Project Notes
 
+## 2026-07-21 (5)
+
+- **1.2.1 integration (12.1g) complete on `dev/v1.2.1_implementation`, pending only the `main` merge/tag.** Version bumped to `1.2.1` in lockstep (`neo_localmcp/__init__.py`, `pyproject.toml`, `packages/claude-desktop/mcpb/manifest.json`); `.mcpb` rebuilt (`neo-localmcp-v1.2.1.mcpb`, verified byte-identical to source via `test_distribution.py`), `v1.2.0.mcpb` kept alongside it per the established keep-prior-bundles convention. Full suite green (454 passed / 4 skipped), compileall clean.
+- **Documentation audit for 1.2.1, per owner request to bring every document up to date.** Beyond the version bump itself: `README.md`'s CLI reference table had drifted from actual `runtime_cli.py` behavior (still describing a bare `setup`/`remove-client`/`clients` shape that predates the `config clients setup/remove/status` reorg) — fixed to match reality, plus added the 1.2.1-relevant behavior (PATH-add-on-install, model recommendations, `--client` parity across install/reinstall/uninstall, `CODEX_HOME`, the `.env` exclusion). `CLAUDE.md`'s "Known gaps" section still listed the `OLLAMA_MODELS` env-inheritance issue as unresolved even though #68 fixed it weeks ago — removed. `.github/CONTRIBUTING.md` directly contradicted this repo's own actually-practiced convention, instructing `git rm` of the previous version's `.mcpb` on a version bump when every real past release (1.0.10 -> 1.1.0 -> 1.1.1 -> 1.2.0, see this file's own history) kept it instead — fixed to match practice, not the other way around.
+- **Independent final audit ("Opus's final pass" per `docs/1.2.1_PLAN.md`'s 12.1g) run before opening the `main` PR**, in an isolated worktree, re-running the full test suite independently and reviewing the three-stacked-bug fix site (`operations.py`/`clients.py`), the new code-owned `include_extensions` logic, and every `chat()` call site for the `think` parameter addition, plus a fresh read of the manual testing record for gaps the implementing session might have missed.
+
+## 2026-07-21 (4)
+
+- **Security fix: `.env` file content was being indexed into the shared sqlite memory** (found
+  during the real-machine 12.1h verification pass — a real neo-notion-agent `.env` got indexed
+  during Phase 4). Root cause: `.env` was literally in `config.py`'s `TEXT_EXTENSIONS`/default
+  `repo.include_extensions`, matched via the filename-equals check (`path.name in includes`), not
+  a real extension. Fixed immediately: removed `.env` from the default; made `include_extensions`
+  code-owned (rebuilt from the code default on every `load_config()`, unioned with a new
+  `repo.extra_include_extensions` user surface) so the fix reaches every existing install
+  automatically, not just fresh ones — same precedent as #41's `exclude_dirs` fix. The
+  already-leaked content was purged directly from the real live DB (`files`/`symbols`/
+  `repo_fts`/`section_summaries` rows for that path deleted), and the real local install was
+  reinstalled from the patched source so the running system stopped being vulnerable immediately,
+  not just the next fresh install. New regression tests in `tests/test_repo_utils.py`
+  (`test_dotenv_file_is_not_indexed`, `test_stale_persisted_include_extensions_cannot_reintroduce_dotenv`,
+  `test_extra_include_extensions_are_added_to_code_owned_extensions`). Full suite green
+  (452 passed / 4 skipped), `.mcpb` rebuilt, live fix confirmed via a real forced `refresh` on
+  neo-notion-agent that no longer picks up `.env`.
+- **Filed #118** for a separate, lower-severity finding from the same testing pass:
+  `record_change` unconditionally `force=True` re-indexes every listed path, which wipes cached
+  summaries even when content is byte-identical — correct behavior for its real intended use (a
+  genuine edit just happened), a real gap only when called speculatively. Deferred, not
+  release-blocking.
+- **Investigated a third finding (heading-scoped `summarize` truncating to an empty response on a
+  "thinking"-capable summary model, e.g. `gemma4:12b`)**: confirmed live that Ollama's `/api/generate`
+  accepts a top-level `"think": false` field that suppresses the model's internal reasoning trace —
+  tested directly against the local Ollama instance, produced a complete, correct answer in 16
+  tokens with `done_reason: "stop"` instead of exhausting the 400-token `section_summary_num_predict`
+  cap on invisible reasoning. `ollama_client.chat()` doesn't currently pass `think` at all. Fix
+  identified and verified, not yet implemented — pending owner decision on scope/timing.
+
+## 2026-07-21 (3)
+
+- **A third client-registration bug, found by explicitly testing the full lifecycle
+  instead of trusting install-in-isolation testing.** Asked directly "how sure are you
+  that install/reinstall/uninstall->install all work and produce the same output" —
+  the honest answer was that reinstall and uninstall->install had never actually been
+  tested in this session (only install had). Ran all three for real (live sandboxed
+  `$HOME`, real venv builds, real `claude mcp` writes): install and reinstall passed,
+  but **uninstall -> install failed** — `Installation verification failed:
+  client-targets`, empty `~/.claude/commands/neo-localmcp`. Root cause: a default
+  uninstall deliberately keeps the `registrations.json` record for a client (so a later
+  reinstall can restore it) while removing the *live* registration. `apply_client_selection`
+  diffed the new selection against that stale record, saw the client as "already
+  current," and never called `setup_client()` — same bug family as #114/#112's second
+  layer, different trigger. Fixed in `neo_localmcp/installer/clients.py`:
+  `apply_client_selection` now always (re)connects every client in the target
+  selection instead of only ones missing from the record (`setup_client` is already
+  idempotent/cheap when genuinely still connected, so this is safe). New regression
+  test confirmed failing without the fix, passing with it; reran the full
+  install -> reinstall -> uninstall -> install sequence live and all four steps now
+  succeed. Not filed as a separate GitHub issue — found, fixed, and verified within the
+  same 12.1h pass. Full suite green (448 passed / 4 skipped) after every fix in this
+  session; `.mcpb` rebuilt in place each time source changed. See `docs/1.2.1_PLAN.md`'s
+  12.1h entry for full detail. **Lesson for future testing in this repo**: testing
+  "install" alone is not sufficient evidence that "reinstall" and "uninstall then
+  reinstall/install" behave the same way, even when they share most of their code path
+  — the divergence lives in exactly the kind of stale-state interaction that only shows
+  up when the full realistic sequence is actually run, not reasoned about from the code
+  alone.
+
+## 2026-07-21 (2)
+
+- **12.1h's manual verification pass was executed for real, not just planned** — asked to
+  run everything short of the Claude Desktop `.mcpb` GUI install. While building the
+  real end-to-end harness (driving `LiveBackend.run_operation()` for real, sandboxed
+  `$HOME`/`NEO_LOCALMCP_HOME`, not mocked), the #114 fix alone turned out insufficient:
+  a genuinely fresh install still failed installation verification with zero clients
+  connected. Root-caused a **second, deeper bug** in the same area: `_install_like()`
+  pre-writes `registrations.json` with the exact target selection (via
+  `_record_client_intent`) *before* `_restore_and_verify()` calls `apply_client_selection`,
+  whose own diff-against-`registrations.json` logic then sees the just-selected client as
+  "already current" and never calls `setup_client()` — a real explicit-selection install
+  silently connects nothing while still reporting success. This is not wizard-specific: the
+  CLI install path has unconditionally set `client_selection_explicit=True` since #103 (PR
+  #106), so this likely affected real CLI installs in production too, undetected because
+  the unit suite's `Recorder` fakes mock `record_selection_fn`/`apply_client_selection_fn`
+  as independent seams that can never see them interact. Fixed by only pre-writing intent
+  when `not client_selection_explicit` (the explicit path already computes its own diff and
+  writes the authoritative record itself). New semi-integration test
+  (`test_explicit_install_actually_connects_the_client_end_to_end`, wired to real
+  `clients.py`, not the `Recorder`) confirmed failing without the fix, passing with it.
+  Live confirmation: sandboxed `claude mcp list` reported `neo-localmcp: ... - Connected`
+  after the fix, in both the localhost-Ollama and NeoRyzen-Ollama passes, and in a
+  deliberately-reconstructed exact-bug-precondition repro (root exists, registration
+  evidence wiped). NeoRyzen's Tailscale host is reachable but Ollama itself isn't currently
+  listening there (port 11434 connection timed out) — config write still succeeded
+  (never blocks on reachability, by design), but no live NeoRyzen inference round-trip was
+  exercised. Codex's `CODEX_HOME` fix (#113) verified both set and unset. Full suite green,
+  `.mcpb` rebuilt in place; every sandboxed test home and incidental duplicate `.mcpb`
+  build artifact was deleted afterward. See `docs/1.2.1_PLAN.md`'s 12.1h entry for full
+  detail. Only the real Claude Desktop `.mcpb` GUI install was left for the owner, as asked.
+
+## 2026-07-21
+
+- **Folded #114/#112/#113 into the 1.2.1 plan as phase 12.1h and fixed all
+  three**, in response to the owner's manual OS testing pass on
+  `dev/v1.2.1_implementation` (9 findings filed as #109-#117; owner asked to
+  defer the 7 UX/transparency ones and fix the 2 real registration bugs now).
+  Root-caused rather than patched blind: #112 ("Claude Code registration
+  silently failed on a real Windows fresh install," empty `~/.claude/commands`,
+  no `claude mcp list` entry) turned out to be a direct consequence of #114
+  (`LiveBackend.run_operation()`'s install branch never set
+  `context.client_selection_explicit = True`, unlike reinstall/uninstall) --
+  masked on a truly empty `~/.neo-localmcp` by the `InstallStateKind.ABSENT`
+  fallback, but the owner's testing session ran several issues back-to-back
+  on the same machine, so by the time client registration was tested a
+  managed root already existed and `_record_client_intent` fell through to a
+  disk snapshot that found nothing yet registered -- writing an empty
+  `registrations.json` that `_restore_and_verify` then dutifully "restored"
+  (i.e. connected nothing), all while still reporting install success. Fixed
+  by setting `client_selection_explicit = True` in the install branch too,
+  so a wizard install always takes the same `apply_client_selection_fn`
+  reconciliation path the CLI install path already used unconditionally --
+  no separate fix needed for #112 itself once traced to this. #113 (Codex
+  ignoring `CODEX_HOME`) was a much more direct fix:
+  `_codex_cli_config_path()` now reads `CODEX_HOME` before falling back to
+  `~/.codex`, matching a comment that already claimed this was the shared
+  behavior across Codex CLI/app/IDE. TDD: `test_live_backend_install_marks_client_selection_explicit`
+  (mirrors existing reinstall/uninstall coverage) plus two `CODEX_HOME`
+  tests in `tests/test_client_removal.py`. Full suite green (447 passed / 4
+  skipped) + compileall; `.mcpb` rebuilt in place (stale-bundle class of
+  failure CLAUDE.md already flags, caught immediately by
+  `test_built_mcpb_embeds_current_package_bytes`). Next: a two-environment
+  manual verification pass (localhost Ollama on the MacBook Pro, remote
+  Ollama on NeoRyzen) scoped to client-registration behavior only, not a
+  full re-test of everything already verified in 12.1a-f.
+
+## 2026-07-12 (2)
+
+- **1.2.1's remaining three issues (#103, #68, #101) implemented overnight, unattended, each merged into `dev/v1.2.1_implementation` via its own PR (#106, #107, #108) — no merge to `main`, per explicit owner instruction.** Picked up from a Codex handoff that had committed only #103's non-wizard half (`556a49f`).
+  - **#103 finished**: wizard gained `_phase_clients` for Reinstall (previously silently kept the on-disk snapshot) and a new Uninstall scope screen ("Uninstall" vs. "Detach specific clients only", the latter skipping the runtime-only/full-wipe questions entirely) so a partial client detach is reachable without the CLI. `LiveBackend`/`PreviewBackend` wired through with `client_selection_explicit` semantics matching the CLI's existing `--client` behavior.
+  - **#68 fixed**: `ollama_client.start_service()` now builds `env=` explicitly (`_ollama_env()`, read live from `os.environ` at spawn time) instead of relying on `Popen`'s default ambient inheritance. Verified with a real sanitized-subprocess repro harness, not just a mocked-`Popen` assertion.
+  - **#101 implemented**: `installer/model_recommendations.py` (`recommend_models(role, installed_models)`, hardware-blind per the plan, reuses `ollama_client._resolve_installed_model` for tag matching). Wizard picker pages render a RECOMMENDED FOR YOUR SETUP section above the always-unabridged installed list, one continuous numbered sequence; confirm page shows an `ollama pull <model>` warning for anything selected-but-not-pulled, never blocking. Recommendation table matches `docs/1.2.1_MANUAL_OS_TESTING.md`'s pre-recorded spec exactly (`qwen3.5:4b`/`qwen3.5:9b` fast, `gemma4:12b`/`qwen3:8b` summary, `bge-m3:latest`/`mxbai-embed-large:latest` embed) rather than a freehand table, once that doc's existing content was noticed.
+  - **Recurring stale-`.mcpb`-bundle issue hit twice more this session** (`test_distribution.py::test_built_mcpb_embeds_current_package_bytes`), same class CLAUDE.md already flags as having broken CI twice historically — `build_mcpb`'s "never overwrite, always suffix `-N`" policy means every source change to `neo_localmcp/**` needs the stale bundle(s) deleted and rebuilt in place before committing, including across a `git rebase` (binary-file conflict, resolved by deleting and rebuilding rather than picking either side). Worth a lint/pre-commit check going forward rather than remembering by hand each time.
+  - All three PRs' CI (macOS + Windows, all named jobs + `ci-gate`) confirmed green before merging into the integration branch; full local suite green throughout (444 passed / 4 skipped on the final state).
+  - **Deliberately not done tonight, reserved for the owner**: manual macOS/Windows hands-on pass (`docs/1.2.1_MANUAL_OS_TESTING.md`, all four issues' checkpoints), 12.1g's version bump/tag/final `dev -> main` PR and merge.
+
 ## 2026-07-12
 
 - **`v1.2.0` shipped** (PR #98 merged to `main` at `87b02f1`, tag pushed). Third tag in this repo's history (`v1.0.10`, `v1.1.1`, `v1.2.0`), first new one since `v1.0.10`.

@@ -263,17 +263,24 @@ def record_selection(
 
 
 def remove_active_registrations(
-    paths: ManagedPaths, *, apply: bool = True
+    paths: ManagedPaths, *, apply: bool = True,
+    selected_clients: Sequence[str] | None = None, forget: bool = False,
 ) -> tuple[dict[str, Any], ...]:
-    # removes only the live registrations; the records themselves stay on disk so a later reinstall can reconnect the same surfaces
+    # selected subset -> remove only those registrations; forget=True drops them from records for a client-only detach
     results: list[dict[str, Any]] = []
-    for record in read_registrations(paths):
+    selected = set(selected_clients) if selected_clients is not None else None
+    records = read_registrations(paths)
+    for record in records:
+        if selected is not None and record.client not in selected:
+            continue
         if record.client == CLAUDE_DESKTOP:
             results.append(client_setup.remove_claude_desktop(apply=apply))
             continue
         if not record.active:
             continue
         results.append(client_setup.remove_client(record.client, apply=apply))
+    if apply and forget and selected is not None:
+        write_registrations(paths, tuple(record for record in records if record.client not in selected))
     return tuple(results)
 
 
@@ -333,9 +340,21 @@ def apply_client_selection(
     on_event: Callable[[str, str], None] | None = None,
     label_fn: Callable[[str], str] | None = None,
 ) -> ClientChangeOutcome:
-    # target vs currently recorded clients -> diff -> connect newcomers (setup_client), disconnect dropped ones (remove_client), persist the new target
+    # target vs currently recorded clients -> diff (for reporting) -> connect every
+    # target client (setup_client), disconnect dropped ones (remove_client), persist
+    # the new target
     # shared by the wizard's "Manage connected clients" and setup.py manage-clients, so both reconcile identically
     # label_fn maps a client key to a display label for event messages only; this module can't import wizard/ (where CLIENT_LABELS lives), so callers supply their own mapping -- defaults to raw keys
+    #
+    # Every target client is (re)connected, not just ones newly missing from
+    # `current` -- a registrations.json record does not guarantee the live
+    # registration is still intact. A default uninstall, for example,
+    # deliberately keeps the record (so a later reinstall can restore it) while
+    # actually removing the live slash-commands/claude-mcp/codex-config entry;
+    # diffing only against the stale record would then see "already current"
+    # and silently skip reconnecting. setup_client (setup_claude_code/
+    # setup_codex/...) is idempotent and cheap when already correctly
+    # connected, so always calling it for the full target list is safe.
     def emit(level: str, message: str) -> None:
         if on_event is not None:
             on_event(level, message)
@@ -344,12 +363,12 @@ def apply_client_selection(
     known = {CLAUDE_CODE, CODEX, CLAUDE_DESKTOP}
     current = {r.client for r in read_registrations(paths) if r.client in known}
     target_list = list(dict.fromkeys(target))  # de-dupe, preserve order
-    add = [c for c in target_list if c not in current]
+    added = [c for c in target_list if c not in current]  # reporting only
     remove = [c for c in current if c not in target_list]
     failures: list[str] = []
     manual: list[str] = []
 
-    for client in add:
+    for client in target_list:
         emit("action", f"Connecting {label(client)} ...")
         try:
             result = client_setup.setup_client(client, apply=True, server_command=server_command)
@@ -369,7 +388,7 @@ def apply_client_selection(
             failures.append(f"{client}: {exc}")
             emit("error", f"  failed: {exc}")
 
-    if not add and not remove:
+    if not target_list and not remove:
         emit("info", "No client changes to apply.")
 
     try:
@@ -380,7 +399,7 @@ def apply_client_selection(
     return ClientChangeOutcome(
         ok=not failures,
         connected=tuple(target_list),
-        added=tuple(add),
+        added=tuple(added),
         removed=tuple(remove),
         manual=tuple(manual),
         failures=tuple(failures),
