@@ -3,6 +3,7 @@ from __future__ import annotations
 from neo_localmcp.installer.wizard import live_backend, preview_backend
 from neo_localmcp.installer.wizard.backend import (
     OP_INSTALL,
+    OP_REINSTALL,
     OP_UNINSTALL,
     WizardBackend,
     WizardState,
@@ -187,7 +188,9 @@ def test_console_embed_phase_picks_and_disables(tmp_path, monkeypatch):
 
     # nomic-embed-text:latest is entry among the fake installed models; drive a pick then a disable.
     info = backend.ollama_info()
-    embed_index = info.installed_models.index("nomic-embed-text:latest") + 1
+    combined = [name for name, _installed in info.recommendations.get("embed", ())]
+    combined += list(info.installed_models)
+    embed_index = combined.index("nomic-embed-text:latest") + 1
 
     replies = iter([str(embed_index)])
     monkeypatch.setattr(ConsoleWizard, "_input", lambda self, prompt: next(replies))
@@ -237,6 +240,202 @@ def test_isolated_app_home_actually_redirects_in_process_config_writes(isolated_
     assert resolved != config._INITIAL_CONFIG_PATH
 
 
+# --- #103: client-selection parity across install/reinstall/uninstall ------
+
+def test_reinstall_now_offers_its_own_client_phase(tmp_path, monkeypatch):
+    """Reinstall used to skip client selection entirely ('kept as-is'); it now
+    gets the same _phase_clients screen as Install/Manage-clients, defaulted
+    to the currently-registered set."""
+    from neo_localmcp.installer.wizard.console import ConsoleWizard
+
+    monkeypatch.setenv("NEO_LOCALMCP_WIZARD_PREVIEW_STATE", "healthy")
+    backend = _isolated_preview_backend(tmp_path, monkeypatch)
+    backend._registered = ["claude-code"]
+    wizard = ConsoleWizard(backend, fake=True)
+    wizard.state.operation = OP_REINSTALL
+
+    monkeypatch.setattr(ConsoleWizard, "_input", lambda self, prompt: "")  # accept default
+    wizard._phase_clients()
+
+    assert wizard.state.selected_clients == ["claude-code"]
+    assert wizard._clients_chosen is True
+
+
+def test_uninstall_client_phase_skipped_unless_detach_only(tmp_path, monkeypatch):
+    import pytest
+
+    from neo_localmcp.installer.wizard.console import ConsoleWizard, _Skip
+
+    backend = _isolated_preview_backend(tmp_path, monkeypatch)
+    wizard = ConsoleWizard(backend, fake=True)
+    wizard.state.operation = OP_UNINSTALL
+    wizard.state.client_detach_only = False
+
+    called = []
+    monkeypatch.setattr(ConsoleWizard, "_input", lambda self, prompt: called.append(prompt) or "")
+    with pytest.raises(_Skip):
+        wizard._phase_clients()
+
+    assert called == []
+    assert wizard.state.selected_clients == []
+
+
+def test_uninstall_scope_phase_sets_detach_only(tmp_path, monkeypatch):
+    from neo_localmcp.installer.wizard.console import ConsoleWizard
+
+    backend = _isolated_preview_backend(tmp_path, monkeypatch)
+    wizard = ConsoleWizard(backend, fake=True)
+    wizard.state.operation = OP_UNINSTALL
+
+    monkeypatch.setattr(ConsoleWizard, "_input", lambda self, prompt: "2")  # detach-only
+    wizard._phase_uninstall_scope()
+    assert wizard.state.client_detach_only is True
+
+
+def test_uninstall_mode_and_wipe_confirm_skipped_when_detach_only(tmp_path, monkeypatch):
+    import pytest
+
+    from neo_localmcp.installer.wizard.console import ConsoleWizard, _Skip
+
+    backend = _isolated_preview_backend(tmp_path, monkeypatch)
+    wizard = ConsoleWizard(backend, fake=True)
+    wizard.state.operation = OP_UNINSTALL
+    wizard.state.client_detach_only = True
+
+    prompts = []
+    monkeypatch.setattr(ConsoleWizard, "_input", lambda self, prompt: prompts.append(prompt) or "")
+    with pytest.raises(_Skip):
+        wizard._phase_uninstall_mode()
+    with pytest.raises(_Skip):
+        wizard._phase_uninstall_wipe_confirm()
+
+    assert prompts == []
+    assert wizard.state.full_wipe is False
+
+
+def test_uninstall_detach_only_selects_subset_and_preserves_runtime(tmp_path, monkeypatch):
+    """End-to-end preview walk of the new detach-only uninstall path: choosing
+    a client subset must not remove the runtime, only the selected clients."""
+    from neo_localmcp.installer.wizard.console import ConsoleWizard
+
+    monkeypatch.setenv("NEO_LOCALMCP_WIZARD_PREVIEW_STATE", "healthy")
+    backend = _isolated_preview_backend(tmp_path, monkeypatch)
+    backend._registered = ["claude-code", "codex"]
+    wizard = ConsoleWizard(backend, fake=True)
+    wizard.state.operation = OP_UNINSTALL
+
+    wizard.state.client_detach_only = True
+    codex_index = next(
+        i for i, o in enumerate(backend.client_options(), 1) if o.key == "codex"
+    )
+    monkeypatch.setattr(ConsoleWizard, "_input", lambda self, prompt: str(codex_index))
+    wizard._phase_clients()
+
+    assert wizard.state.selected_clients == ["codex"]
+
+    outcome = backend.run_operation(wizard.state, lambda _event: None)
+    assert outcome.ok is True
+    assert backend._registered == ["claude-code"]
+    assert backend.detect().is_installed  # runtime preserved
+
+
+def test_live_backend_install_marks_client_selection_explicit(isolated_app_home, monkeypatch):
+    # regression for #114/#112: an install-branch omission left client_selection_explicit
+    # False, so a wizard install with any leftover managed-root state silently snapshot
+    # whatever was already on disk (nothing, on a broken/partial prior install) instead of
+    # actually registering the user's chosen clients.
+    from neo_localmcp.installer.wizard import live_backend
+    from neo_localmcp.installer.types import Operation, OperationResult, OperationStatus
+
+    backend = live_backend.LiveBackend()
+    captured = {}
+
+    def fake_install(context, **kwargs):
+        captured["selected_clients"] = list(context.selected_clients)
+        captured["explicit"] = context.client_selection_explicit
+        return OperationResult(Operation.INSTALL, OperationStatus.SUCCEEDED, (), ())
+
+    monkeypatch.setattr(live_backend, "install", fake_install)
+    monkeypatch.setattr(backend, "_build_desktop_bundle", lambda _emit: None)
+
+    outcome = backend.run_operation(
+        WizardState(operation=OP_INSTALL, selected_clients=["claude-code"]), lambda _event: None,
+    )
+
+    assert outcome.ok is True
+    assert captured == {"selected_clients": ["claude-code"], "explicit": True}
+
+
+def test_live_backend_reinstall_marks_client_selection_explicit(isolated_app_home, monkeypatch):
+    from neo_localmcp.installer.wizard import live_backend
+    from neo_localmcp.installer.types import Operation, OperationResult, OperationStatus
+
+    backend = live_backend.LiveBackend()
+    captured = {}
+
+    def fake_reinstall(context):
+        captured["selected_clients"] = list(context.selected_clients)
+        captured["explicit"] = context.client_selection_explicit
+        return OperationResult(Operation.REINSTALL, OperationStatus.SUCCEEDED, (), ())
+
+    monkeypatch.setattr(live_backend, "reinstall", fake_reinstall)
+    monkeypatch.setattr(backend, "_build_desktop_bundle", lambda _emit: None)
+
+    outcome = backend.run_operation(
+        WizardState(operation=OP_REINSTALL, selected_clients=["codex"]), lambda _event: None,
+    )
+
+    assert outcome.ok is True
+    assert captured == {"selected_clients": ["codex"], "explicit": True}
+
+
+def test_live_backend_uninstall_detach_only_marks_explicit_selection(isolated_app_home, monkeypatch):
+    from neo_localmcp.installer.wizard import live_backend
+    from neo_localmcp.installer.types import Operation, OperationResult, OperationStatus
+
+    backend = live_backend.LiveBackend()
+    captured = {}
+
+    def fake_uninstall(context, **kwargs):
+        captured["selected_clients"] = list(context.selected_clients)
+        captured["explicit"] = context.client_selection_explicit
+        return OperationResult(Operation.UNINSTALL, OperationStatus.SUCCEEDED, (), ())
+
+    monkeypatch.setattr(live_backend, "uninstall", fake_uninstall)
+
+    outcome = backend.run_operation(
+        WizardState(
+            operation=OP_UNINSTALL, client_detach_only=True, selected_clients=["claude-code"],
+        ),
+        lambda _event: None,
+    )
+
+    assert outcome.ok is True
+    assert captured == {"selected_clients": ["claude-code"], "explicit": True}
+
+
+def test_live_backend_full_uninstall_does_not_mark_explicit_selection(isolated_app_home, monkeypatch):
+    from neo_localmcp.installer.wizard import live_backend
+    from neo_localmcp.installer.types import Operation, OperationResult, OperationStatus
+
+    backend = live_backend.LiveBackend()
+    captured = {}
+
+    def fake_uninstall(context, **kwargs):
+        captured["selected_clients"] = list(context.selected_clients)
+        captured["explicit"] = context.client_selection_explicit
+        return OperationResult(Operation.UNINSTALL, OperationStatus.SUCCEEDED, (), ())
+
+    monkeypatch.setattr(live_backend, "uninstall", fake_uninstall)
+
+    outcome = backend.run_operation(
+        WizardState(operation=OP_UNINSTALL, client_detach_only=False), lambda _event: None,
+    )
+
+    assert outcome.ok is True
+    assert captured == {"selected_clients": [], "explicit": False}
+
+
 def test_confirm_phase_asks_a_single_default_yes_question_no_dry_run_prompt(tmp_path, monkeypatch):
     """The interactive review-and-confirm page used to ask two questions
     (a 'Preview only (dry run)?' toggle, then a separate proceed question) --
@@ -261,6 +460,120 @@ def test_confirm_phase_asks_a_single_default_yes_question_no_dry_run_prompt(tmp_
     assert "dry run" not in prompts[0].lower()
     assert "preview only" not in prompts[0].lower()
     assert wizard.state.dry_run is False
+
+
+# --- #101: confirm-page pull reminder for not-yet-installed models --------
+
+def test_confirm_shows_no_pull_warning_when_all_selected_models_installed(tmp_path, monkeypatch, capsys):
+    from neo_localmcp.installer.wizard.console import ConsoleWizard
+
+    backend = _isolated_preview_backend(tmp_path, monkeypatch)
+    wizard = ConsoleWizard(backend, fake=True)
+    wizard.state.operation = OP_INSTALL
+    wizard.state.configure_ollama = True
+    wizard.state.fast_model = "qwen3:8b"
+    wizard.state.summary_model = "qwen3-coder:30b"
+    wizard.state.embed_model = ""  # disabled
+
+    monkeypatch.setattr(ConsoleWizard, "_input", lambda self, prompt: "")
+    wizard._phase_confirm()
+
+    out = capsys.readouterr().out
+    assert "ollama pull" not in out
+    assert "not pulled" not in out.lower()
+
+
+def test_confirm_shows_pull_warning_listing_exactly_the_missing_models(tmp_path, monkeypatch, capsys):
+    from neo_localmcp.installer.wizard.console import ConsoleWizard
+
+    backend = _isolated_preview_backend(tmp_path, monkeypatch)
+    wizard = ConsoleWizard(backend, fake=True)
+    wizard.state.operation = OP_INSTALL
+    wizard.state.configure_ollama = True
+    wizard.state.fast_model = "qwen3:8b"  # installed in the fake list
+    wizard.state.summary_model = "brand-new-model:latest"  # not installed
+    wizard.state.embed_model = "another-missing-model"  # not installed
+
+    monkeypatch.setattr(ConsoleWizard, "_input", lambda self, prompt: "")
+    wizard._phase_confirm()
+
+    out = capsys.readouterr().out
+    assert "ollama pull qwen3:8b" not in out
+    assert "ollama pull brand-new-model:latest" in out
+    assert "ollama pull another-missing-model" in out
+
+
+def test_confirm_pull_warning_absent_when_ollama_config_untouched(tmp_path, monkeypatch, capsys):
+    """configure_ollama False -> _missing_pull_models() must return [] even if
+    stale fast/summary/embed_model values happen to be set on state."""
+    from neo_localmcp.installer.wizard.console import ConsoleWizard
+
+    backend = _isolated_preview_backend(tmp_path, monkeypatch)
+    wizard = ConsoleWizard(backend, fake=True)
+    wizard.state.operation = OP_INSTALL
+    wizard.state.configure_ollama = False
+    wizard.state.fast_model = "brand-new-model:latest"
+
+    monkeypatch.setattr(ConsoleWizard, "_input", lambda self, prompt: "")
+    wizard._phase_confirm()
+
+    out = capsys.readouterr().out
+    assert "ollama pull" not in out
+
+
+def test_path_phase_defaults_to_adding_managed_cli_directory(tmp_path, monkeypatch):
+    from neo_localmcp.installer.wizard.console import ConsoleWizard
+
+    backend = _isolated_preview_backend(tmp_path, monkeypatch)
+    wizard = ConsoleWizard(backend, fake=True)
+    wizard.state.operation = OP_INSTALL
+
+    monkeypatch.setattr(ConsoleWizard, "_input", lambda self, prompt: "")
+    wizard._phase_path()
+
+    assert wizard.state.add_to_path is True
+    assert any(label == "PATH" and "enabled" in value for label, value in wizard.summary)
+
+
+def test_live_backend_updates_path_only_after_successful_opt_in(isolated_app_home, monkeypatch):
+    from neo_localmcp.installer.path import PathUpdate
+    from neo_localmcp.installer.types import Operation, OperationResult, OperationStatus
+
+    backend = live_backend.LiveBackend()
+    updates = []
+    result = OperationResult(Operation.INSTALL, OperationStatus.SUCCEEDED, (), ())
+    monkeypatch.setattr(live_backend, "install", lambda *_args, **_kwargs: result)
+    monkeypatch.setattr(backend, "_build_desktop_bundle", lambda _emit: None)
+    monkeypatch.setattr(
+        live_backend,
+        "add_to_path",
+        lambda paths: updates.append(paths) or PathUpdate(True, paths.home / ".zshrc"),
+    )
+
+    outcome = backend.run_operation(
+        WizardState(operation=OP_INSTALL, add_to_path=True), lambda _event: None,
+    )
+
+    assert outcome.ok is True
+    assert updates == [backend._paths]
+
+
+def test_live_backend_leaves_path_unchanged_when_wizard_opt_outs(isolated_app_home, monkeypatch):
+    from neo_localmcp.installer.types import Operation, OperationResult, OperationStatus
+
+    backend = live_backend.LiveBackend()
+    updates = []
+    result = OperationResult(Operation.INSTALL, OperationStatus.SUCCEEDED, (), ())
+    monkeypatch.setattr(live_backend, "install", lambda *_args, **_kwargs: result)
+    monkeypatch.setattr(backend, "_build_desktop_bundle", lambda _emit: None)
+    monkeypatch.setattr(live_backend, "add_to_path", lambda paths: updates.append(paths))
+
+    outcome = backend.run_operation(
+        WizardState(operation=OP_INSTALL, add_to_path=False), lambda _event: None,
+    )
+
+    assert outcome.ok is True
+    assert updates == []
 
 
 # --- Ollama URL validation + model-kind labeling (pure functions) ----------
@@ -365,11 +678,13 @@ def test_pick_model_uses_the_colored_kind_aware_table(tmp_path, monkeypatch):
     backend = _isolated_preview_backend(tmp_path, monkeypatch)
     wizard = ConsoleWizard(backend, fake=True)
     info = backend.ollama_info()
-    target_index = info.installed_models.index("qwen3-coder:30b") + 1
+    combined = [name for name, _installed in info.recommendations.get("fast", ())]
+    combined += list(info.installed_models)
+    target_index = combined.index("qwen3-coder:30b") + 1
 
     replies = iter([str(target_index)])
     monkeypatch.setattr(ConsoleWizard, "_input", lambda self, prompt: next(replies))
-    chosen = wizard._pick_model("fast model", ["hint"], info, current="qwen3:8b")
+    chosen = wizard._pick_model("fast model", ["hint"], info, current="qwen3:8b", role="fast")
     assert chosen == "qwen3-coder:30b"
 
 
@@ -403,7 +718,7 @@ def test_pick_model_default_skips_embed_only_model_when_current_not_installed(tm
 
     replies = iter([""])  # accept whatever the default is
     monkeypatch.setattr(ConsoleWizard, "_input", lambda self, prompt: next(replies))
-    chosen = wizard._pick_model("summary model", ["hint"], info, current="qwen3-coder:30b")
+    chosen = wizard._pick_model("summary model", ["hint"], info, current="qwen3-coder:30b", role="summary")
     assert chosen != "bge-m3:latest"
     assert "embedding" not in info.model_capabilities.get(chosen, ())
 
@@ -427,3 +742,73 @@ def test_format_model_table_marks_the_default_row_when_not_current(tmp_path, mon
     assert "\033[" in default_row  # colored
     assert "default" in default_row.lower()
     assert "\033[" not in embed_row
+
+
+# --- #101: recommended-models section on the model-picker pages ------------
+
+def test_fast_model_picker_shows_recommended_section_with_markers(tmp_path, monkeypatch, capsys):
+    """The RECOMMENDED FOR YOUR SETUP section must appear above ALL INSTALLED
+    MODELS, marking each candidate installed ([x] available) or not ([ ] not
+    pulled), while the full installed list stays unabridged below it."""
+    from neo_localmcp.installer.wizard.console import ConsoleWizard
+
+    backend = _isolated_preview_backend(tmp_path, monkeypatch)
+    wizard = ConsoleWizard(backend, fake=True)
+    info = backend.ollama_info()
+    recs = info.recommendations["fast"]
+    assert recs, "fixture must exercise a role with at least one recommendation"
+
+    monkeypatch.setattr(ConsoleWizard, "_input", lambda self, prompt: "1")
+    wizard._pick_model("fast model", ["hint"], info, current="qwen3:8b", role="fast")
+
+    out = capsys.readouterr().out
+    assert "RECOMMENDED FOR YOUR SETUP" in out
+    assert "ALL INSTALLED MODELS" in out
+    assert out.index("RECOMMENDED FOR YOUR SETUP") < out.index("ALL INSTALLED MODELS")
+    for name, installed in recs:
+        assert name in out
+        marker = "[x] available" if installed else "[ ] not pulled"
+        assert marker in out
+    # the full installed list stays unabridged below the recommended section
+    for model in info.installed_models:
+        assert model in out
+
+
+def test_embed_model_picker_shows_recommended_section_before_installed_list(tmp_path, monkeypatch, capsys):
+    from neo_localmcp.installer.wizard.console import ConsoleWizard
+
+    backend = _isolated_preview_backend(tmp_path, monkeypatch)
+    wizard = ConsoleWizard(backend, fake=True)
+    wizard.state.configure_ollama = True
+    info = backend.ollama_info()
+    recs = info.recommendations["embed"]
+    assert recs
+
+    monkeypatch.setattr(ConsoleWizard, "_input", lambda self, prompt: "0")
+    wizard._phase_ollama_embed()
+
+    out = capsys.readouterr().out
+    assert "RECOMMENDED FOR YOUR SETUP" in out
+    assert "ALL INSTALLED MODELS" in out
+    for model in info.installed_models:
+        assert model in out
+
+
+def test_pick_model_recommended_choice_can_select_an_uninstalled_candidate(tmp_path, monkeypatch):
+    """A recommended-but-not-installed candidate must still be selectable by its
+    numbered choice, even though it never appears in installed_models."""
+    from neo_localmcp.installer.wizard.console import ConsoleWizard
+
+    backend = _isolated_preview_backend(tmp_path, monkeypatch)
+    wizard = ConsoleWizard(backend, fake=True)
+    info = backend.ollama_info()
+    recs = info.recommendations["embed"]  # mxbai-embed-large isn't in the fake installed list
+    not_installed_index = next(
+        i for i, (_name, installed) in enumerate(recs, start=1) if not installed
+    )
+    expected_name = recs[not_installed_index - 1][0]
+    assert expected_name not in info.installed_models
+
+    monkeypatch.setattr(ConsoleWizard, "_input", lambda self, prompt: str(not_installed_index))
+    chosen = wizard._pick_model("embedding model", ["hint"], info, current="", role="embed")
+    assert chosen == expected_name

@@ -57,7 +57,7 @@ def process_registry_dir() -> Path:
 
 TEXT_EXTENSIONS = [
     ".cs", ".xaml", ".csproj", ".sln", ".json", ".xml", ".md", ".txt", ".props", ".targets",
-    ".config", ".yml", ".yaml", ".toml", ".ini", ".env", ".py", ".ps1", ".bat", ".cmd", ".sh",
+    ".config", ".yml", ".yaml", ".toml", ".ini", ".py", ".ps1", ".bat", ".cmd", ".sh",
     ".js", ".jsx", ".ts", ".tsx", ".vue", ".svelte", ".html", ".css", ".scss", ".sql",
     ".go", ".rs", ".java", ".kt", ".kts", ".swift", ".rb", ".php", ".dockerfile", "Dockerfile",
 ]
@@ -102,7 +102,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
         ],
         # user surface for adding excludes -- exclude_dirs above is code-owned and rebuilt from defaults on every load() (won't preserve hand-edits); put custom excludes here instead, unioned on top
         "extra_exclude_dirs": [],
+        # code-owned, same rule as exclude_dirs -- a security-relevant removal (e.g. dropping ".env")
+        # must reach every existing install automatically, not just fresh ones; use extra_include_extensions
+        # below to add your own on top
         "include_extensions": TEXT_EXTENSIONS,
+        "extra_include_extensions": [],
     },
     "memory": {
         "db_path": str(DEFAULT_DB_PATH),
@@ -164,6 +168,14 @@ def load_config() -> dict[str, Any]:
     code_owned = list(_effective_default_config()["repo"]["exclude_dirs"])
     extra = repo_cfg.get("extra_exclude_dirs") or []
     repo_cfg["exclude_dirs"] = code_owned + [d for d in extra if d not in code_owned]
+    # include_extensions is code-owned for the same reason: a security-relevant removal (dropping
+    # ".env" after it was found to leak real secret content into the shared index) must reach every
+    # existing install automatically, not just fresh ones -- a stale persisted list must never keep
+    # indexing something the current code default no longer allows. Rebuilt every load, unioned with
+    # repo.extra_include_extensions for user additions.
+    code_owned_ext = list(_effective_default_config()["repo"]["include_extensions"])
+    extra_ext = repo_cfg.get("extra_include_extensions") or []
+    repo_cfg["include_extensions"] = code_owned_ext + [e for e in extra_ext if e not in code_owned_ext]
     cfg["identity"] = IDENTITY.as_dict()
     return cfg
 

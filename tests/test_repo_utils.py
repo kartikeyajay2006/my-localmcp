@@ -161,6 +161,67 @@ def test_dirs_that_merely_contain_venv_substring_are_not_excluded(tmp_path, isol
     assert complete is True
 
 
+def test_dotenv_file_is_not_indexed(tmp_path, isolated_config):
+    """Regression: `.env` matched `repo.include_extensions` by filename (not a real
+    extension), so its real content -- routinely real secrets -- was indexed into
+    the shared sqlite memory. Reproduced live indexing a real neo-notion-agent
+    `.env` during 1.2.1 manual verification; the leaked content was purged from
+    the live DB and this default removed the same day."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "real.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (repo / ".env").write_text("API_KEY=super-secret-value\n", encoding="utf-8")
+
+    found, eligible, complete = utils.scan_repo_files(repo)
+    rels = {utils.rel(p, repo) for p in found}
+
+    assert rels == {"real.py"}
+    assert eligible == 1
+    assert complete is True
+
+
+def test_stale_persisted_include_extensions_cannot_reintroduce_dotenv(tmp_path, isolated_config):
+    """A persisted config written before `.env` was removed from the code default
+    must not keep indexing it -- include_extensions is code-owned for the same
+    reason exclude_dirs is (#41's precedent): a security-relevant removal has to
+    reach every existing install automatically, not just fresh ones."""
+    stale = copy.deepcopy(config.DEFAULT_CONFIG)
+    stale["repo"]["include_extensions"] = list(stale["repo"]["include_extensions"]) + [".env"]
+    _write_persisted_config(stale)
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "real.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (repo / ".env").write_text("API_KEY=super-secret-value\n", encoding="utf-8")
+
+    found, eligible, complete = utils.scan_repo_files(repo)
+    rels = {utils.rel(p, repo) for p in found}
+
+    assert rels == {"real.py"}
+    assert eligible == 1
+    assert complete is True
+
+
+def test_extra_include_extensions_are_added_to_code_owned_extensions(tmp_path, isolated_config):
+    """Users add their own indexable extensions via `repo.extra_include_extensions`;
+    these stack on top of the code-owned default set rather than replacing it."""
+    cfg = copy.deepcopy(config.DEFAULT_CONFIG)
+    cfg["repo"]["extra_include_extensions"] = [".proto"]
+    _write_persisted_config(cfg)
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "real.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (repo / "schema.proto").write_text("message Foo {}\n", encoding="utf-8")
+
+    found, eligible, complete = utils.scan_repo_files(repo)
+    rels = {utils.rel(p, repo) for p in found}
+
+    assert rels == {"real.py", "schema.proto"}
+    assert eligible == 2
+    assert complete is True
+
+
 def test_rg_search_fallback_interprets_the_query_as_a_regex(tmp_path, isolated_config, monkeypatch):
     """Regression: on a host without ripgrep on PATH (e.g. GitHub's macos-latest
     CI runner has no rg preinstalled, unlike the windows-latest runner used
