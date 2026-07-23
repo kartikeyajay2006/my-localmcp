@@ -339,7 +339,8 @@ class LiveBackend:
             details.extend(extra_details)
             return OperationOutcome(
                 ok=True, status=status, title=f"{op.capitalize()} succeeded.",
-                detail_lines=tuple(details), next_command="neo-localmcp doctor",
+                detail_lines=tuple(details),
+                next_command=None if op == OP_UNINSTALL else "neo-localmcp doctor",
             )
         details = list(result.warnings) or ["See the log for details."]
         return OperationOutcome(
