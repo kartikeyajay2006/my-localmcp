@@ -60,6 +60,47 @@ def test_summary_is_replaced_and_invalidated_on_source_change(tmp_path, isolated
     assert row["summary_source_hash"] is None
 
 
+def test_record_change_preserves_summary_when_content_is_unchanged(tmp_path, isolated_config):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    source = repo / "module.py"
+    source.write_text("def value():\n    return 1\n", encoding="utf-8")
+    repo_memory.index_repo(repo)
+    repo_memory.store_summary("module.py", "cached summary", "model-a", "prompt-v1", repo)
+
+    repo_memory.record_change("no-op", ["module.py"], repo)
+
+    conn = repo_memory.connect()
+    rid = repo_memory.repo_id(repo)
+    row = conn.execute(
+        "SELECT purpose_summary, summary_source_hash FROM files WHERE repo_id=? AND path='module.py'",
+        (rid,),
+    ).fetchone()
+    assert row["purpose_summary"] == "cached summary"
+    assert row["summary_source_hash"] is not None
+
+
+def test_record_change_invalidates_summary_when_content_changed(tmp_path, isolated_config):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    source = repo / "module.py"
+    source.write_text("def value():\n    return 1\n", encoding="utf-8")
+    repo_memory.index_repo(repo)
+    repo_memory.store_summary("module.py", "cached summary", "model-a", "prompt-v1", repo)
+    source.write_text("def value():\n    return 2\n", encoding="utf-8")
+
+    repo_memory.record_change("real edit", ["module.py"], repo)
+
+    conn = repo_memory.connect()
+    rid = repo_memory.repo_id(repo)
+    row = conn.execute(
+        "SELECT purpose_summary, summary_source_hash FROM files WHERE repo_id=? AND path='module.py'",
+        (rid,),
+    ).fetchone()
+    assert row["purpose_summary"] is None
+    assert row["summary_source_hash"] is None
+
+
 def test_file_context_line_count_is_total_not_radius(tmp_path, isolated_config):
     repo = tmp_path / "repo"
     repo.mkdir()
