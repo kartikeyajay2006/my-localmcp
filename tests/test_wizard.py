@@ -433,6 +433,7 @@ def test_live_backend_full_uninstall_does_not_mark_explicit_selection(isolated_a
     )
 
     assert outcome.ok is True
+    assert outcome.next_command is None
     assert captured == {"selected_clients": [], "explicit": False}
 
 
