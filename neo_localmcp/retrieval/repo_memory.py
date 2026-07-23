@@ -243,11 +243,11 @@ def index_file(conn: sqlite3.Connection, root: Path, path: Path, rid: str | None
             modified_at=excluded.modified_at,
             line_count=excluded.line_count,
             last_indexed_at=excluded.last_indexed_at,
-            purpose_summary=NULL,
-            last_summarized_at=NULL,
-            summary_source_hash=NULL,
-            summary_model=NULL,
-            summary_prompt_version=NULL
+            purpose_summary=CASE WHEN files.sha256=excluded.sha256 THEN files.purpose_summary ELSE NULL END,
+            last_summarized_at=CASE WHEN files.sha256=excluded.sha256 THEN files.last_summarized_at ELSE NULL END,
+            summary_source_hash=CASE WHEN files.sha256=excluded.sha256 THEN files.summary_source_hash ELSE NULL END,
+            summary_model=CASE WHEN files.sha256=excluded.sha256 THEN files.summary_model ELSE NULL END,
+            summary_prompt_version=CASE WHEN files.sha256=excluded.sha256 THEN files.summary_prompt_version ELSE NULL END
         """,
         (rid, relative, lang, stat.st_size, current_hash, stat.st_mtime, line_count, ts),
     )
