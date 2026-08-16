@@ -4,7 +4,7 @@ import json
 import zipfile
 from pathlib import Path
 
-from neo_localmcp.installer import mcpb
+from my_localmcp.installer import mcpb
 
 
 def _make_source_root(tmp_path: Path, *, version: str = "9.9.9") -> Path:
@@ -13,13 +13,13 @@ def _make_source_root(tmp_path: Path, *, version: str = "9.9.9") -> Path:
     staging = root / "packages" / "claude-desktop" / "mcpb"
     staging.mkdir(parents=True)
     (staging / "manifest.json").write_text(
-        json.dumps({"manifest_version": "0.4", "name": "neo-localmcp", "version": version}),
+        json.dumps({"manifest_version": "0.4", "name": "my-localmcp", "version": version}),
         encoding="utf-8",
     )
-    (staging / "server.py").write_text("from neo_localmcp.server import main\n", encoding="utf-8")
+    (staging / "server.py").write_text("from my_localmcp.server import main\n", encoding="utf-8")
     (staging / ".mcpbignore").write_text(".venv/\n__pycache__/\n*.pyc\ntests/\n", encoding="utf-8")
 
-    pkg = root / "neo_localmcp"
+    pkg = root / "my_localmcp"
     pkg.mkdir()
     (pkg / "__init__.py").write_text(f'__version__ = "{version}"\n', encoding="utf-8")
     (pkg / "server.py").write_text("def main():\n    pass\n", encoding="utf-8")
@@ -33,8 +33,8 @@ def _make_source_root(tmp_path: Path, *, version: str = "9.9.9") -> Path:
     (pkg / "tests" / "test_inner.py").write_text("assert True\n", encoding="utf-8")
     (pkg / ".DS_Store").write_bytes(b"\x00junk")
 
-    (root / "README.md").write_text("# neo-localmcp\n", encoding="utf-8")
-    (root / "pyproject.toml").write_text('[project]\nname = "neo-localmcp"\n', encoding="utf-8")
+    (root / "README.md").write_text("# my-localmcp\n", encoding="utf-8")
+    (root / "pyproject.toml").write_text('[project]\nname = "my-localmcp"\n', encoding="utf-8")
     return root
 
 
@@ -45,7 +45,7 @@ def _target_dir(root: Path) -> Path:
 def test_build_writes_versioned_bundle(tmp_path):
     root = _make_source_root(tmp_path, version="9.9.9")
     written = mcpb.build_mcpb(root, "9.9.9")
-    assert written == _target_dir(root) / "neo-localmcp-v9.9.9.mcpb"
+    assert written == _target_dir(root) / "my-localmcp-v9.9.9.mcpb"
     assert written.exists()
 
 
@@ -59,8 +59,8 @@ def test_bundle_contents_match_layout(tmp_path):
     # Top-level staging + repo-root inputs are present.
     assert {"manifest.json", "server.py", "README.md", "pyproject.toml"} <= names
     # Package tree is included.
-    assert "neo_localmcp/__init__.py" in names
-    assert "neo_localmcp/installer/__init__.py" in names
+    assert "my_localmcp/__init__.py" in names
+    assert "my_localmcp/installer/__init__.py" in names
     # Manifest is copied faithfully.
     assert manifest["version"] == "9.9.9"
     # .mcpbignore rules are honored.
@@ -78,25 +78,25 @@ def test_second_build_does_not_overwrite(tmp_path):
     first = mcpb.build_mcpb(root, "9.9.9")
     second = mcpb.build_mcpb(root, "9.9.9")
     third = mcpb.build_mcpb(root, "9.9.9")
-    assert first == _target_dir(root) / "neo-localmcp-v9.9.9.mcpb"
-    assert second == _target_dir(root) / "neo-localmcp-v9.9.9-2.mcpb"
-    assert third == _target_dir(root) / "neo-localmcp-v9.9.9-3.mcpb"
+    assert first == _target_dir(root) / "my-localmcp-v9.9.9.mcpb"
+    assert second == _target_dir(root) / "my-localmcp-v9.9.9-2.mcpb"
+    assert third == _target_dir(root) / "my-localmcp-v9.9.9-3.mcpb"
     # All three coexist; nothing was overwritten.
     assert first.exists() and second.exists() and third.exists()
 
 
 def test_returns_none_without_staging(tmp_path):
     root = tmp_path / "not-a-checkout"
-    (root / "neo_localmcp").mkdir(parents=True)
-    (root / "neo_localmcp" / "__init__.py").write_text("", encoding="utf-8")
+    (root / "my_localmcp").mkdir(parents=True)
+    (root / "my_localmcp" / "__init__.py").write_text("", encoding="utf-8")
     assert mcpb.build_mcpb(root, "9.9.9") is None
 
 
 # -- wizard hook ---------------------------------------------------------- #
 
-from neo_localmcp.installer import Operation, OperationStatus  # noqa: E402
-from neo_localmcp.installer.wizard import live_backend as rb  # noqa: E402
-from neo_localmcp.installer.wizard.backend import WizardState  # noqa: E402
+from my_localmcp.installer import Operation, OperationStatus  # noqa: E402
+from my_localmcp.installer.wizard import live_backend as rb  # noqa: E402
+from my_localmcp.installer.wizard.backend import WizardState  # noqa: E402
 
 
 class _Result:
@@ -117,12 +117,12 @@ def test_wizard_install_surfaces_built_bundle(monkeypatch):
     backend = rb.LiveBackend()
     monkeypatch.setattr(rb, "install", lambda ctx, clean: _Result("install"))
     calls = []
-    monkeypatch.setattr(rb, "build_mcpb", lambda root, version: calls.append((root, version)) or Path("/repo/neo-localmcp-v9.9.9.mcpb"))
+    monkeypatch.setattr(rb, "build_mcpb", lambda root, version: calls.append((root, version)) or Path("/repo/my-localmcp-v9.9.9.mcpb"))
 
     outcome, events = _run(backend, WizardState(operation="install"))
 
     assert calls, "build_mcpb was not called on a successful install"
-    assert any("neo-localmcp-v9.9.9.mcpb" in line for line in outcome.detail_lines)
+    assert any("my-localmcp-v9.9.9.mcpb" in line for line in outcome.detail_lines)
     assert any("Built Claude Desktop bundle" in e.message for e in events)
 
 

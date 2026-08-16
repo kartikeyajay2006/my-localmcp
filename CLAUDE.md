@@ -4,7 +4,7 @@ Guidance for Claude Code (or any agent) working in this repository.
 
 ## What this is
 
-`neo-localmcp` is a local MCP server that gives Claude/Codex deterministic,
+`my-localmcp` is a local MCP server that gives Claude/Codex deterministic,
 hash-aware repository context (ranked source excerpts, symbols, tests) so the
 primary model can skip repeated broad search/reads. Ollama is optional local
 preprocessing (ranking/summarization) layered on top — never authoritative, never
@@ -35,43 +35,43 @@ python setup.py uninstall
 
 # Verification (run after any code change)
 python -m pytest -q
-python -m compileall -q neo_localmcp setup.py
+python -m compileall -q my_localmcp setup.py
 
 # Manual smoke test
-neo-localmcp doctor
-neo-localmcp ollama status
-neo-localmcp context "debug repository indexing: index_repo, refresh" --repo-root . --token-budget 1000
+my-localmcp doctor
+my-localmcp ollama status
+my-localmcp context "debug repository indexing: index_repo, refresh" --repo-root . --token-budget 1000
 ```
 
-## Module map (`neo_localmcp/`)
+## Module map (`my_localmcp/`)
 
-- `mcp/` — the MCP server surface: `server.py` (FastMCP entrypoint; registers the tools with `mcp_server_lifecycle.py` and runs the stdio loop — the `neo-localmcp-server` console script is `neo_localmcp.mcp.server:main`), `context_worker.py` (the isolated subprocess runner for `prepare_context`), and the tool bodies split by category:
+- `mcp/` — the MCP server surface: `server.py` (FastMCP entrypoint; registers the tools with `mcp_server_lifecycle.py` and runs the stdio loop — the `my-localmcp-server` console script is `my_localmcp.mcp.server:main`), `context_worker.py` (the isolated subprocess runner for `prepare_context`), and the tool bodies split by category:
   - `mcp/system.py` — status/lifecycle tools: `init`, `status`, `where`, `model_status`, `doctor`, `repo_index`/`repo_reindex`/`repo_refresh`, `reset_repo`/`reset_all`, `repo_lookup`.
   - `mcp/memory.py` — the context-retrieval pipeline: `prepare_context`/`context_prepare`, `file_context`/`file_excerpts`, `record_change`, `test_determinism`, plus the scoring/ranking/formatting internals that back them.
   - `mcp/ollama.py` — Ollama-facing tools: `set_ollama`, `ollama_status`, `ollama_ensure`, `ollama_control`.
   - `mcp/editing.py` — the two source-touching tools: `summarize_file` and `apply_unified_patch` (the only writer, and only via an exact developer-approved diff).
   - `mcp/_shared.py` — small helpers shared across the category modules (`json_out`, model-timing formatting, response-slimming); not a tool module itself, so no category imports another.
-- `runtime_cli.py` — CLI subcommands (`index`, `context`, `doctor`, `servers`, `stop`, `setup`, ...); `neo-localmcp` console script. Administration is CLI-only, never exposed as an MCP tool; imports the same `mcp/` tool bodies. Named `runtime_cli.py` (not `cli.py`) to read unambiguously alongside the installer CLI at `installer/cli.py`.
+- `runtime_cli.py` — CLI subcommands (`index`, `context`, `doctor`, `servers`, `stop`, `setup`, ...); `my-localmcp` console script. Administration is CLI-only, never exposed as an MCP tool; imports the same `mcp/` tool bodies. Named `runtime_cli.py` (not `cli.py`) to read unambiguously alongside the installer CLI at `installer/cli.py`.
 - `retrieval/` — the deterministic retrieval engine: `repo_memory.py` (SQLite repo/file/symbol index, `repo_fts`, the retrieval-boost implicit-feedback memory — `get_boost_map`/`record_task_query`/`record_retrieval_feedback` — and the optional `file_embeddings` semantic-rerank store, populated only when `ollama.embed_model` is set) and `query.py` (natural/hybrid task-string parsing into intent + strong/weak terms). Deterministic core; `mcp/memory.py` ranks against it, blending embeddings in only as an additive re-rank when they exist.
 - `ollama_client.py` — Ollama lifecycle (status/start/warm/ensure), bounded inference (`num_predict`) and bounded `embed()` (optional, non-blocking; skips cleanly when Ollama is down or `embed_model` unset), never auto-downloads models.
-- `mcp_server_lifecycle.py` — MCP **server process** registry + graceful-stop (`neo-localmcp stop`), used by `setup.py` before touching runtime files. Named to avoid colliding with `installer/`'s own "lifecycle" framing below — this file only supervises the running server process (PID registration, stop-file watch, clean exit), it never touches AI requests or the repo filesystem itself.
-- `ai_client_config.py` — registers and deregisters neo-localmcp for Claude Code / Claude Desktop / Codex (`setup_*`/`remove_*` per surface, plus `remove_client`/`remove_clients` dispatchers). Claude Desktop removal is detect-and-warn only — the extension itself is removed through Claude's own UI, not automated. Reads the slash-command templates from `templates/`.
-- `config.py` — single source of truth for `APP_DIR` (`~/.neo-localmcp` by default) and `config.yaml` defaults. Despite the extension, the on-disk content is JSON (legacy naming, kept for backward compatibility — see the `CONFIG_PATH` comment).
+- `mcp_server_lifecycle.py` — MCP **server process** registry + graceful-stop (`my-localmcp stop`), used by `setup.py` before touching runtime files. Named to avoid colliding with `installer/`'s own "lifecycle" framing below — this file only supervises the running server process (PID registration, stop-file watch, clean exit), it never touches AI requests or the repo filesystem itself.
+- `ai_client_config.py` — registers and deregisters my-localmcp for Claude Code / Claude Desktop / Codex (`setup_*`/`remove_*` per surface, plus `remove_client`/`remove_clients` dispatchers). Claude Desktop removal is detect-and-warn only — the extension itself is removed through Claude's own UI, not automated. Reads the slash-command templates from `templates/`.
+- `config.py` — single source of truth for `APP_DIR` (`~/.my-localmcp` by default) and `config.yaml` defaults. Despite the extension, the on-disk content is JSON (legacy naming, kept for backward compatibility — see the `CONFIG_PATH` comment).
 - `repo_utils.py` — low-level cross-cutting helpers (path safety, subprocess wrappers, symbol extraction, git info) shared by everything above.
 - `installer/` — the lifecycle package (path/process/state/verification machinery, `mcpb.py`'s bundle builder), now also home to both installer frontends: `cli.py` (the scriptable installer CLI, moved from the old top-level `setup_cli.py`) and `wizard/` (the guided terminal installer behind `setup_wizard.py` — plain, stdlib-only, full-screen *numbered* UI, no TUI toolkit; its `preview_backend.py`/`live_backend.py` are the two `WizardBackend` implementations). See `docs/` design specs for this package's internal submodule breakdown — that level of detail doesn't belong in this always-loaded file.
 - `benchmarker/` — retrieval-quality benchmarking: package `__init__.py` plus `queries/` (the query fixtures, e.g. `default.jsonl`) it runs against.
-- `templates/` — the `/neo-localmcp:*` slash-command markdown installed into Claude Code (package data read by `ai_client_config.py`).
-- `branding.py` / `neo.toml` — product naming constants (only place that should ever need to change if the product is renamed).
+- `templates/` — the `/my-localmcp:*` slash-command markdown installed into Claude Code (package data read by `ai_client_config.py`).
+- `branding.py` / `my.toml` — product naming constants (only place that should ever need to change if the product is renamed).
 
 ## Repo-wide conventions
 
-- **Version is defined once**, in `neo_localmcp/__init__.py`'s `__version__`. Every
+- **Version is defined once**, in `my_localmcp/__init__.py`'s `__version__`. Every
   release bumps it in lockstep with `pyproject.toml`'s `version` and
   `packages/claude-desktop/mcpb/manifest.json` — the three must always match.
 - **macOS and Windows are the currently supported platforms.** `setup.py` is the sole
   lifecycle policy surface. Linux support is deferred.
 - **Repository memory is centralized, not per-repo.** All indexed repos share one
-  `~/.neo-localmcp/repo-context.sqlite`, distinguished internally by `repo_id`
+  `~/.my-localmcp/repo-context.sqlite`, distinguished internally by `repo_id`
   (canonical root + git remote). A "wipe memory" action affects every indexed repo,
   not just the one you're standing in.
 - **Deterministic retrieval must never depend on Ollama.** Every Ollama-touching code
@@ -89,7 +89,7 @@ neo-localmcp context "debug repository indexing: index_repo, refresh" --repo-roo
 ## Code commenting standard
 
 Use concise developer comments when editing or generating code. The goal is
-better navigation for Neel and future maintainers, not more comments.
+better navigation for Kartikeya Yadav and future maintainers, not more comments.
 
 Functions may have up to three short comment lines that describe purpose,
 responsibility, inputs, outputs, or important constraints. Prefer compact

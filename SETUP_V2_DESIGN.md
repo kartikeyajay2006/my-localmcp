@@ -43,8 +43,8 @@ python setup.py --help
 
 Every command and subcommand supports `-h` and `--help` consistently.
 
-The installed executable is always named `neo-localmcp`. There is no `neo`
-alias. Installed `neo-localmcp` commands operate the MCP (`doctor`, `config`,
+The installed executable is always named `my-localmcp`. There is no `neo`
+alias. Installed `my-localmcp` commands operate the MCP (`doctor`, `config`,
 `stop`, context commands, and similar functions); they do not install,
 reinstall, or uninstall it.
 
@@ -56,16 +56,16 @@ The installer installs from the local checkout containing `setup.py`. Downloaded
 or remotely selected releases are outside the current scope.
 
 `setup.py` is a thin dispatcher. The testable implementation lives in focused
-modules under `neo_localmcp/installer/` rather than in one large script. The
+modules under `my_localmcp/installer/` rather than in one large script. The
 current PowerShell and shell installers are behavioral references, not the new
 architecture.
 
 ## Managed filesystem
 
-The canonical managed root is `~/.neo-localmcp/`:
+The canonical managed root is `~/.my-localmcp/`:
 
 ```text
-~/.neo-localmcp/
+~/.my-localmcp/
 |-- venv/       disposable managed runtime
 |-- memory/     durable retrieval and feedback memory
 |-- sqlite/     durable databases
@@ -97,7 +97,7 @@ Creates or updates the managed runtime and reuses existing durable data. When
 preserved data exists without a runtime, it prints:
 
 ```text
-Existing neo-localmcp memory detected. Reusing preserved memory/data.
+Existing my-localmcp memory detected. Reusing preserved memory/data.
 ```
 
 ### Reinstall
@@ -126,7 +126,7 @@ data and client-registration records remain available for a later install.
 python setup.py uninstall --delete-memory --yes
 ```
 
-Deletes the validated `~/.neo-localmcp/` root, including runtime, memory,
+Deletes the validated `~/.my-localmcp/` root, including runtime, memory,
 databases, configuration, client records, logs, and cache. A full wipe is never
 the default and requires interactive confirmation or explicit non-interactive
 flags.
@@ -148,7 +148,7 @@ Interactive use requires clear confirmation; non-interactive use requires
 Before replacing or removing the runtime, the lifecycle performs these steps:
 
 1. Mark the operation as in progress.
-2. Ask registered neo-localmcp servers to stop gracefully.
+2. Ask registered my-localmcp servers to stop gracefully.
 3. Unload only the Ollama models configured or recorded as used by Neo.
 4. Stop Neo-owned helpers such as `uv.exe`, Python children, launchers, and
    associated Windows console processes.
@@ -177,7 +177,7 @@ verification happen after replacement.
 ## Planned module boundaries
 
 ```text
-neo_localmcp/installer/
+my_localmcp/installer/
 |-- cli.py
 |-- paths.py
 |-- state.py
@@ -200,7 +200,7 @@ Install and reinstall are successful only after verifying all of the following:
 
 - The managed interpreter exists and is Python 3.12 or newer.
 - The installed package version matches the local checkout.
-- `neo-localmcp` resolves to the managed venv.
+- `my-localmcp` resolves to the managed venv.
 - The CLI starts successfully.
 - The MCP server imports and completes a bounded startup or handshake probe.
 - Client registrations point to the correct managed executable.

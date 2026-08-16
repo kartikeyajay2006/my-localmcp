@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from neo_localmcp import ollama_client
-from neo_localmcp.installer import ollama
+from my_localmcp import ollama_client
+from my_localmcp.installer import ollama
 
 
 def test_configured_models_are_distinct_and_ordered(isolated_config):
@@ -11,7 +11,7 @@ def test_configured_models_are_distinct_and_ordered(isolated_config):
 
 
 def test_configured_models_dedupes_identical_fast_and_summary(monkeypatch, isolated_config):
-    from neo_localmcp import config
+    from my_localmcp import config
 
     monkeypatch.setattr(
         config,
@@ -43,7 +43,7 @@ def test_unload_neo_models_sends_bounded_keep_alive_zero_per_distinct_model(monk
 
 
 def test_unload_neo_models_unloads_duplicated_models_once(monkeypatch, isolated_config):
-    from neo_localmcp import config
+    from my_localmcp import config
 
     monkeypatch.setattr(
         config,

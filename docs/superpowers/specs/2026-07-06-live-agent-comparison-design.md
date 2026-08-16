@@ -6,10 +6,10 @@ Split out from #9 (automated token-reduction benchmarking) during that
 feature's own design discussion, because this piece is fundamentally
 different in kind from the rest of the benchmark tool: it spends real API
 budget, is non-deterministic by nature, and needs a live agent driver rather
-than neo-localmcp's own self-reported estimates. The rest of #9 (phases
+than my-localmcp's own self-reported estimates. The rest of #9 (phases
 1a-1f, shipped in 1.1.1) measures `estimated_tokens_returned` — a char÷4
 proxy — against a deterministic baseline. This feature instead runs a real
-agent through a task twice, once restricted to neo-localmcp's own tools and
+agent through a task twice, once restricted to my-localmcp's own tools and
 once restricted to raw filesystem tools, and sums the *actual* API-reported
 token usage for each run. That is what validates the README's stated
 acceptance targets (>=50% fewer discovery/read tokens, >=30% fewer total
@@ -22,8 +22,8 @@ questions, were resolved through brainstorming on 2026-07-06; this document
 records the resolved design, not the discussion.
 
 Relationship to #9: shares #9's task/query corpus
-(`neo_localmcp/benchmark_queries/default.jsonl`) and output-directory
-convention (`neo-localmcp_benchmarks/<timestamp>/...`), but is designed and
+(`my_localmcp/benchmark_queries/default.jsonl`) and output-directory
+convention (`my-localmcp_benchmarks/<timestamp>/...`), but is designed and
 implemented independently, per the issue's own reasoning above.
 
 ## Decisions locked in during design
@@ -31,14 +31,14 @@ implemented independently, per the issue's own reasoning above.
 - **Driver: Claude Agent SDK**, not a hand-rolled Anthropic API tool loop. It
   already ships built-in `Read`/`Grep`/`Glob` tools for the "without MCP"
   baseline, and can attach this repo's own MCP server (via the existing
-  `neo-localmcp-server` stdio entry point, `pyproject.toml`'s
+  `my-localmcp-server` stdio entry point, `pyproject.toml`'s
   `[project.scripts]`) restricted to specific tools for the "with MCP"
   condition. Least new code to build and maintain; least surface for a
   hand-rolled harness bug to skew the comparison itself.
-- **Optional dependency, not a base one.** `neo-localmcp[benchmark-live-agent]`
+- **Optional dependency, not a base one.** `my-localmcp[benchmark-live-agent]`
   pins `claude-agent-sdk`; the base install stays untouched, matching the
   existing `[wizard]` extra convention (`psutil` is pinned there, not in base
-  deps) — most users of neo-localmcp will never invoke this feature or spend
+  deps) — most users of my-localmcp will never invoke this feature or spend
   API budget on it.
 - **Stopping condition: explicit `report_answer` tool + turn-cap fallback.**
   Both conditions get one extra tool, `report_answer(file, line_range,
@@ -77,16 +77,16 @@ implemented independently, per the issue's own reasoning above.
   exists to make honest.
 - **Credentials: reuse ambient `ANTHROPIC_API_KEY` / Claude Code auth.** The
   Claude Agent SDK already resolves credentials the way the Claude Code CLI
-  does. No new credential-storage code in neo-localmcp; if credentials are
+  does. No new credential-storage code in my-localmcp; if credentials are
   missing, the command fails fast with a clear message before spending
   anything.
-- **CLI: a new dedicated subcommand**, `neo-localmcp benchmark-live-agent`,
+- **CLI: a new dedicated subcommand**, `my-localmcp benchmark-live-agent`,
   not a flag on the existing `benchmark <group>` command. Structurally
   impossible to trigger via `benchmark full` or any existing group, and its
   flag shape (`--task-name`, `--runs`, `--max-tasks`, `--yes`) doesn't need
   to fit the existing group-based command's shape.
 - **README must state the Claude/Anthropic-only requirement explicitly.**
-  The rest of neo-localmcp (including the rest of the benchmark tool) needs
+  The rest of my-localmcp (including the rest of the benchmark tool) needs
   no external LLM API access at all — only optionally local Ollama. This one
   command is the sole exception, since it is Claude Agent SDK-driven and
   spends real Anthropic API budget. The command reference table entry and
@@ -100,12 +100,12 @@ implemented independently, per the issue's own reasoning above.
 
 ## Architecture
 
-A new module, `neo_localmcp/live_agent_benchmark.py`, separate from
+A new module, `my_localmcp/live_agent_benchmark.py`, separate from
 `benchmark.py` per the reasoning above, but importing `benchmark.py`'s
 report-writing/output-path helpers (`_write_report`'s path convention) rather
 than duplicating them. The optional `claude-agent-sdk` import is isolated to
-this one module and guarded — importing `neo_localmcp.cli` or
-`neo_localmcp.benchmark` must never require the extra to be installed;
+this one module and guarded — importing `my_localmcp.cli` or
+`my_localmcp.benchmark` must never require the extra to be installed;
 only invoking `benchmark-live-agent` itself does.
 
 `cli.py` gains a new subcommand wired to a `cmd_benchmark_live_agent`
@@ -117,7 +117,7 @@ For each selected task (by id, from the corpus):
 
 1. Load the task's `task` prompt string and `gold_file` from the corpus.
 2. Run condition **with-mcp**: a Claude Agent SDK session configured with
-   this repo's `neo-localmcp-server` stdio entry point as its only MCP
+   this repo's `my-localmcp-server` stdio entry point as its only MCP
    server, tools allow-listed to `prepare_context`/`file_excerpts`/
    `repo_lookup` plus `report_answer`. System prompt frames these as the
    agent's available context tools.
@@ -144,7 +144,7 @@ For each selected task (by id, from the corpus):
 ## CLI
 
 ```
-neo-localmcp benchmark-live-agent \
+my-localmcp benchmark-live-agent \
     --task-name <id> [--task-name <id> ...] \
     [--queries <path>] \
     [--runs N] \
@@ -164,7 +164,7 @@ neo-localmcp benchmark-live-agent \
   tty and `--yes` is absent.
 - Missing `ANTHROPIC_API_KEY` or the `claude-agent-sdk` package: fails fast
   with a clear, actionable message (`pip install
-  "neo-localmcp[benchmark-live-agent]"` / `export ANTHROPIC_API_KEY=...`)
+  "my-localmcp[benchmark-live-agent]"` / `export ANTHROPIC_API_KEY=...`)
   before any API call is attempted.
 - Never part of `benchmark full` or any existing group; only reachable via
   this dedicated subcommand.

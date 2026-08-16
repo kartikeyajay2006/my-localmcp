@@ -1,0 +1,13 @@
+[identity]
+product_name = "my-localmcp"
+display_name = "my-localmcp"
+cli_name = "my-localmcp"
+slash_prefix = "my-localmcp"
+mcp_server_name = "my-localmcp"
+package_name = "my-localmcp"
+
+[defaults]
+ollama_base_url = "http://127.0.0.1:11434"
+summary_model = "qwen3-coder:30b"
+fast_model = "qwen3:8b"
+num_ctx = 32768

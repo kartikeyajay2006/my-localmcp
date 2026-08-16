@@ -39,7 +39,7 @@ def _run(argv: list[str], *, env: dict[str, str] | None = None, stdin_data: str 
 
 
 def _isolated_env(tmp_path: Path) -> dict[str, str]:
-    return {"NEO_LOCALMCP_HOME": str(tmp_path / ".neo-localmcp")}
+    return {"MY_LOCALMCP_HOME": str(tmp_path / ".my-localmcp")}
 
 
 # --------------------------------------------------------------------------- #
@@ -117,7 +117,7 @@ def test_install_rejects_unknown_client() -> None:
 
 @pytest.mark.parametrize("operation", ["install", "reinstall"])
 def test_install_like_commands_accept_explicit_add_to_path_flag(operation: str) -> None:
-    from neo_localmcp.installer.cli import build_parser
+    from my_localmcp.installer.cli import build_parser
 
     args = build_parser().parse_args([operation, "--add-to-path"])
 
@@ -126,7 +126,7 @@ def test_install_like_commands_accept_explicit_add_to_path_flag(operation: str) 
 
 @pytest.mark.parametrize("operation", ["reinstall", "uninstall"])
 def test_reinstall_and_uninstall_accept_repeatable_client_selection(operation: str) -> None:
-    from neo_localmcp.installer.cli import build_parser
+    from my_localmcp.installer.cli import build_parser
 
     args = build_parser().parse_args([operation, "--client", "codex", "--client", "claude-code"])
 
@@ -138,15 +138,15 @@ def test_reinstall_and_uninstall_accept_repeatable_client_selection(operation: s
 def test_successful_install_like_operation_prints_hint_and_only_updates_path_when_requested(
     tmp_path: Path, monkeypatch, capsys, operation: str, add_to_path: bool,
 ) -> None:
-    from neo_localmcp.installer import cli
-    from neo_localmcp.installer.operations import OperationContext
-    from neo_localmcp.installer.output import Reporter
-    from neo_localmcp.installer.path import PathUpdate
-    from neo_localmcp.installer.paths import ManagedPaths
-    from neo_localmcp.installer.types import Operation, OperationResult, OperationStatus
+    from my_localmcp.installer import cli
+    from my_localmcp.installer.operations import OperationContext
+    from my_localmcp.installer.output import Reporter
+    from my_localmcp.installer.path import PathUpdate
+    from my_localmcp.installer.paths import ManagedPaths
+    from my_localmcp.installer.types import Operation, OperationResult, OperationStatus
 
     paths = ManagedPaths(
-        root=tmp_path / ".neo-localmcp", platform="posix", home=tmp_path,
+        root=tmp_path / ".my-localmcp", platform="posix", home=tmp_path,
         allow_test_root=True,
     )
     context = OperationContext(
@@ -178,7 +178,7 @@ def test_successful_install_like_operation_prints_hint_and_only_updates_path_whe
 def test_python_floor_guard_runs_before_package_import(tmp_path: Path) -> None:
     """Simulate an old interpreter by faking sys.version_info before the guard
     runs, in a fresh subprocess. If the guard truly runs before any
-    neo_localmcp import, the process must print the floor message and exit 2
+    my_localmcp import, the process must print the floor message and exit 2
     without ever attempting to import the package (which would raise/behave
     differently under a faked low version tuple due to 3.12-only syntax)."""
 
@@ -200,9 +200,9 @@ def test_python_floor_guard_runs_before_package_import(tmp_path: Path) -> None:
     )
     assert result.returncode == 2
     assert "Python 3.12+ required" in result.stderr or "requires Python 3.12" in result.stderr
-    # The floor guard must fire before neo_localmcp (and thus psutil) is ever
+    # The floor guard must fire before my_localmcp (and thus psutil) is ever
     # imported; a partial/failed package import would surface as a traceback
-    # mentioning neo_localmcp/psutil instead of the clean floor message.
+    # mentioning my_localmcp/psutil instead of the clean floor message.
     assert "Traceback" not in result.stderr
 
 
@@ -216,7 +216,7 @@ def test_python_floor_message_content() -> None:
     spec.loader.exec_module(module)
     message = module._python_floor_message((3, 12))
     assert "3.12" in message
-    assert "neo-localmcp requires Python" in message
+    assert "my-localmcp requires Python" in message
 
 
 # --------------------------------------------------------------------------- #
@@ -225,7 +225,7 @@ def test_python_floor_message_content() -> None:
 
 
 def test_install_dry_run_mutates_nothing(tmp_path: Path) -> None:
-    home = tmp_path / ".neo-localmcp"
+    home = tmp_path / ".my-localmcp"
     result = _run(["install", "--dry-run"], env=_isolated_env(tmp_path))
     assert result.returncode == 0
     assert "DRY RUN" in result.stdout or "DRY RUN" in result.stderr
@@ -233,21 +233,21 @@ def test_install_dry_run_mutates_nothing(tmp_path: Path) -> None:
 
 
 def test_reinstall_dry_run_mutates_nothing(tmp_path: Path) -> None:
-    home = tmp_path / ".neo-localmcp"
+    home = tmp_path / ".my-localmcp"
     result = _run(["reinstall", "--dry-run"], env=_isolated_env(tmp_path))
     assert result.returncode == 0
     assert not home.exists()
 
 
 def test_uninstall_dry_run_mutates_nothing(tmp_path: Path) -> None:
-    home = tmp_path / ".neo-localmcp"
+    home = tmp_path / ".my-localmcp"
     result = _run(["uninstall", "--dry-run"], env=_isolated_env(tmp_path))
     assert result.returncode == 0
     assert not home.exists()
 
 
 def test_install_clean_dry_run_mutates_nothing_and_shows_plan(tmp_path: Path) -> None:
-    home = tmp_path / ".neo-localmcp"
+    home = tmp_path / ".my-localmcp"
     result = _run(["install", "--clean", "--dry-run", "--yes"], env=_isolated_env(tmp_path))
     assert result.returncode == 0
     assert not home.exists()
@@ -256,14 +256,14 @@ def test_install_clean_dry_run_mutates_nothing_and_shows_plan(tmp_path: Path) ->
 
 
 def test_uninstall_delete_memory_dry_run_mutates_nothing(tmp_path: Path) -> None:
-    home = tmp_path / ".neo-localmcp"
+    home = tmp_path / ".my-localmcp"
     result = _run(["uninstall", "--delete-memory", "--dry-run", "--yes"], env=_isolated_env(tmp_path))
     assert result.returncode == 0
     assert not home.exists()
 
 
 def test_install_clean_noninteractive_without_yes_is_safety_refusal(tmp_path: Path) -> None:
-    home = tmp_path / ".neo-localmcp"
+    home = tmp_path / ".my-localmcp"
     home.mkdir(parents=True)
     marker = home / "sentinel.txt"
     marker.write_text("do not delete me")
@@ -278,7 +278,7 @@ def test_install_clean_noninteractive_without_yes_is_safety_refusal(tmp_path: Pa
 
 
 def test_uninstall_delete_memory_noninteractive_without_yes_is_safety_refusal(tmp_path: Path) -> None:
-    home = tmp_path / ".neo-localmcp"
+    home = tmp_path / ".my-localmcp"
     home.mkdir(parents=True)
     marker = home / "sentinel.txt"
     marker.write_text("do not delete me")

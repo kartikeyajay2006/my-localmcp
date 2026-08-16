@@ -13,11 +13,11 @@ merge/split/rename where it clarifies responsibility, eliminate duplication, and
 end with a precise, verifiable dependency graph (mermaid, file-level, edges
 labeled with the actual symbol needed) for both the current and the target state.
 
-A parallel question raised mid-investigation: do Claude Code's `/neo-localmcp:*`
+A parallel question raised mid-investigation: do Claude Code's `/my-localmcp:*`
 slash commands touch this repo at all? Answer, confirmed by reading
 `client_setup.py`: **yes, entirely.** They are static markdown files at
-`neo_localmcp/templates/claude-code/commands/neo-localmcp/*.md`, copied verbatim
-to `~/.claude/commands/neo-localmcp/` by `setup_claude_code()`. Claude Code does
+`my_localmcp/templates/claude-code/commands/my-localmcp/*.md`, copied verbatim
+to `~/.claude/commands/my-localmcp/` by `setup_claude_code()`. Claude Code does
 not derive them from the MCP tool schema. This directory is installer-adjacent
 content and stays where it is (see "Explicitly out of scope").
 
@@ -25,16 +25,16 @@ content and stays where it is (see "Explicitly out of scope").
 
 Three parallel read-only agents mapped, file-by-file: every function/class
 defined, every import (what it needs), every importer (who needs it), and test
-coverage, for `neo_localmcp/installer/` (12 files), `neo_localmcp/wizard/` (7
+coverage, for `my_localmcp/installer/` (12 files), `my_localmcp/wizard/` (7
 files), and the scattered top-level installer files plus the MCP tool/command
 layer (`tools.py`, `server.py`, `cli.py`, `benchmark.py`). Findings below are
 sourced from that map, not assumption.
 
 ## Key finding: the packages are not actually a mess
 
-`neo_localmcp/installer/` (~3,900 lines, 12 files: `types`, `paths`, `output`,
+`my_localmcp/installer/` (~3,900 lines, 12 files: `types`, `paths`, `output`,
 `state`, `processes`, `migration`, `runtime`, `verification`, `ollama`, `clients`,
-`operations`, `__init__` barrel) and `neo_localmcp/wizard/` (~1,800 lines, 7
+`operations`, `__init__` barrel) and `my_localmcp/wizard/` (~1,800 lines, 7
 files: `backend`, `console`, `real_backend`, `fake_backend`, `preflight`,
 `_ansi`, `__init__`) are each **already cleanly layered internally** — strict
 dependency direction, no duplicated logic, dependency-injected seams for
@@ -79,7 +79,7 @@ graph TD
         setup_py["setup.py"]
         setup_wizard_py["setup_wizard.py"]
     end
-    subgraph WIZARD["neo_localmcp/wizard/"]
+    subgraph WIZARD["my_localmcp/wizard/"]
         backend["backend.py"]
         console["console.py"]
         real_backend["real_backend.py"]
@@ -87,7 +87,7 @@ graph TD
         preflight["preflight.py"]
     end
     setup_cli["setup_cli.py"]
-    subgraph INSTALLER["neo_localmcp/installer/ (12 files, already clean)"]
+    subgraph INSTALLER["my_localmcp/installer/ (12 files, already clean)"]
         operations["operations.py"]
         state_mod["state.py"]
         installer_ollama["ollama.py"]
@@ -137,14 +137,14 @@ here for readability.)
 ### File tree
 
 ```
-neo_localmcp/
+my_localmcp/
   installer/
     __init__.py, types.py, paths.py, output.py, state.py,      # unchanged
     processes.py, migration.py, runtime.py, verification.py,   # unchanged
     ollama.py, clients.py                                      # unchanged
-    mcpb.py                    # moved from neo_localmcp/mcpb_build.py (build_mcpb() body unchanged)
-    cli.py                     # moved+renamed from neo_localmcp/setup_cli.py
-    wizard/                    # moved from neo_localmcp/wizard/
+    mcpb.py                    # moved from my_localmcp/mcpb_build.py (build_mcpb() body unchanged)
+    cli.py                     # moved+renamed from my_localmcp/setup_cli.py
+    wizard/                    # moved from my_localmcp/wizard/
       __init__.py, backend.py, preflight.py, _ansi.py          # unchanged
       console.py                # unchanged logic; "dummy" terminology purged (see below)
       live_backend.py           # renamed from real_backend.py; RealBackend -> LiveBackend
@@ -160,27 +160,27 @@ neo_localmcp/
 
   benchmarker/                 # renamed from benchmark.py + benchmark_queries/
     __init__.py                # run_benchmark() and its helpers, unchanged logic
-    queries/                   # moved from neo_localmcp/benchmark_queries/
+    queries/                   # moved from my_localmcp/benchmark_queries/
 
   server.py, cli.py, client_setup.py, ollama_client.py,
   lifecycle.py, config.py, templates/, repo_memory.py,
   query.py, utils.py, identity.py, context_worker.py     # all unchanged -- genuinely cross-cutting
 
-setup.py           # repo root, unchanged location; delegates to neo_localmcp.installer.cli.main()
-setup_wizard.py    # repo root, unchanged location; delegates to neo_localmcp.installer.wizard.console.run()
+setup.py           # repo root, unchanged location; delegates to my_localmcp.installer.cli.main()
+setup_wizard.py    # repo root, unchanged location; delegates to my_localmcp.installer.wizard.console.run()
 ```
 
 ### Naming decisions (owner-confirmed)
 
 | Old | New | Why |
 |---|---|---|
-| `neo_localmcp/setup_cli.py` | `neo_localmcp/installer/cli.py` | Installer's CLI frontend; belongs inside the domain it drives. No internal split needed — 449 lines / 14 functions is cohesive. |
-| `neo_localmcp/wizard/` | `neo_localmcp/installer/wizard/` | Installer's interactive UI frontend; same reasoning. Kept as a package (already 7 files), no extra `wizard_helper/` nesting layer since there's nothing to split into it. |
-| `neo_localmcp/mcpb_build.py` | `neo_localmcp/installer/mcpb.py` | Sole consumer anywhere in the repo is the wizard's real backend — installer-only. |
-| `neo_localmcp/wizard/real_backend.py` / `RealBackend` | `installer/wizard/live_backend.py` / `LiveBackend` | Clearer opposite of "preview" than "real vs fake". |
-| `neo_localmcp/wizard/fake_backend.py` / `FakeBackend` | `installer/wizard/preview_backend.py` / `PreviewBackend` | The UI already used three inconsistent words for this concept ("fake" in code, "dummy" in the toggle key, "preview" in the state dir name) — standardizing on "preview" fixes that inconsistency, not just the file name. |
-| `neo_localmcp/tools.py` | `neo_localmcp/mcp_commands/{system,memory,ollama,editing}.py` | Splits the 4 already-distinct logical categories into their own files. `editing.py` chosen over the originally proposed `misc.py` — "misc" hides what the file does; `summarize_file` + `apply_unified_patch` are both "operate on file content." |
-| `neo_localmcp/benchmark.py` + `neo_localmcp/benchmark_queries/` | `neo_localmcp/benchmarker/__init__.py` + `neo_localmcp/benchmarker/queries/` | Colocates the runner with its fixture data under one name matching the "benchmarker" concept. |
+| `my_localmcp/setup_cli.py` | `my_localmcp/installer/cli.py` | Installer's CLI frontend; belongs inside the domain it drives. No internal split needed — 449 lines / 14 functions is cohesive. |
+| `my_localmcp/wizard/` | `my_localmcp/installer/wizard/` | Installer's interactive UI frontend; same reasoning. Kept as a package (already 7 files), no extra `wizard_helper/` nesting layer since there's nothing to split into it. |
+| `my_localmcp/mcpb_build.py` | `my_localmcp/installer/mcpb.py` | Sole consumer anywhere in the repo is the wizard's real backend — installer-only. |
+| `my_localmcp/wizard/real_backend.py` / `RealBackend` | `installer/wizard/live_backend.py` / `LiveBackend` | Clearer opposite of "preview" than "real vs fake". |
+| `my_localmcp/wizard/fake_backend.py` / `FakeBackend` | `installer/wizard/preview_backend.py` / `PreviewBackend` | The UI already used three inconsistent words for this concept ("fake" in code, "dummy" in the toggle key, "preview" in the state dir name) — standardizing on "preview" fixes that inconsistency, not just the file name. |
+| `my_localmcp/tools.py` | `my_localmcp/mcp_commands/{system,memory,ollama,editing}.py` | Splits the 4 already-distinct logical categories into their own files. `editing.py` chosen over the originally proposed `misc.py` — "misc" hides what the file does; `summarize_file` + `apply_unified_patch` are both "operate on file content." |
+| `my_localmcp/benchmark.py` + `my_localmcp/benchmark_queries/` | `my_localmcp/benchmarker/__init__.py` + `my_localmcp/benchmarker/queries/` | Colocates the runner with its fixture data under one name matching the "benchmarker" concept. |
 
 ### "dummy" -> "preview" terminology purge
 
@@ -216,7 +216,7 @@ graph TD
         setup_py["setup.py"]
         setup_wizard_py["setup_wizard.py"]
     end
-    subgraph INSTALLER["neo_localmcp/installer/"]
+    subgraph INSTALLER["my_localmcp/installer/"]
         cli_mod["cli.py (was setup_cli.py)"]
         mcpb_mod["mcpb.py (was mcpb_build.py)"]
         operations["operations.py"]
@@ -252,14 +252,14 @@ graph TD
 graph TD
     server_py["server.py"]
     cli_py["cli.py (general CLI, now unambiguous)"]
-    subgraph MCPCMDS["neo_localmcp/mcp_commands/"]
+    subgraph MCPCMDS["my_localmcp/mcp_commands/"]
         shared["_shared.py (json_out, output formatting)"]
         system_mod["system.py"]
         memory_mod["memory.py"]
         ollama_mod["ollama.py"]
         editing_mod["editing.py"]
     end
-    subgraph BENCH["neo_localmcp/benchmarker/"]
+    subgraph BENCH["my_localmcp/benchmarker/"]
         bench_runner["__init__.py (run_benchmark)"]
         bench_queries["queries/"]
     end
@@ -295,14 +295,14 @@ piece into `_shared.py`, not adding a category-to-category import edge.
   preference over incremental smaller PRs.
 - `pyproject.toml`: update `package-data`'s `benchmark_queries/*.jsonl` glob to
   `benchmarker/queries/*.jsonl`. `[tool.setuptools.packages.find]` already uses
-  the wildcard `include = ["neo_localmcp*"]`, so nested subpackages
+  the wildcard `include = ["my_localmcp*"]`, so nested subpackages
   (`installer.wizard`, `mcp_commands`, `benchmarker`) are auto-discovered with no
   further config changes, as long as each new directory gets an `__init__.py`.
 - `CLAUDE.md`'s "Module map" section is rewritten to match — it is the
   authoritative doc for this and would otherwise go stale immediately.
 - Tests get their import paths updated directly (e.g.
-  `tests/test_wizard.py`'s `from neo_localmcp.wizard import fake_backend` becomes
-  `from neo_localmcp.installer.wizard import preview_backend`) — no compatibility
+  `tests/test_wizard.py`'s `from my_localmcp.wizard import fake_backend` becomes
+  `from my_localmcp.installer.wizard import preview_backend`) — no compatibility
   shims, per this repo's stated convention against them.
 - Full suite (`pytest -q`, `python -m compileall`) must stay green throughout;
   `tests/installer/test_*_lifecycle.py` (real venvs, real process trees) is the
@@ -314,9 +314,9 @@ piece into `_shared.py`, not adding a category-to-category import edge.
   `backend.py`/`console.py`/`preflight.py`/`_ansi.py` — investigation found them
   already well-factored.
 - `config.py`, `ollama_client.py`, `client_setup.py`, `lifecycle.py` stay at
-  `neo_localmcp/` top level — genuinely shared between the installer and the live
+  `my_localmcp/` top level — genuinely shared between the installer and the live
   MCP server; moving them into `installer/` would misrepresent that.
-- `neo_localmcp/templates/claude-code/commands/*.md` stays where it is — static
+- `my_localmcp/templates/claude-code/commands/*.md` stays where it is — static
   content whose only consumer, `client_setup.py`, is also staying put.
 - Exact placement of `tools.py`'s numerous private ranking/formatting helpers
   (`_score_index_and_symbol_hits`, `_apply_retrieval_boost`, etc.) into

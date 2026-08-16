@@ -39,13 +39,13 @@ below and are reflected in the code:
   client registrations, and `config.yaml`.
 - **Scope trim for safety:** clean-install (full-wipe-then-install) was left out
   of the menu. Full wipe is reachable only under Uninstall, behind the same
-  typed-`DELETE ALL NEO-LOCALMCP DATA` gate the CLI uses, so there is exactly one
+  typed-`DELETE ALL MY-LOCALMCP DATA` gate the CLI uses, so there is exactly one
   destructive path in the UI.
 
 ## Origin
 
 `setup.py` already implements a full, correct install/reinstall/uninstall
-lifecycle (see `neo_localmcp/installer/`), but it is flag-driven
+lifecycle (see `my_localmcp/installer/`), but it is flag-driven
 (`--client codex --client claude-code`, `--clean --yes`, ...). A first-time
 user cloning the repo has to already know which flags exist, what each client
 surface means, and what OS-specific paths get written. This session also
@@ -63,11 +63,11 @@ It does not replace `setup.py`; both remain supported entrypoints.
 - Not a general TUI shell over the whole CLI (indexing, context queries,
   doctor, etc.) — install/reinstall/uninstall/clean lifecycle plus Ollama
   endpoint/model configuration only.
-- Not a rewrite of `neo_localmcp/installer/` lifecycle logic — the wizard is
+- Not a rewrite of `my_localmcp/installer/` lifecycle logic — the wizard is
   a new caller of existing operations, never a fork of them.
 - Not responsible for installing Ollama itself, or any model — only for
-  configuring the base-url/model names neo-localmcp will use once Ollama is
-  present, same scope as `neo-localmcp set-ollama` today.
+  configuring the base-url/model names my-localmcp will use once Ollama is
+  present, same scope as `my-localmcp set-ollama` today.
 
 ## Dependency bootstrap
 
@@ -81,7 +81,7 @@ python setup_wizard.py
 ```
 
 `setup_wizard.py` itself starts with a **stdlib-only preflight** (no import of
-`textual`/`psutil`/anything from `neo_localmcp` beyond what stdlib needs):
+`textual`/`psutil`/anything from `my_localmcp` beyond what stdlib needs):
 it attempts `import textual` and `import psutil`; if either fails, it cannot
 draw the real UI, so it falls back to a plain `input()`-based prompt that
 prints the exact `pip install -e ".[wizard]"` command and offers to run it via
@@ -91,8 +91,8 @@ clone with nothing pip-installed, still works end to end.
 
 ## Architecture
 
-New package `neo_localmcp/wizard/`, mirroring the existing separation of
-concerns in `neo_localmcp/installer/`:
+New package `my_localmcp/wizard/`, mirroring the existing separation of
+concerns in `my_localmcp/installer/`:
 
 - **`preflight.py`** — stdlib-only. Dependency detection + the fallback
   plain-text bootstrap offer described above. Never imports `textual` or
@@ -102,13 +102,13 @@ concerns in `neo_localmcp/installer/`:
   `run_reinstall(...)`, `run_uninstall(...)`, `client_paths_preview(...)`,
   `get_ollama_config()`, `set_ollama_config(...)`. This is the sole seam
   between the UI and real lifecycle logic — screens depend only on this
-  Protocol, never on `neo_localmcp.installer` directly.
+  Protocol, never on `my_localmcp.installer` directly.
 - **`fake_backend.py`** — Phase 1 deliverable. In-memory implementation of
   `WizardBackend`: no subprocesses, no filesystem writes, simulated
   results/delays, canned client-path previews for both Windows and macOS so
   the OS-specific text can be validated without switching machines.
 - **`real_backend.py`** — Phase 2 deliverable. Wraps the existing
-  `neo_localmcp.installer` operations (`install`/`reinstall`/`uninstall`,
+  `my_localmcp.installer` operations (`install`/`reinstall`/`uninstall`,
   `build_candidate`/`promote_candidate`, `snapshot_clients`,
   `record_selection`, Ollama config helpers in `config.py`). No lifecycle
   logic is duplicated here, only called.
@@ -116,7 +116,7 @@ concerns in `neo_localmcp/installer/`:
   (`fake_backend` or `real_backend`) is constructed and wires the screen flow.
 - **`screens/`** — one module per wizard step (see Screen flow below).
 
-Screens never import `neo_localmcp.installer` directly and never import
+Screens never import `my_localmcp.installer` directly and never import
 `fake_backend`/`real_backend` directly — only the `WizardBackend` protocol
 type and whatever instance `app.py` hands them. This makes Phase 1 → Phase 2
 a one-line change in `app.py` (which backend class gets constructed), with
@@ -142,7 +142,7 @@ zero screen-code changes.
    Claude Desktop / none. Each shows the OS-specific config path that will
    actually be written as its dim subtext (e.g. `%APPDATA%\Claude\...` on
    Windows vs `~/Library/Application Support/Claude/...` on macOS), sourced
-   from `WizardBackend.client_paths_preview()` (same data `neo-localmcp
+   from `WizardBackend.client_paths_preview()` (same data `my-localmcp
    clients` already computes via `client_setup.py`).
 4. **Ollama config** (skippable, collapsed by default) — base-url /
    fast_model / summary_model / num_ctx text inputs, pre-filled with current
@@ -156,7 +156,7 @@ zero screen-code changes.
    completes, reusing the existing `Reporter` event stream `setup.py` already
    emits (info/action/error events). Ends in a clear success/failure panel
    with the lifecycle log path and a suggested next command
-   (e.g. `neo-localmcp doctor`).
+   (e.g. `my-localmcp doctor`).
 
 ## Data flow
 
@@ -196,7 +196,7 @@ wizard inherits for free by calling the same operations.
   fake backend only. Fully navigable and demoable; nothing it does is real.
   Textual `Pilot` tests cover every screen.
 - **Phase 2 — real wiring**: `real_backend.py` implementing the same
-  `WizardBackend` Protocol against `neo_localmcp.installer`; swap it in as
+  `WizardBackend` Protocol against `my_localmcp.installer`; swap it in as
   `app.py`'s default; add the mock-based and real lifecycle tests described
   above; update `README.md` with the new `pip install -e ".[wizard]"` +
   `python setup_wizard.py` entrypoint alongside the existing `setup.py` docs.

@@ -7,13 +7,13 @@
 
 While tracing the full call chain from `setup_wizard.py` and `setup.py` down to
 `installer/operations.py` (see conversation), it surfaced that the wizard
-(`neo_localmcp/wizard/console.py`) exposes five operations — install, reinstall,
+(`my_localmcp/wizard/console.py`) exposes five operations — install, reinstall,
 uninstall, **Configure Ollama models**, and **Manage connected clients** — while
-the lifecycle CLI (`neo_localmcp/setup_cli.py`, invoked via `python setup.py`)
+the lifecycle CLI (`my_localmcp/setup_cli.py`, invoked via `python setup.py`)
 only exposes three: install, reinstall, uninstall. The other two only exist
-through a third, unrelated entry point: `neo_localmcp/cli.py`'s `set-ollama` and
+through a third, unrelated entry point: `my_localmcp/cli.py`'s `set-ollama` and
 `config clients setup/remove` subcommands (the separate, already-installed
-`neo-localmcp` runtime command).
+`my-localmcp` runtime command).
 
 Owner's stated goal: the wizard and `setup.py`'s CLI should be **1:1** — whatever
 one can do, the other can do. Where the wizard's per-operation logic currently
@@ -44,7 +44,7 @@ with no dependency between the two).
    `type:refactor` PR later.
 4. **Full 3-way dedup for the Ollama-config logic.** Owner explicitly asked for
    full deduplication rather than leaving `tools.py`'s `set_ollama` (used by the
-   separate `neo-localmcp set-ollama` runtime command) as a third
+   separate `my-localmcp set-ollama` runtime command) as a third
    near-duplicate. All three surfaces call one function.
 5. **No dedup target exists for client management beyond two callers.**
    `cli.py`'s `config clients setup/remove` do explicit add-only/remove-only
@@ -82,7 +82,7 @@ Three callers, all converging on this one function:
 
 | Caller | Passes `num_ctx`? | Notes |
 |---|---|---|
-| `neo_localmcp/tools.py::set_ollama()` | yes (its own param) | Used by `cli.py`'s `set-ollama` (the runtime CLI). Refactored from its own load/set/save to a single call + `json_out` wrap. |
+| `my_localmcp/tools.py::set_ollama()` | yes (its own param) | Used by `cli.py`'s `set-ollama` (the runtime CLI). Refactored from its own load/set/save to a single call + `json_out` wrap. |
 | `wizard/real_backend.py::_write_ollama_config()` | no (wizard never asks) | Refactored to call it, then emit one `StepEvent("action", ...)`. |
 | `setup_cli.py`'s new `config-ollama` subcommand | no (matches wizard) | New. |
 

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from neo_localmcp.installer.paths import ManagedPaths
+from my_localmcp.installer.paths import ManagedPaths
 
 
 def _paths(tmp_path, *, platform: str = "posix") -> ManagedPaths:
     return ManagedPaths(
-        root=tmp_path / ".neo-localmcp",
+        root=tmp_path / ".my-localmcp",
         platform=platform,  # type: ignore[arg-type]
         home=tmp_path,
         allow_test_root=True,
@@ -15,7 +15,7 @@ def _paths(tmp_path, *, platform: str = "posix") -> ManagedPaths:
 
 
 def test_path_hint_uses_managed_posix_bin_directory(tmp_path) -> None:
-    from neo_localmcp.installer.path import path_hint
+    from my_localmcp.installer.path import path_hint
 
     paths = _paths(tmp_path)
 
@@ -23,7 +23,7 @@ def test_path_hint_uses_managed_posix_bin_directory(tmp_path) -> None:
 
 
 def test_path_hint_uses_managed_windows_scripts_directory(tmp_path) -> None:
-    from neo_localmcp.installer.path import path_hint
+    from my_localmcp.installer.path import path_hint
 
     paths = _paths(tmp_path, platform="windows")
 
@@ -31,7 +31,7 @@ def test_path_hint_uses_managed_windows_scripts_directory(tmp_path) -> None:
 
 
 def test_append_shell_path_writes_once_only_when_confirmed(tmp_path) -> None:
-    from neo_localmcp.installer.path import append_shell_path, path_hint
+    from my_localmcp.installer.path import append_shell_path, path_hint
 
     paths = _paths(tmp_path)
     rc_file = paths.home / ".zshrc"
@@ -41,18 +41,18 @@ def test_append_shell_path_writes_once_only_when_confirmed(tmp_path) -> None:
     assert result.changed is True
     assert result.target == rc_file
     assert rc_file.read_text(encoding="utf-8") == (
-        "\n# neo-localmcp PATH\n"
+        "\n# my-localmcp PATH\n"
         f"{path_hint(paths)}\n"
     )
 
     repeated = append_shell_path(paths, environ={"SHELL": "/bin/zsh"})
 
     assert repeated.changed is False
-    assert rc_file.read_text(encoding="utf-8").count("# neo-localmcp PATH") == 1
+    assert rc_file.read_text(encoding="utf-8").count("# my-localmcp PATH") == 1
 
 
 def test_add_to_path_updates_windows_user_path_once(tmp_path) -> None:
-    from neo_localmcp.installer.path import add_to_path
+    from my_localmcp.installer.path import add_to_path
 
     class _Key:
         def __enter__(self):

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Consolidate the installer's two frontends (`setup_cli.py`, `wizard/`) under `neo_localmcp/installer/`, split the 1164-line `tools.py` monolith into `neo_localmcp/mcp_commands/` by category, rename `benchmark.py`+`benchmark_queries/` into `neo_localmcp/benchmarker/`, and purge inconsistent "dummy"/"fake" wizard terminology down to one word ("preview") — with zero behavior change, verified by the existing test suite plus updated import paths.
+**Goal:** Consolidate the installer's two frontends (`setup_cli.py`, `wizard/`) under `my_localmcp/installer/`, split the 1164-line `tools.py` monolith into `my_localmcp/mcp_commands/` by category, rename `benchmark.py`+`benchmark_queries/` into `my_localmcp/benchmarker/`, and purge inconsistent "dummy"/"fake" wizard terminology down to one word ("preview") — with zero behavior change, verified by the existing test suite plus updated import paths.
 
 **Architecture:** This is a pure refactor of already-tested, working code — no new logic. Every task is a verbatim relocation of existing functions/classes into a new file (or a rename), followed by updating every known import call-site, followed by running the affected test(s) to confirm nothing broke. Tasks are TDD in spirit (verify-before/verify-after), not TDD in the "write a new failing test" sense, since the behavior under test does not change.
 
@@ -10,10 +10,10 @@
 
 ## Global Constraints
 
-- **Python floor is 3.12+** everywhere (`setup.py`, `setup_wizard.py`, `neo_localmcp/setup_cli.py` all guard this identically) — unaffected by this plan, but do not regress it.
+- **Python floor is 3.12+** everywhere (`setup.py`, `setup_wizard.py`, `my_localmcp/setup_cli.py` all guard this identically) — unaffected by this plan, but do not regress it.
 - **No compatibility shims.** Per this repo's `CLAUDE.md`, do not add backwards-compat re-exports, deprecated aliases, or "old path still works" fallbacks for anything moved in this plan. Every import call-site gets updated directly.
 - **`git mv` for every file relocation**, never delete+recreate — preserves history.
-- **Full verification after every task:** `python -m pytest -q` and `python -m compileall -q neo_localmcp setup.py` must both stay green. Do not proceed to the next task if either fails.
+- **Full verification after every task:** `python -m pytest -q` and `python -m compileall -q my_localmcp setup.py` must both stay green. Do not proceed to the next task if either fails.
 - **This is a refactor-only plan.** No task may change observable behavior of any function being moved. If a step's diff does anything beyond "relocate code" + "fix the accompanying path arithmetic that the relocation invalidates" + "update an import," that is a bug in the plan step, not an intended improvement — stop and flag it.
 - **Work happens on a dedicated branch** `refactor/installer-mcp-reorg`, cut from `docs/installer-mcp-reorg-design` so the design spec + this plan + the mermaid diagrams ride along and merge to `main` together with the implementation as one PR. Create it before Task 1: `git checkout docs/installer-mcp-reorg-design && git checkout -b refactor/installer-mcp-reorg`. (See Task 1, Step 1 for the fallback if the docs branch has already merged to `main`.)
 - **Design source of truth:** `docs/superpowers/specs/2026-07-06-installer-mcp-reorg-design.md` and its four mermaid diagrams in `mermaid_diagrams/20260706_*.mmd`. This plan implements that spec exactly; if you find a conflict, the spec wins and this plan has a bug.
@@ -46,12 +46,12 @@
 **Why:** `mcpb_build.py`'s only consumer anywhere in the repo is `wizard/real_backend.py` (soon `installer/wizard/live_backend.py`) and its own test file — it is installer-only, so it belongs inside `installer/`.
 
 **Files:**
-- Move: `neo_localmcp/mcpb_build.py` → `neo_localmcp/installer/mcpb.py` (body unchanged — `build_mcpb()`, `_is_excluded()`, `_next_free_path()`, all constants, verbatim)
-- Modify: `neo_localmcp/wizard/real_backend.py:21` (import line only — this file also moves in Task 3, but fix this import now so Task 1 is independently testable)
+- Move: `my_localmcp/mcpb_build.py` → `my_localmcp/installer/mcpb.py` (body unchanged — `build_mcpb()`, `_is_excluded()`, `_next_free_path()`, all constants, verbatim)
+- Modify: `my_localmcp/wizard/real_backend.py:21` (import line only — this file also moves in Task 3, but fix this import now so Task 1 is independently testable)
 - Modify: `tests/test_mcpb_build.py:7` (import line only)
 
 **Interfaces:**
-- Produces: `neo_localmcp.installer.mcpb.build_mcpb(source_root: Path | str, version: str) -> Path | None` — identical signature/behavior to the old `neo_localmcp.mcpb_build.build_mcpb`.
+- Produces: `my_localmcp.installer.mcpb.build_mcpb(source_root: Path | str, version: str) -> Path | None` — identical signature/behavior to the old `my_localmcp.mcpb_build.build_mcpb`.
 
 - [x] **Step 1: Create the branch**
 
@@ -64,14 +64,14 @@ Branch off `docs/installer-mcp-reorg-design` (NOT `main`) — that branch carrie
 - [x] **Step 2: Move the file with `git mv`**
 
 ```bash
-git mv neo_localmcp/mcpb_build.py neo_localmcp/installer/mcpb.py
+git mv my_localmcp/mcpb_build.py my_localmcp/installer/mcpb.py
 ```
 
 Do not edit the file's contents — `build_mcpb()`'s logic has no `__file__`-relative path assumptions (it takes `source_root` as a parameter), so nothing inside the file needs to change.
 
 - [x] **Step 3: Update `real_backend.py`'s import**
 
-In `neo_localmcp/wizard/real_backend.py`, change line 21 from:
+In `my_localmcp/wizard/real_backend.py`, change line 21 from:
 
 ```python
 from ..mcpb_build import build_mcpb
@@ -88,13 +88,13 @@ from ..mcpb import build_mcpb
 In `tests/test_mcpb_build.py`, change line 7 from:
 
 ```python
-from neo_localmcp import mcpb_build
+from my_localmcp import mcpb_build
 ```
 
 to:
 
 ```python
-from neo_localmcp.installer import mcpb
+from my_localmcp.installer import mcpb
 ```
 
 Then update every call site in that file from `mcpb_build.build_mcpb(...)` to `mcpb.build_mcpb(...)` — this occurs at lines 47, 54, 78, 79, 80, 92 (six call sites, all `mcpb_build.build_mcpb(root, "9.9.9")` or similar — mechanically replace the `mcpb_build.` prefix with `mcpb.`).
@@ -107,12 +107,12 @@ Do NOT touch the file's bottom section (`# -- wizard hook --`, lines 95+) yet �
 python -m pytest -q tests/test_mcpb_build.py -k "not wizard"
 ```
 
-Expected: the four non-wizard tests (`test_build_writes_versioned_bundle`, `test_bundle_contents_match_layout`, `test_second_build_does_not_overwrite`, `test_returns_none_without_staging`) PASS. The three `test_wizard_*` tests at the bottom will still fail/error at this point because they still reference `neo_localmcp.wizard` (unmoved) — that's expected; Task 6 fixes them. Confirm only that the four non-wizard tests pass and nothing you touched broke.
+Expected: the four non-wizard tests (`test_build_writes_versioned_bundle`, `test_bundle_contents_match_layout`, `test_second_build_does_not_overwrite`, `test_returns_none_without_staging`) PASS. The three `test_wizard_*` tests at the bottom will still fail/error at this point because they still reference `my_localmcp.wizard` (unmoved) — that's expected; Task 6 fixes them. Confirm only that the four non-wizard tests pass and nothing you touched broke.
 
 - [x] **Step 6: Compile-check**
 
 ```bash
-python -m compileall -q neo_localmcp setup.py
+python -m compileall -q my_localmcp setup.py
 ```
 
 Expected: no output (success).
@@ -120,7 +120,7 @@ Expected: no output (success).
 - [x] **Step 7: Commit**
 
 ```bash
-git add neo_localmcp/installer/mcpb.py neo_localmcp/mcpb_build.py neo_localmcp/wizard/real_backend.py tests/test_mcpb_build.py
+git add my_localmcp/installer/mcpb.py my_localmcp/mcpb_build.py my_localmcp/wizard/real_backend.py tests/test_mcpb_build.py
 git commit -m "refactor(installer): move mcpb_build.py into installer/ as mcpb.py"
 ```
 
@@ -128,29 +128,29 @@ git commit -m "refactor(installer): move mcpb_build.py into installer/ as mcpb.p
 
 ### Task 2: Move `setup_cli.py` → `installer/cli.py` ✅ COMPLETE (commit a0684a5)
 
-**Why:** `setup_cli.py` exists purely to parse args and call `neo_localmcp.installer` operations — it is the installer's CLI frontend and belongs inside the domain it drives, directly analogous to `wizard/` being the installer's UI frontend (Task 3).
+**Why:** `setup_cli.py` exists purely to parse args and call `my_localmcp.installer` operations — it is the installer's CLI frontend and belongs inside the domain it drives, directly analogous to `wizard/` being the installer's UI frontend (Task 3).
 
-**Critical gotcha:** `setup_cli.py`'s `_source_root()` does `Path(__file__).resolve().parents[1]` to find the repo root. Today `__file__` = `neo_localmcp/setup_cli.py`, so `parents[0]` = `neo_localmcp/`, `parents[1]` = repo root. After the move, `__file__` = `neo_localmcp/installer/cli.py`, so `parents[1]` = `neo_localmcp/` (wrong!) — it must become `parents[2]` to still reach the repo root. **Missing this breaks every real (non-dry-run) install/reinstall/uninstall**, since `_source_root()` feeds `OperationContext.source_root`, which the runtime-build step validates against (`pyproject.toml` existence, etc.).
+**Critical gotcha:** `setup_cli.py`'s `_source_root()` does `Path(__file__).resolve().parents[1]` to find the repo root. Today `__file__` = `my_localmcp/setup_cli.py`, so `parents[0]` = `my_localmcp/`, `parents[1]` = repo root. After the move, `__file__` = `my_localmcp/installer/cli.py`, so `parents[1]` = `my_localmcp/` (wrong!) — it must become `parents[2]` to still reach the repo root. **Missing this breaks every real (non-dry-run) install/reinstall/uninstall**, since `_source_root()` feeds `OperationContext.source_root`, which the runtime-build step validates against (`pyproject.toml` existence, etc.).
 
 **Files:**
-- Move: `neo_localmcp/setup_cli.py` → `neo_localmcp/installer/cli.py`
+- Move: `my_localmcp/setup_cli.py` → `my_localmcp/installer/cli.py`
 - Modify (within the moved file): imports, `_source_root()`, `argparse` help strings (none reference the old path, no change needed there)
 - Modify: `setup.py:44` (delegation target)
-- Modify: `neo_localmcp/wizard/real_backend.py:278-280` (the dynamic `_dry_run` import — this file also moves in Task 3, but fix the reference now)
+- Modify: `my_localmcp/wizard/real_backend.py:278-280` (the dynamic `_dry_run` import — this file also moves in Task 3, but fix the reference now)
 
 **Interfaces:**
-- Produces: `neo_localmcp.installer.cli.main(argv: list[str] | None = None) -> int`, `neo_localmcp.installer.cli.dry_run_plan(operation: str, *, clean: bool = False, delete_memory: bool = False) -> tuple[str, tuple[str, ...]]`, `neo_localmcp.installer.cli.build_parser() -> argparse.ArgumentParser`, `neo_localmcp.installer.cli.build_context(reporter: Reporter | None = None) -> OperationContext` — all identical signatures to the old `neo_localmcp.setup_cli` equivalents.
+- Produces: `my_localmcp.installer.cli.main(argv: list[str] | None = None) -> int`, `my_localmcp.installer.cli.dry_run_plan(operation: str, *, clean: bool = False, delete_memory: bool = False) -> tuple[str, tuple[str, ...]]`, `my_localmcp.installer.cli.build_parser() -> argparse.ArgumentParser`, `my_localmcp.installer.cli.build_context(reporter: Reporter | None = None) -> OperationContext` — all identical signatures to the old `my_localmcp.setup_cli` equivalents.
 - Consumes (from Task 1, already in place): nothing new.
 
 - [x] **Step 1: Move the file with `git mv`**
 
 ```bash
-git mv neo_localmcp/setup_cli.py neo_localmcp/installer/cli.py
+git mv my_localmcp/setup_cli.py my_localmcp/installer/cli.py
 ```
 
 - [x] **Step 2: Fix `_source_root()`'s path depth**
 
-In `neo_localmcp/installer/cli.py`, change:
+In `my_localmcp/installer/cli.py`, change:
 
 ```python
 def _source_root() -> Path:
@@ -166,10 +166,10 @@ def _source_root() -> Path:
 
 - [x] **Step 3: Convert the module-level import from absolute to relative-sibling**
 
-In `neo_localmcp/installer/cli.py`, change:
+In `my_localmcp/installer/cli.py`, change:
 
 ```python
-from neo_localmcp.installer import (  # noqa: E402
+from my_localmcp.installer import (  # noqa: E402
     ManagedPaths,
     Operation,
     OperationContext,
@@ -197,7 +197,7 @@ from .state import detect_state  # noqa: E402
 from .types import Operation, OperationContext, OperationResult, OperationStatus  # noqa: E402
 ```
 
-Note: `OperationContext` is defined in `.operations`, not `.types` — check `neo_localmcp/installer/operations.py`'s own `from .types import (...)` line if unsure, but per the barrel's own grouping (`from .operations import (OperationContext, SourceValidationError, ...)`), the correct import is:
+Note: `OperationContext` is defined in `.operations`, not `.types` — check `my_localmcp/installer/operations.py`'s own `from .types import (...)` line if unsure, but per the barrel's own grouping (`from .operations import (OperationContext, SourceValidationError, ...)`), the correct import is:
 
 ```python
 from .operations import OperationContext, install, reinstall, uninstall  # noqa: E402
@@ -215,13 +215,13 @@ from .state import detect_state  # noqa: E402
 from .types import Operation, OperationResult, OperationStatus  # noqa: E402
 ```
 
-- [x] **Step 4: Replace the two inline `from neo_localmcp.installer import X` calls**
+- [x] **Step 4: Replace the two inline `from my_localmcp.installer import X` calls**
 
 In `_run_config_ollama` (was line 369), change:
 
 ```python
 def _run_config_ollama(args: argparse.Namespace, reporter: Reporter) -> int:
-    from neo_localmcp.installer import configure_models
+    from my_localmcp.installer import configure_models
 
     ollama_cfg = configure_models(
 ```
@@ -239,7 +239,7 @@ In `_run_manage_clients` (was line 389), change:
 def _run_manage_clients(
     args: argparse.Namespace, context: OperationContext, reporter: Reporter,
 ) -> int:
-    from neo_localmcp.installer import apply_client_selection
+    from my_localmcp.installer import apply_client_selection
 
     outcome = apply_client_selection(
 ```
@@ -258,18 +258,18 @@ def _run_manage_clients(
 In `setup.py`, change line 44 from:
 
 ```python
-        from neo_localmcp.setup_cli import main
+        from my_localmcp.setup_cli import main
 ```
 
 to:
 
 ```python
-        from neo_localmcp.installer.cli import main
+        from my_localmcp.installer.cli import main
 ```
 
 - [x] **Step 6: Update `real_backend.py`'s dynamic dry-run import**
 
-In `neo_localmcp/wizard/real_backend.py`, inside `_dry_run` (was lines 277-280), change:
+In `my_localmcp/wizard/real_backend.py`, inside `_dry_run` (was lines 277-280), change:
 
 ```python
     def _dry_run(self, state: WizardState, emit: EmitFn) -> OperationOutcome:
@@ -289,7 +289,7 @@ to:
             state.operation,
 ```
 
-(This file physically moves to `installer/wizard/real_backend.py` → `live_backend.py` in Task 3/Task 4; this step just fixes the reference now so it's correct wherever the file lives. After Task 3 the relative import stays `from ..installer import cli as installer_cli` since `..` will then mean `installer/`'s parent... — **no**, re-check: after Task 3, `real_backend.py`/`live_backend.py` lives at `neo_localmcp/installer/wizard/`, so `..` means `neo_localmcp/installer/`, and `from ..installer import cli` would incorrectly look for `neo_localmcp/installer/installer/cli`. **Do not write the final form yet in this task** — write it correctly for Task 2's *current* file location (`neo_localmcp/wizard/real_backend.py`, where `..` = `neo_localmcp/`), i.e.:
+(This file physically moves to `installer/wizard/real_backend.py` → `live_backend.py` in Task 3/Task 4; this step just fixes the reference now so it's correct wherever the file lives. After Task 3 the relative import stays `from ..installer import cli as installer_cli` since `..` will then mean `installer/`'s parent... — **no**, re-check: after Task 3, `real_backend.py`/`live_backend.py` lives at `my_localmcp/installer/wizard/`, so `..` means `my_localmcp/installer/`, and `from ..installer import cli` would incorrectly look for `my_localmcp/installer/installer/cli`. **Do not write the final form yet in this task** — write it correctly for Task 2's *current* file location (`my_localmcp/wizard/real_backend.py`, where `..` = `my_localmcp/`), i.e.:
 
 ```python
     def _dry_run(self, state: WizardState, emit: EmitFn) -> OperationOutcome:
@@ -299,7 +299,7 @@ to:
             state.operation,
 ```
 
-This is correct for Task 2 (file still at `neo_localmcp/wizard/`). Task 3 will correct the dot-depth again when the file itself moves.
+This is correct for Task 2 (file still at `my_localmcp/wizard/`). Task 3 will correct the dot-depth again when the file itself moves.
 
 - [x] **Step 7: Run the affected tests**
 
@@ -318,13 +318,13 @@ Expected: all PASS (the `test_*_lifecycle.py` files are slow/real-venv tests; sk
 - [x] **Step 8: Compile-check**
 
 ```bash
-python -m compileall -q neo_localmcp setup.py
+python -m compileall -q my_localmcp setup.py
 ```
 
 - [x] **Step 9: Commit**
 
 ```bash
-git add neo_localmcp/installer/cli.py neo_localmcp/setup_cli.py setup.py neo_localmcp/wizard/real_backend.py
+git add my_localmcp/installer/cli.py my_localmcp/setup_cli.py setup.py my_localmcp/wizard/real_backend.py
 git commit -m "refactor(installer): move setup_cli.py into installer/ as cli.py"
 ```
 
@@ -335,30 +335,30 @@ git commit -m "refactor(installer): move setup_cli.py into installer/ as cli.py"
 **Why:** The wizard is the installer's interactive UI frontend, same reasoning as Task 2's CLI frontend. `RealBackend`/`FakeBackend` naming was flagged as confusing; `LiveBackend` is the clearer opposite of the "preview" backend (renamed in Task 4).
 
 **Critical gotchas (both are real bugs if missed):**
-1. `real_backend.py`'s relative-import depth changes: it currently does `from .. import client_setup, config, ollama_client` (two dots = `neo_localmcp/`, since the file is at `neo_localmcp/wizard/`). After the move to `neo_localmcp/installer/wizard/`, reaching `neo_localmcp/` needs **three** dots.
-2. `real_backend.py`'s `self._source_root = Path(neo_localmcp.__file__).resolve().parent.parent` is **unaffected** by the move — it resolves via the absolute `import neo_localmcp` and `neo_localmcp.__file__`, not via this module's own `__file__`. Do not "fix" this line; it is already correct and moving the file changes nothing about it.
+1. `real_backend.py`'s relative-import depth changes: it currently does `from .. import client_setup, config, ollama_client` (two dots = `my_localmcp/`, since the file is at `my_localmcp/wizard/`). After the move to `my_localmcp/installer/wizard/`, reaching `my_localmcp/` needs **three** dots.
+2. `real_backend.py`'s `self._source_root = Path(my_localmcp.__file__).resolve().parent.parent` is **unaffected** by the move — it resolves via the absolute `import my_localmcp` and `my_localmcp.__file__`, not via this module's own `__file__`. Do not "fix" this line; it is already correct and moving the file changes nothing about it.
 
 **Files:**
-- Move: `neo_localmcp/wizard/__init__.py` → `neo_localmcp/installer/wizard/__init__.py` (unchanged content)
-- Move: `neo_localmcp/wizard/_ansi.py` → `neo_localmcp/installer/wizard/_ansi.py` (unchanged content — no `__file__`-relative paths inside it)
-- Move: `neo_localmcp/wizard/preflight.py` → `neo_localmcp/installer/wizard/preflight.py` (unchanged content — no `__file__`-relative paths inside it; only cosmetic `--fake` → `--preview` comment fix, done in Task 5)
-- Move: `neo_localmcp/wizard/backend.py` → `neo_localmcp/installer/wizard/backend.py` (unchanged content — zero imports beyond stdlib)
-- Move + rename: `neo_localmcp/wizard/real_backend.py` → `neo_localmcp/installer/wizard/live_backend.py`, class `RealBackend` → `LiveBackend`
-- Modify: `neo_localmcp/wizard/console.py` → moves to `neo_localmcp/installer/wizard/console.py` in this task (import-path fix only; terminology purge is Task 5)
+- Move: `my_localmcp/wizard/__init__.py` → `my_localmcp/installer/wizard/__init__.py` (unchanged content)
+- Move: `my_localmcp/wizard/_ansi.py` → `my_localmcp/installer/wizard/_ansi.py` (unchanged content — no `__file__`-relative paths inside it)
+- Move: `my_localmcp/wizard/preflight.py` → `my_localmcp/installer/wizard/preflight.py` (unchanged content — no `__file__`-relative paths inside it; only cosmetic `--fake` → `--preview` comment fix, done in Task 5)
+- Move: `my_localmcp/wizard/backend.py` → `my_localmcp/installer/wizard/backend.py` (unchanged content — zero imports beyond stdlib)
+- Move + rename: `my_localmcp/wizard/real_backend.py` → `my_localmcp/installer/wizard/live_backend.py`, class `RealBackend` → `LiveBackend`
+- Modify: `my_localmcp/wizard/console.py` → moves to `my_localmcp/installer/wizard/console.py` in this task (import-path fix only; terminology purge is Task 5)
 - Modify: `setup_wizard.py:54,59` (delegation targets)
 
 **Interfaces:**
-- Produces: `neo_localmcp.installer.wizard.console.run(argv: list[str] | None = None) -> int`; `neo_localmcp.installer.wizard.live_backend.LiveBackend` (implements `WizardBackend`); `neo_localmcp.installer.wizard.backend.WizardBackend`, `.WizardState`, `.DetectedInfo`, `.ClientOption`, `.OllamaInfo`, `.OperationOutcome`, `.StepEvent`, `.EmitFn`, `.human_size`, `.CLIENT_KEYS`, `.CLIENT_LABELS`, `.OP_INSTALL`, `.OP_REINSTALL`, `.OP_UNINSTALL`, `.OP_CONFIG_OLLAMA`, `.OP_MANAGE_CLIENTS`, `.FULL_WIPE_PHRASE` — all identical to today's `neo_localmcp.wizard.backend` exports, just at the new module path.
-- Consumes (from Task 1 and Task 2, already in place): `neo_localmcp.installer.mcpb.build_mcpb`, `neo_localmcp.installer.cli.dry_run_plan`.
+- Produces: `my_localmcp.installer.wizard.console.run(argv: list[str] | None = None) -> int`; `my_localmcp.installer.wizard.live_backend.LiveBackend` (implements `WizardBackend`); `my_localmcp.installer.wizard.backend.WizardBackend`, `.WizardState`, `.DetectedInfo`, `.ClientOption`, `.OllamaInfo`, `.OperationOutcome`, `.StepEvent`, `.EmitFn`, `.human_size`, `.CLIENT_KEYS`, `.CLIENT_LABELS`, `.OP_INSTALL`, `.OP_REINSTALL`, `.OP_UNINSTALL`, `.OP_CONFIG_OLLAMA`, `.OP_MANAGE_CLIENTS`, `.FULL_WIPE_PHRASE` — all identical to today's `my_localmcp.wizard.backend` exports, just at the new module path.
+- Consumes (from Task 1 and Task 2, already in place): `my_localmcp.installer.mcpb.build_mcpb`, `my_localmcp.installer.cli.dry_run_plan`.
 
 - [x] **Step 1: Move the four unchanged-content files with `git mv`**
 
 ```bash
-mkdir -p neo_localmcp/installer/wizard
-git mv neo_localmcp/wizard/__init__.py neo_localmcp/installer/wizard/__init__.py
-git mv neo_localmcp/wizard/_ansi.py neo_localmcp/installer/wizard/_ansi.py
-git mv neo_localmcp/wizard/preflight.py neo_localmcp/installer/wizard/preflight.py
-git mv neo_localmcp/wizard/backend.py neo_localmcp/installer/wizard/backend.py
+mkdir -p my_localmcp/installer/wizard
+git mv my_localmcp/wizard/__init__.py my_localmcp/installer/wizard/__init__.py
+git mv my_localmcp/wizard/_ansi.py my_localmcp/installer/wizard/_ansi.py
+git mv my_localmcp/wizard/preflight.py my_localmcp/installer/wizard/preflight.py
+git mv my_localmcp/wizard/backend.py my_localmcp/installer/wizard/backend.py
 ```
 
 Do not edit these four files' contents in this step.
@@ -366,21 +366,21 @@ Do not edit these four files' contents in this step.
 - [x] **Step 2: Move and rename `real_backend.py` → `live_backend.py`**
 
 ```bash
-git mv neo_localmcp/wizard/real_backend.py neo_localmcp/installer/wizard/live_backend.py
+git mv my_localmcp/wizard/real_backend.py my_localmcp/installer/wizard/live_backend.py
 ```
 
 - [x] **Step 3: Fix `live_backend.py`'s import depth and class name**
 
-**Note on the file's actual current state:** Task 1 moved `mcpb_build.py` to `installer/mcpb.py` while this file was still at its old location (`neo_localmcp/wizard/real_backend.py`, `..` = `neo_localmcp/`). Reaching `neo_localmcp/installer/mcpb.py` from there needs `from ..installer.mcpb import build_mcpb` (NOT `from ..mcpb import build_mcpb` — that would resolve to a nonexistent `neo_localmcp.mcpb`). If Task 1 was executed correctly, the file's import block currently reads `from ..installer.mcpb import build_mcpb`, not `from ..mcpb_build import build_mcpb`. Verify this with `grep -n "mcpb" neo_localmcp/wizard/real_backend.py` before proceeding — if it still shows `..mcpb_build`, Task 1 was not completed correctly and must be fixed first.
+**Note on the file's actual current state:** Task 1 moved `mcpb_build.py` to `installer/mcpb.py` while this file was still at its old location (`my_localmcp/wizard/real_backend.py`, `..` = `my_localmcp/`). Reaching `my_localmcp/installer/mcpb.py` from there needs `from ..installer.mcpb import build_mcpb` (NOT `from ..mcpb import build_mcpb` — that would resolve to a nonexistent `my_localmcp.mcpb`). If Task 1 was executed correctly, the file's import block currently reads `from ..installer.mcpb import build_mcpb`, not `from ..mcpb_build import build_mcpb`. Verify this with `grep -n "mcpb" my_localmcp/wizard/real_backend.py` before proceeding — if it still shows `..mcpb_build`, Task 1 was not completed correctly and must be fixed first.
 
 Also per Task 2, Step 6, the `_dry_run` method's inline import currently reads `from ..installer import cli as installer_cli`.
 
-In `neo_localmcp/installer/wizard/live_backend.py` (this task's new location, after Step 2's `git mv` above), fix **all** relative imports for the new depth (`wizard/` → `installer/` → `neo_localmcp/` is now three levels, not two — moving `wizard/` one level deeper changes every dot-count that used to reach `neo_localmcp/` or `installer/` from the old `neo_localmcp/wizard/` location).
+In `my_localmcp/installer/wizard/live_backend.py` (this task's new location, after Step 2's `git mv` above), fix **all** relative imports for the new depth (`wizard/` → `installer/` → `my_localmcp/` is now three levels, not two — moving `wizard/` one level deeper changes every dot-count that used to reach `my_localmcp/` or `installer/` from the old `my_localmcp/wizard/` location).
 
 Change the top-of-file imports from:
 
 ```python
-import neo_localmcp
+import my_localmcp
 from .. import client_setup, config, ollama_client
 from ..installer.mcpb import build_mcpb
 from ..installer import (
@@ -415,7 +415,7 @@ from .backend import (
 to:
 
 ```python
-import neo_localmcp
+import my_localmcp
 from ... import client_setup, config, ollama_client
 from .. import (
     ManagedPaths,
@@ -447,7 +447,7 @@ from .backend import (
 )
 ```
 
-(`from .. import (...)` now reaches the `installer/` barrel — one level up from `installer/wizard/` is `installer/`, which is exactly right. `from ... import client_setup, config, ollama_client` now reaches `neo_localmcp/` — two levels up from `installer/wizard/` is `installer/`, three levels up is `neo_localmcp/`.)
+(`from .. import (...)` now reaches the `installer/` barrel — one level up from `installer/wizard/` is `installer/`, which is exactly right. `from ... import client_setup, config, ollama_client` now reaches `my_localmcp/` — two levels up from `installer/wizard/` is `installer/`, three levels up is `my_localmcp/`.)
 
 Then fix the `_dry_run` method's inline import from:
 
@@ -469,7 +469,7 @@ to:
 
 - [x] **Step 4: Rename the class `RealBackend` → `LiveBackend`**
 
-In `neo_localmcp/installer/wizard/live_backend.py`, change:
+In `my_localmcp/installer/wizard/live_backend.py`, change:
 
 ```python
 class RealBackend:
@@ -488,10 +488,10 @@ This is the only place the class is *defined*; every other file that references 
 - [x] **Step 5: Move `console.py` and fix its import depth**
 
 ```bash
-git mv neo_localmcp/wizard/console.py neo_localmcp/installer/wizard/console.py
+git mv my_localmcp/wizard/console.py my_localmcp/installer/wizard/console.py
 ```
 
-In `neo_localmcp/installer/wizard/console.py`, the late imports change. Change:
+In `my_localmcp/installer/wizard/console.py`, the late imports change. Change:
 
 ```python
     def _enter_preview_dummy(self) -> None:
@@ -550,12 +550,12 @@ In `setup_wizard.py`, change:
 ```python
 def main() -> int:
     # Stdlib-only preflight -- may print, prompt, pip-install, and re-exec.
-    from neo_localmcp.wizard.preflight import ensure_dependencies
+    from my_localmcp.wizard.preflight import ensure_dependencies
 
     ensure_dependencies(REPO_ROOT, sys.argv)
 
     # Dependencies are guaranteed present past this point.
-    from neo_localmcp.wizard.console import run
+    from my_localmcp.wizard.console import run
 
     return run(sys.argv[1:])
 ```
@@ -565,12 +565,12 @@ to:
 ```python
 def main() -> int:
     # Stdlib-only preflight -- may print, prompt, pip-install, and re-exec.
-    from neo_localmcp.installer.wizard.preflight import ensure_dependencies
+    from my_localmcp.installer.wizard.preflight import ensure_dependencies
 
     ensure_dependencies(REPO_ROOT, sys.argv)
 
     # Dependencies are guaranteed present past this point.
-    from neo_localmcp.installer.wizard.console import run
+    from my_localmcp.installer.wizard.console import run
 
     return run(sys.argv[1:])
 ```
@@ -580,17 +580,17 @@ def main() -> int:
 Finish what Task 1/Step 4 deferred. In `tests/test_mcpb_build.py`, change:
 
 ```python
-from neo_localmcp.installer import Operation, OperationStatus  # noqa: E402
-from neo_localmcp.wizard import real_backend as rb  # noqa: E402
-from neo_localmcp.wizard.backend import WizardState  # noqa: E402
+from my_localmcp.installer import Operation, OperationStatus  # noqa: E402
+from my_localmcp.wizard import real_backend as rb  # noqa: E402
+from my_localmcp.wizard.backend import WizardState  # noqa: E402
 ```
 
 to:
 
 ```python
-from neo_localmcp.installer import Operation, OperationStatus  # noqa: E402
-from neo_localmcp.installer.wizard import live_backend as rb  # noqa: E402
-from neo_localmcp.installer.wizard.backend import WizardState  # noqa: E402
+from my_localmcp.installer import Operation, OperationStatus  # noqa: E402
+from my_localmcp.installer.wizard import live_backend as rb  # noqa: E402
+from my_localmcp.installer.wizard.backend import WizardState  # noqa: E402
 ```
 
 And every `rb.RealBackend()` call site (there are 4: in `_run`'s type hint and in `test_wizard_install_surfaces_built_bundle`, `test_wizard_uninstall_does_not_build`, `test_wizard_survives_build_failure`) becomes `rb.LiveBackend()`. The `monkeypatch.setattr(rb, "install", ...)`, `monkeypatch.setattr(rb, "uninstall", ...)`, `monkeypatch.setattr(rb, "build_mcpb", ...)` calls need NO change — they patch attributes on the `rb` module object itself (which still exists, just aliased to `live_backend` now), and those names (`install`, `uninstall`, `build_mcpb`) are still imported into that module's namespace after Task 3's Step 3 edits.
@@ -614,7 +614,7 @@ Note: `tests/test_wizard.py` will still fail at this point — it's fixed in Tas
 - [x] **Step 9: Compile-check**
 
 ```bash
-python -m compileall -q neo_localmcp setup.py
+python -m compileall -q my_localmcp setup.py
 ```
 
 - [x] **Step 10: Commit**
@@ -630,26 +630,26 @@ git commit -m "refactor(installer): move wizard/ into installer/wizard/, rename 
 
 **Why:** Consistent with the "preview" naming chosen for the wizard's simulation mode (see Task 5 for the full terminology purge). Splitting this into its own task from Task 5 keeps the file-rename mechanics separate from the pure text/terminology edits inside `console.py`.
 
-**Critical gotcha:** `fake_backend.py`'s `_STATE_DIR = Path(__file__).resolve().parents[2] / ".wizard_preview"`. Today `__file__` = `neo_localmcp/wizard/fake_backend.py` → `parents[0]`=`wizard/`, `parents[1]`=`neo_localmcp/`, `parents[2]`=repo root. After Task 3 already moved this file's *sibling* `console.py` etc. into `installer/wizard/`, and this task moves `fake_backend.py` itself into that same new location (`neo_localmcp/installer/wizard/preview_backend.py`), the depth changes: `parents[0]`=`wizard/`, `parents[1]`=`installer/`, `parents[2]`=`neo_localmcp/` (wrong — one level short). **It must become `parents[3]`** to still reach the repo root. Missing this makes `.wizard_preview/state.json` get created inside `neo_localmcp/` instead of at the repo root — the directory is gitignored either way so it wouldn't break CI, but it would silently break every local `--preview` run's state persistence (each run would look in the wrong place, always reseed instead of round-tripping state) and the round-trip test in Task 6 would fail.
+**Critical gotcha:** `fake_backend.py`'s `_STATE_DIR = Path(__file__).resolve().parents[2] / ".wizard_preview"`. Today `__file__` = `my_localmcp/wizard/fake_backend.py` → `parents[0]`=`wizard/`, `parents[1]`=`my_localmcp/`, `parents[2]`=repo root. After Task 3 already moved this file's *sibling* `console.py` etc. into `installer/wizard/`, and this task moves `fake_backend.py` itself into that same new location (`my_localmcp/installer/wizard/preview_backend.py`), the depth changes: `parents[0]`=`wizard/`, `parents[1]`=`installer/`, `parents[2]`=`my_localmcp/` (wrong — one level short). **It must become `parents[3]`** to still reach the repo root. Missing this makes `.wizard_preview/state.json` get created inside `my_localmcp/` instead of at the repo root — the directory is gitignored either way so it wouldn't break CI, but it would silently break every local `--preview` run's state persistence (each run would look in the wrong place, always reseed instead of round-tripping state) and the round-trip test in Task 6 would fail.
 
 **Files:**
-- Move + rename: `neo_localmcp/installer/wizard/fake_backend.py` → `neo_localmcp/installer/wizard/preview_backend.py`, class `FakeBackend` → `PreviewBackend`
-- Modify: `neo_localmcp/installer/wizard/backend.py` (docstring only, Step 6 — a gap the Task 3 review surfaced: no other task was scheduled to fix its stale module-path references)
+- Move + rename: `my_localmcp/installer/wizard/fake_backend.py` → `my_localmcp/installer/wizard/preview_backend.py`, class `FakeBackend` → `PreviewBackend`
+- Modify: `my_localmcp/installer/wizard/backend.py` (docstring only, Step 6 — a gap the Task 3 review surfaced: no other task was scheduled to fix its stale module-path references)
 
 **Interfaces:**
-- Produces: `neo_localmcp.installer.wizard.preview_backend.PreviewBackend` (implements `WizardBackend`), module attributes `_STATE_PATH`, `_STATE_DIR`, `_STEP_DELAY` (same names, same meaning, just class/module renamed) — these three names are monkeypatched by `tests/test_wizard.py` (fixed in Task 6), so they must keep their exact names.
+- Produces: `my_localmcp.installer.wizard.preview_backend.PreviewBackend` (implements `WizardBackend`), module attributes `_STATE_PATH`, `_STATE_DIR`, `_STEP_DELAY` (same names, same meaning, just class/module renamed) — these three names are monkeypatched by `tests/test_wizard.py` (fixed in Task 6), so they must keep their exact names.
 
 - [x] **Step 1: Move and rename**
 
-**Note:** Task 3's file list deliberately excluded `fake_backend.py` — it moved the other six wizard/ files into `installer/wizard/` but left `fake_backend.py` behind at its original top-level location, `neo_localmcp/wizard/fake_backend.py`, specifically for this task to move+rename in one step. Verify with `ls neo_localmcp/wizard/` (should show only `fake_backend.py` and possibly stale `__pycache__/`) before running:
+**Note:** Task 3's file list deliberately excluded `fake_backend.py` — it moved the other six wizard/ files into `installer/wizard/` but left `fake_backend.py` behind at its original top-level location, `my_localmcp/wizard/fake_backend.py`, specifically for this task to move+rename in one step. Verify with `ls my_localmcp/wizard/` (should show only `fake_backend.py` and possibly stale `__pycache__/`) before running:
 
 ```bash
-git mv neo_localmcp/wizard/fake_backend.py neo_localmcp/installer/wizard/preview_backend.py
+git mv my_localmcp/wizard/fake_backend.py my_localmcp/installer/wizard/preview_backend.py
 ```
 
 - [x] **Step 2: Fix `_STATE_DIR`'s path depth**
 
-In `neo_localmcp/installer/wizard/preview_backend.py`, change:
+In `my_localmcp/installer/wizard/preview_backend.py`, change:
 
 ```python
 _STATE_DIR = Path(__file__).resolve().parents[2] / ".wizard_preview"
@@ -679,7 +679,7 @@ class PreviewBackend:
 
 - [x] **Step 4: Update `console.py`'s references to the moved/renamed module**
 
-In `neo_localmcp/installer/wizard/console.py`:
+In `my_localmcp/installer/wizard/console.py`:
 
 Change:
 
@@ -723,43 +723,43 @@ to (again, only the module/class reference — the `--fake`/`fake` flag rename i
 
 - [x] **Step 5: Rename the environment variable**
 
-In `neo_localmcp/installer/wizard/preview_backend.py`, change **all three** occurrences of `NEO_LOCALMCP_WIZARD_FAKE_STATE` to `NEO_LOCALMCP_WIZARD_PREVIEW_STATE`: the code in `_seed_state()`, the module docstring near the top of the file, and a comment above `_STATE_DIR`. The code occurrence is in `_seed_state()`:
+In `my_localmcp/installer/wizard/preview_backend.py`, change **all three** occurrences of `MY_LOCALMCP_WIZARD_FAKE_STATE` to `MY_LOCALMCP_WIZARD_PREVIEW_STATE`: the code in `_seed_state()`, the module docstring near the top of the file, and a comment above `_STATE_DIR`. The code occurrence is in `_seed_state()`:
 
 ```python
 def _seed_state() -> dict[str, Any]:
-    start = os.environ.get("NEO_LOCALMCP_WIZARD_FAKE_STATE", "absent").strip().lower()
+    start = os.environ.get("MY_LOCALMCP_WIZARD_FAKE_STATE", "absent").strip().lower()
 ```
 
 becomes:
 
 ```python
 def _seed_state() -> dict[str, Any]:
-    start = os.environ.get("NEO_LOCALMCP_WIZARD_PREVIEW_STATE", "absent").strip().lower()
+    start = os.environ.get("MY_LOCALMCP_WIZARD_PREVIEW_STATE", "absent").strip().lower()
 ```
 
-Also update the module docstring's mention of this env var (near the top of the file) from `NEO_LOCALMCP_WIZARD_FAKE_STATE` to `NEO_LOCALMCP_WIZARD_PREVIEW_STATE`, and `setup_wizard.py`'s docstring, which also documents this env var:
+Also update the module docstring's mention of this env var (near the top of the file) from `MY_LOCALMCP_WIZARD_FAKE_STATE` to `MY_LOCALMCP_WIZARD_PREVIEW_STATE`, and `setup_wizard.py`'s docstring, which also documents this env var:
 
 ```python
-             NEO_LOCALMCP_WIZARD_FAKE_STATE=healthy to simulate a returning user
+             MY_LOCALMCP_WIZARD_FAKE_STATE=healthy to simulate a returning user
 ```
 
 becomes:
 
 ```python
-             NEO_LOCALMCP_WIZARD_PREVIEW_STATE=healthy to simulate a returning user
+             MY_LOCALMCP_WIZARD_PREVIEW_STATE=healthy to simulate a returning user
 ```
 
 - [x] **Step 6: Fix `backend.py`'s stale docstring (review-pass addition, Task 3)**
 
-Task 3's review found that `neo_localmcp/installer/wizard/backend.py`'s module docstring (lines 4-7) was never scheduled for a fix by any task: it names the two backend implementations by their OLD module paths and OLD class names, and nothing else in this plan touches it. Fix it now, in this task, since this is where both renames it needs (`fake_backend`→`preview_backend`, and the `real_backend`→`live_backend` rename Task 3 already did) are both in scope. Change:
+Task 3's review found that `my_localmcp/installer/wizard/backend.py`'s module docstring (lines 4-7) was never scheduled for a fix by any task: it names the two backend implementations by their OLD module paths and OLD class names, and nothing else in this plan touches it. Fix it now, in this task, since this is where both renames it needs (`fake_backend`→`preview_backend`, and the `real_backend`→`live_backend` rename Task 3 already did) are both in scope. Change:
 
 ```python
 """The seam between the wizard UI and real lifecycle work.
 
 Screens depend only on :class:`WizardBackend` and the plain dataclasses here --
-never on ``neo_localmcp.installer`` directly. Two implementations satisfy this
-contract: :mod:`neo_localmcp.wizard.fake_backend` (in-memory, side-effect free,
-for walking the flow) and :mod:`neo_localmcp.wizard.real_backend` (drives the
+never on ``my_localmcp.installer`` directly. Two implementations satisfy this
+contract: :mod:`my_localmcp.wizard.fake_backend` (in-memory, side-effect free,
+for walking the flow) and :mod:`my_localmcp.wizard.real_backend` (drives the
 actual install lifecycle). Swapping them is a one-line change in ``app.py``.
 
 This module is stdlib-only on purpose so it stays importable everywhere.
@@ -772,10 +772,10 @@ to:
 """The seam between the wizard UI and real lifecycle work.
 
 Screens depend only on :class:`WizardBackend` and the plain dataclasses here --
-never on ``neo_localmcp.installer`` directly. Two implementations satisfy this
-contract: :mod:`neo_localmcp.installer.wizard.preview_backend` (in-memory,
+never on ``my_localmcp.installer`` directly. Two implementations satisfy this
+contract: :mod:`my_localmcp.installer.wizard.preview_backend` (in-memory,
 side-effect free, for walking the flow) and
-:mod:`neo_localmcp.installer.wizard.live_backend` (drives the actual install
+:mod:`my_localmcp.installer.wizard.live_backend` (drives the actual install
 lifecycle). Swapping them is a one-line change in ``app.py``.
 
 This module is stdlib-only on purpose so it stays importable everywhere.
@@ -793,7 +793,7 @@ Expected: all PASS (nothing here references `fake_backend`/`FakeBackend` yet —
 - [x] **Step 8: Compile-check**
 
 ```bash
-python -m compileall -q neo_localmcp setup.py setup_wizard.py
+python -m compileall -q my_localmcp setup.py setup_wizard.py
 ```
 
 - [x] **Step 9: Commit**
@@ -810,16 +810,16 @@ git commit -m "refactor(wizard): rename fake_backend.py to preview_backend.py, F
 **Why:** The UI previously used three inconsistent words for the same concept ("fake" in code, "dummy" in the toggle key/exception, "preview" in the state dir name). Task 4 fixed the file/class names; this task fixes the remaining UI copy, the toggle mechanism, and the `--fake` CLI flag, so "preview" is the only word used anywhere.
 
 **Files:**
-- Modify: `neo_localmcp/installer/wizard/console.py` (multiple spots — see below)
+- Modify: `my_localmcp/installer/wizard/console.py` (multiple spots — see below)
 - Modify: `setup_wizard.py` (docstring `--fake` mention)
-- Modify: `neo_localmcp/installer/wizard/preview_backend.py` (docstring/comment mentions of `--fake`, cosmetic only)
-- Modify: `neo_localmcp/installer/wizard/preflight.py` (one comment mentioning `--fake`, cosmetic only)
+- Modify: `my_localmcp/installer/wizard/preview_backend.py` (docstring/comment mentions of `--fake`, cosmetic only)
+- Modify: `my_localmcp/installer/wizard/preflight.py` (one comment mentioning `--fake`, cosmetic only)
 
 **Interfaces:** No public interface changes — this task is pure text/identifier renaming inside `console.py`'s private implementation. `run(argv)`'s signature is unchanged; only the flag string it looks for in `argv` changes from `"--fake"` to `"--preview"`.
 
 - [x] **Step 1: Rename the `_ToggleDummy` exception**
 
-In `neo_localmcp/installer/wizard/console.py`, change:
+In `my_localmcp/installer/wizard/console.py`, change:
 
 ```python
 class _ToggleDummy(Exception):
@@ -955,7 +955,7 @@ Change:
 Flags:
     --fake   Run against an in-memory simulation. No processes, venvs, network,
              or files are touched -- a safe way to walk the whole flow. Set
-             NEO_LOCALMCP_WIZARD_PREVIEW_STATE=healthy to simulate a returning user
+             MY_LOCALMCP_WIZARD_PREVIEW_STATE=healthy to simulate a returning user
              (already-installed) instead of a first-time clone.
 ```
 
@@ -965,7 +965,7 @@ to:
 Flags:
     --preview   Run against an in-memory simulation. No processes, venvs, network,
                 or files are touched -- a safe way to walk the whole flow. Set
-                NEO_LOCALMCP_WIZARD_PREVIEW_STATE=healthy to simulate a returning user
+                MY_LOCALMCP_WIZARD_PREVIEW_STATE=healthy to simulate a returning user
                 (already-installed) instead of a first-time clone.
 ```
 
@@ -973,7 +973,7 @@ Flags:
 
 - [x] **Step 8: Fix cosmetic `--fake` mentions in `preview_backend.py`**
 
-In `neo_localmcp/installer/wizard/preview_backend.py`, the module docstring and one comment mention `--fake`:
+In `my_localmcp/installer/wizard/preview_backend.py`, the module docstring and one comment mention `--fake`:
 
 ```python
 walk the whole flow safely (``python setup_wizard.py --fake``).
@@ -1011,7 +1011,7 @@ And the three occurrences of `"This is a simulation (--fake)."` / `"This was a s
 
 - [x] **Step 9: Fix cosmetic `--fake` mention in `preflight.py`**
 
-In `neo_localmcp/installer/wizard/preflight.py`, change:
+In `my_localmcp/installer/wizard/preflight.py`, change:
 
 ```python
     # Re-exec so the freshly-installed packages load in a clean process. Preserve
@@ -1036,7 +1036,7 @@ Expected: all PASS (no test yet directly exercises `console.py`'s toggle mechani
 - [x] **Step 11: Compile-check**
 
 ```bash
-python -m compileall -q neo_localmcp setup.py setup_wizard.py
+python -m compileall -q my_localmcp setup.py setup_wizard.py
 ```
 
 - [x] **Step 12: Commit**
@@ -1062,8 +1062,8 @@ git commit -m "refactor(wizard): purge 'dummy' terminology from console.py, stan
 Change:
 
 ```python
-from neo_localmcp.wizard import fake_backend, real_backend
-from neo_localmcp.wizard.backend import (
+from my_localmcp.wizard import fake_backend, real_backend
+from my_localmcp.wizard.backend import (
     OP_INSTALL,
     OP_UNINSTALL,
     WizardBackend,
@@ -1074,8 +1074,8 @@ from neo_localmcp.wizard.backend import (
 to:
 
 ```python
-from neo_localmcp.installer.wizard import live_backend, preview_backend
-from neo_localmcp.installer.wizard.backend import (
+from my_localmcp.installer.wizard import live_backend, preview_backend
+from my_localmcp.installer.wizard.backend import (
     OP_INSTALL,
     OP_UNINSTALL,
     WizardBackend,
@@ -1094,7 +1094,7 @@ def _isolated_fake_backend(tmp_path, monkeypatch):
     # parameterize -- redirect it so tests don't read/write a real file in
     # this repo's working tree or leak state between tests (#13: this whole
     # module had zero pytest coverage before this file). Callers set
-    # NEO_LOCALMCP_WIZARD_FAKE_STATE themselves (via monkeypatch) before
+    # MY_LOCALMCP_WIZARD_FAKE_STATE themselves (via monkeypatch) before
     # calling this, if they want a seed other than the "absent" default.
     monkeypatch.setattr(fake_backend, "_STATE_PATH", tmp_path / "wizard_state.json")
     return fake_backend.FakeBackend()
@@ -1109,7 +1109,7 @@ def _isolated_preview_backend(tmp_path, monkeypatch):
     # parameterize -- redirect it so tests don't read/write a real file in
     # this repo's working tree or leak state between tests (#13: this whole
     # module had zero pytest coverage before this file). Callers set
-    # NEO_LOCALMCP_WIZARD_PREVIEW_STATE themselves (via monkeypatch) before
+    # MY_LOCALMCP_WIZARD_PREVIEW_STATE themselves (via monkeypatch) before
     # calling this, if they want a seed other than the "absent" default.
     monkeypatch.setattr(preview_backend, "_STATE_PATH", tmp_path / "wizard_state.json")
     return preview_backend.PreviewBackend()
@@ -1122,35 +1122,35 @@ Apply this mechanical rename across the whole file (every occurrence):
 - `test_fake_backend_satisfies_wizard_backend_protocol` → `test_preview_backend_satisfies_wizard_backend_protocol`
 - `test_real_backend_satisfies_wizard_backend_protocol` → `test_live_backend_satisfies_wizard_backend_protocol`, and inside it, `real_backend.RealBackend()` → `live_backend.LiveBackend()`
 - `test_fake_backend_detects_absent_by_default` → `test_preview_backend_detects_absent_by_default`
-- `test_fake_backend_detects_healthy_when_seeded` → `test_preview_backend_detects_healthy_when_seeded`, and inside it, `monkeypatch.setenv("NEO_LOCALMCP_WIZARD_FAKE_STATE", "healthy")` → `monkeypatch.setenv("NEO_LOCALMCP_WIZARD_PREVIEW_STATE", "healthy")`
+- `test_fake_backend_detects_healthy_when_seeded` → `test_preview_backend_detects_healthy_when_seeded`, and inside it, `monkeypatch.setenv("MY_LOCALMCP_WIZARD_FAKE_STATE", "healthy")` → `monkeypatch.setenv("MY_LOCALMCP_WIZARD_PREVIEW_STATE", "healthy")`
 - `test_fake_backend_client_options_cover_every_client_key` → `test_preview_backend_client_options_cover_every_client_key`
 - `test_fake_backend_ollama_info_reports_simulated_models` → `test_preview_backend_ollama_info_reports_simulated_models`
 - `test_fake_backend_dry_run_install_makes_no_state_change` → `test_preview_backend_dry_run_install_makes_no_state_change`
 - `test_fake_backend_install_then_uninstall_round_trips_state` → `test_preview_backend_install_then_uninstall_round_trips_state`, and inside it: `monkeypatch.setattr(fake_backend, "_STEP_DELAY", 0.0)` → `monkeypatch.setattr(preview_backend, "_STEP_DELAY", 0.0)`, and the comment `# the same way a later --fake run would see...` → `# the same way a later --preview run would see...`
 - `test_real_backend_apply_client_changes_uses_shared_helper` → `test_live_backend_apply_client_changes_uses_shared_helper`; inside it, change:
   ```python
-  from neo_localmcp.installer import clients as clients_mod
-  from neo_localmcp.wizard.backend import WizardState
-  from neo_localmcp.wizard.real_backend import RealBackend
+  from my_localmcp.installer import clients as clients_mod
+  from my_localmcp.wizard.backend import WizardState
+  from my_localmcp.wizard.real_backend import RealBackend
   ```
   to:
   ```python
-  from neo_localmcp.installer import clients as clients_mod
-  from neo_localmcp.installer.wizard.backend import WizardState
-  from neo_localmcp.installer.wizard.live_backend import LiveBackend
+  from my_localmcp.installer import clients as clients_mod
+  from my_localmcp.installer.wizard.backend import WizardState
+  from my_localmcp.installer.wizard.live_backend import LiveBackend
   ```
   and `backend = RealBackend()` → `backend = LiveBackend()`
 - `test_real_backend_apply_ollama_config_uses_shared_helper` → `test_live_backend_apply_ollama_config_uses_shared_helper`; inside it, change:
   ```python
-  from neo_localmcp import config
-  from neo_localmcp.wizard.backend import WizardState
-  from neo_localmcp.wizard.real_backend import RealBackend
+  from my_localmcp import config
+  from my_localmcp.wizard.backend import WizardState
+  from my_localmcp.wizard.real_backend import RealBackend
   ```
   to:
   ```python
-  from neo_localmcp import config
-  from neo_localmcp.installer.wizard.backend import WizardState
-  from neo_localmcp.installer.wizard.live_backend import LiveBackend
+  from my_localmcp import config
+  from my_localmcp.installer.wizard.backend import WizardState
+  from my_localmcp.installer.wizard.live_backend import LiveBackend
   ```
   and `backend = RealBackend()` → `backend = LiveBackend()`
 
@@ -1170,12 +1170,12 @@ python -m pytest -q -m "not slow" --deselect tests/test_distribution.py::test_bu
 
 Expected: all PASS (this is the first point where every test touched by Tasks 1-6 runs together).
 
-**Why the `--deselect`:** `test_built_mcpb_embeds_current_package_bytes` walks `neo_localmcp/` and asserts the committed `packages/claude-desktop/neo-localmcp-v<version>.mcpb` bundle contains every file byte-for-byte. Tasks 1-5 moved files under `neo_localmcp/` without regenerating that build artifact, so it is legitimately stale mid-reorg. It is deselected at every intermediate checkpoint and regenerated + run for real once in Task 14. This test checks bundle freshness, not reorg correctness, so deselecting it here loses no coverage of the actual code moves. (The sibling `test_built_mcpb_contains_valid_manifest` still runs and passes — it only checks the manifest + `server.py` presence, and `__version__` is unchanged, so the bundle filename/manifest still match.)
+**Why the `--deselect`:** `test_built_mcpb_embeds_current_package_bytes` walks `my_localmcp/` and asserts the committed `packages/claude-desktop/my-localmcp-v<version>.mcpb` bundle contains every file byte-for-byte. Tasks 1-5 moved files under `my_localmcp/` without regenerating that build artifact, so it is legitimately stale mid-reorg. It is deselected at every intermediate checkpoint and regenerated + run for real once in Task 14. This test checks bundle freshness, not reorg correctness, so deselecting it here loses no coverage of the actual code moves. (The sibling `test_built_mcpb_contains_valid_manifest` still runs and passes — it only checks the manifest + `server.py` presence, and `__version__` is unchanged, so the bundle filename/manifest still match.)
 
 - [x] **Step 6: Compile-check**
 
 ```bash
-python -m compileall -q neo_localmcp setup.py setup_wizard.py
+python -m compileall -q my_localmcp setup.py setup_wizard.py
 ```
 
 - [x] **Step 7: Commit**
@@ -1189,27 +1189,27 @@ git commit -m "test(wizard): update test_wizard.py for installer/wizard/ move an
 
 ---
 
-### Task 7: Create `neo_localmcp/mcp_commands/_shared.py` ✅ COMPLETE (commit 46ebfc7)
+### Task 7: Create `my_localmcp/mcp_commands/_shared.py` ✅ COMPLETE (commit 46ebfc7)
 
 **Why:** Three helpers in `tools.py` are genuinely used across what will become 2+ separate category files (`json_out` by all four; `_format_model_timing`/`_ns_to_seconds` and `_slim_status_for_nesting` by both `memory.py`'s `context_prepare` and `editing.py`'s `summarize_file`/`_summarize_section`). Per the design's rule ("no category imports another category — promote to `_shared.py` instead"), these three live here.
 
 **Files:**
-- Create: `neo_localmcp/mcp_commands/__init__.py` (empty — just makes the directory a package)
-- Create: `neo_localmcp/mcp_commands/_shared.py`
+- Create: `my_localmcp/mcp_commands/__init__.py` (empty — just makes the directory a package)
+- Create: `my_localmcp/mcp_commands/_shared.py`
 
 **Interfaces:**
-- Produces: `neo_localmcp.mcp_commands._shared.json_out(data: Any) -> str`, `neo_localmcp.mcp_commands._shared._format_model_timing(result: dict[str, Any] | None) -> dict[str, Any] | None`, `neo_localmcp.mcp_commands._shared._slim_status_for_nesting(status: dict[str, Any] | None) -> dict[str, Any] | None`. Tasks 8-11 consume these via `from ._shared import json_out` etc.
+- Produces: `my_localmcp.mcp_commands._shared.json_out(data: Any) -> str`, `my_localmcp.mcp_commands._shared._format_model_timing(result: dict[str, Any] | None) -> dict[str, Any] | None`, `my_localmcp.mcp_commands._shared._slim_status_for_nesting(status: dict[str, Any] | None) -> dict[str, Any] | None`. Tasks 8-11 consume these via `from ._shared import json_out` etc.
 
 - [x] **Step 1: Create the package directory and empty `__init__.py`**
 
 ```bash
-mkdir -p neo_localmcp/mcp_commands
-touch neo_localmcp/mcp_commands/__init__.py
+mkdir -p my_localmcp/mcp_commands
+touch my_localmcp/mcp_commands/__init__.py
 ```
 
 - [x] **Step 2: Write `_shared.py`**
 
-Create `neo_localmcp/mcp_commands/_shared.py` with exactly this content (moved verbatim from `tools.py` lines 25-53 and 1018-1024 — `json_out`, `_ns_to_seconds`, `_format_model_timing`, `_slim_status_for_nesting`):
+Create `my_localmcp/mcp_commands/_shared.py` with exactly this content (moved verbatim from `tools.py` lines 25-53 and 1018-1024 — `json_out`, `_ns_to_seconds`, `_format_model_timing`, `_slim_status_for_nesting`):
 
 ```python
 from __future__ import annotations
@@ -1263,24 +1263,24 @@ Do not delete these four definitions from `tools.py` yet — `tools.py` still ex
 - [x] **Step 2: Compile-check the new file**
 
 ```bash
-python -m compileall -q neo_localmcp/mcp_commands
+python -m compileall -q my_localmcp/mcp_commands
 ```
 
 - [x] **Step 3: Commit**
 
 ```bash
-git add neo_localmcp/mcp_commands/__init__.py neo_localmcp/mcp_commands/_shared.py
+git add my_localmcp/mcp_commands/__init__.py my_localmcp/mcp_commands/_shared.py
 git commit -m "refactor(mcp-commands): add _shared.py with json_out/_format_model_timing/_slim_status_for_nesting"
 ```
 
 ---
 
-### Task 8: Create `neo_localmcp/mcp_commands/system.py` ✅ COMPLETE (commit 89354e4)
+### Task 8: Create `my_localmcp/mcp_commands/system.py` ✅ COMPLETE (commit 89354e4)
 
 **Why:** `init`, `status`, `where`, `model_status`, `doctor`, `repo_index`, `repo_reindex`, `repo_refresh`, `repo_lookup`, `reset_repo`, `reset_all` are the "system/repo management" category — none of them touch context-ranking, summarization, or Ollama configuration beyond a basic reachability ping.
 
 **Files:**
-- Create: `neo_localmcp/mcp_commands/system.py`
+- Create: `my_localmcp/mcp_commands/system.py`
 
 **Interfaces:**
 - Produces: `init() -> str`, `status(repo_root: str = "auto") -> str`, `where(repo_root: str = "auto") -> str`, `model_status() -> str`, `doctor(repo_root: str = "auto") -> str`, `repo_index(repo_root: str = "auto", max_files: int | None = None, force: bool = False) -> str`, `repo_reindex(repo_root: str = "auto", max_files: int | None = None) -> str`, `repo_refresh(repo_root: str = "auto", max_files: int | None = None, force: bool = False) -> str`, `repo_lookup(query: str, repo_root: str = "auto", limit: int = 20) -> str`, `reset_repo(repo_root: str = "auto") -> str`, `reset_all() -> str` — identical signatures to today's `tools.*` equivalents.
@@ -1288,7 +1288,7 @@ git commit -m "refactor(mcp-commands): add _shared.py with json_out/_format_mode
 
 - [x] **Step 1: Write `system.py`**
 
-Create `neo_localmcp/mcp_commands/system.py`, moving these functions verbatim from `tools.py` (lines 350-427 for `init`/`status`/`where`/`model_status`/`doctor`/`repo_index`/`repo_reindex`/`reset_repo`/`reset_all`, plus lines 501 and 505 for `repo_refresh`/`repo_lookup`):
+Create `my_localmcp/mcp_commands/system.py`, moving these functions verbatim from `tools.py` (lines 350-427 for `init`/`status`/`where`/`model_status`/`doctor`/`repo_index`/`repo_reindex`/`reset_repo`/`reset_all`, plus lines 501 and 505 for `repo_refresh`/`repo_lookup`):
 
 ```python
 from __future__ import annotations
@@ -1301,7 +1301,7 @@ from .utils import repo_root_or_cwd
 from .mcp_commands._shared import json_out
 ```
 
-Wait — `system.py` lives at `neo_localmcp/mcp_commands/system.py`, so its relative imports to top-level `neo_localmcp/` modules need **one** dot (same depth as `tools.py` had, since both `tools.py` and `mcp_commands/` are direct children of `neo_localmcp/`... no — `tools.py` was directly in `neo_localmcp/`, but `system.py` is in `neo_localmcp/mcp_commands/`, one level deeper). Use exactly this import block instead:
+Wait — `system.py` lives at `my_localmcp/mcp_commands/system.py`, so its relative imports to top-level `my_localmcp/` modules need **one** dot (same depth as `tools.py` had, since both `tools.py` and `mcp_commands/` are direct children of `my_localmcp/`... no — `tools.py` was directly in `my_localmcp/`, but `system.py` is in `my_localmcp/mcp_commands/`, one level deeper). Use exactly this import block instead:
 
 ```python
 from __future__ import annotations
@@ -1321,10 +1321,10 @@ def init() -> str:
         "product": IDENTITY.product_name,
         "config_path": str(path),
         "next": [
-            "Run client setup once from anywhere: neo-localmcp config clients setup --client all",
+            "Run client setup once from anywhere: my-localmcp config clients setup --client all",
             "Then cd into the repo you want analyzed: cd /path/to/your/repo",
-            "Index that repo: neo-localmcp index",
-            "Ask for context: neo-localmcp context \"debug feature X: KnownSymbol, FileName.cs\"",
+            "Index that repo: my-localmcp index",
+            "Ask for context: my-localmcp context \"debug feature X: KnownSymbol, FileName.cs\"",
         ],
     })
 
@@ -1338,13 +1338,13 @@ def where(repo_root: str = "auto") -> str:
     root = repo_root_or_cwd(repo_root)
     return json_out({
         "product": IDENTITY.product_name,
-        "installed_command_hint": "neo-localmcp",
+        "installed_command_hint": "my-localmcp",
         "config_path": str(CONFIG_PATH),
         "current_repo": str(root),
         "repo_db": str(repo_memory.db_path()),
         "ollama_base_url": cfg.get("ollama", {}).get("base_url"),
         "summary_model": cfg.get("ollama", {}).get("summary_model"),
-        "note": "Run index/context from the repo you want analyzed. Client setup (neo-localmcp config clients setup) can be run once from anywhere.",
+        "note": "Run index/context from the repo you want analyzed. Client setup (my-localmcp config clients setup) can be run once from anywhere.",
     })
 
 
@@ -1367,11 +1367,11 @@ def doctor(repo_root: str = "auto") -> str:
         "repo": repo_memory.status(repo_root),
         "running_servers": lifecycle.list_servers(prune=True),
         "rules": [
-            "neo-localmcp retrieves, indexes, summarizes, ranks, and applies exact approved patches.",
-            "neo-localmcp does not generate source code or make engineering decisions.",
+            "my-localmcp retrieves, indexes, summarizes, ranks, and applies exact approved patches.",
+            "my-localmcp does not generate source code or make engineering decisions.",
             "Claude/Codex reason and create exact patches.",
             "Context lookup is deterministic by default; Ollama ranking is opt-in with --ollama-rank or MCP use_ollama=true.",
-            "Run `neo-localmcp --help` for the full, authoritative command inventory.",
+            "Run `my-localmcp --help` for the full, authoritative command inventory.",
         ],
         "config": {"ollama_base_url": cfg.get("ollama", {}).get("base_url"), "summary_model": cfg.get("ollama", {}).get("summary_model"), "db_path": cfg.get("memory", {}).get("db_path")},
     }
@@ -1407,13 +1407,13 @@ Note: `doctor()`'s `from .. import lifecycle` stays a deferred/inline import exa
 - [x] **Step 2: Compile-check**
 
 ```bash
-python -m compileall -q neo_localmcp/mcp_commands
+python -m compileall -q my_localmcp/mcp_commands
 ```
 
 - [x] **Step 3: Commit**
 
 ```bash
-git add neo_localmcp/mcp_commands/system.py
+git add my_localmcp/mcp_commands/system.py
 git commit -m "refactor(mcp-commands): add system.py (init/status/where/doctor/repo_index/reindex/refresh/lookup/reset)"
 ```
 
@@ -1421,12 +1421,12 @@ git commit -m "refactor(mcp-commands): add system.py (init/status/where/doctor/r
 
 ---
 
-### Task 9: Create `neo_localmcp/mcp_commands/memory.py` ✅ COMPLETE (commit b10ef24) — biggest/riskiest task, independently re-verified
+### Task 9: Create `my_localmcp/mcp_commands/memory.py` ✅ COMPLETE (commit b10ef24) — biggest/riskiest task, independently re-verified
 
 **Why:** This is the context-retrieval/ranking pipeline — `context_prepare`/`prepare_context` and everything that exists solely to support them (scoring, heading matching, excerpt-range selection, retrieval-boost, determinism testing). It is the largest and highest-risk file in this plan; move it verbatim, do not refactor its internals.
 
 **Files:**
-- Create: `neo_localmcp/mcp_commands/memory.py`
+- Create: `my_localmcp/mcp_commands/memory.py`
 
 **Interfaces:**
 - Produces: `context_prepare(...) -> str`, `prepare_context(...) -> str`, `file_context(...) -> str`, `file_excerpts(...) -> str`, `record_change(...) -> str`, `test_determinism(...) -> str` — identical signatures to today's `tools.*` equivalents. Also produces (private, used only within this file): `_render_context_text`, `_mcp_compact_context`, `_mcp_tiny_context_text`, `_format`, `_project_read_first_item`, `_git_summary`, `_sanitize_ollama_advisory`, `_stable_context_projection`, `_stable_hash`, `_resolve_reference`, `_line_hint_from_reason`, `_add_candidate`, `_group_line_hints_for_guidance`, `_agent_guidance`, `_term_score`, `_heading_words`, `_heading_match_score`, `_best_heading_section`, `_score_index_and_symbol_hits`, `_score_batched_search`, `_resolve_explicit_paths`, `_apply_retrieval_boost`, `_select_read_first`, `_build_excerpt_ranges`, `_run_ollama_ranking`, `_hint_sort_key`, `_compact_line_hints`, plus module constants `LINE_HINT_MAX_PER_FILE`, `READ_FIRST_MAX`, `_MILESTONE_RE`, `_MAX_SECTION_LINES`.
@@ -1434,7 +1434,7 @@ git commit -m "refactor(mcp-commands): add system.py (init/status/where/doctor/r
 
 - [x] **Step 1: Write `memory.py`**
 
-Create `neo_localmcp/mcp_commands/memory.py` with this import header:
+Create `my_localmcp/mcp_commands/memory.py` with this import header:
 
 ```python
 from __future__ import annotations
@@ -1531,12 +1531,12 @@ from ._shared import _format_model_timing, _slim_status_for_nesting, json_out
 - `prepare_context` (was lines 990-992)
 - `record_change` (was lines 1133-1134)
 
-Copy every one of these function/constant bodies **exactly** as they appear in the current `neo_localmcp/tools.py` (available to read at that path until Task 12 deletes it) — do not paraphrase, reformat, or "improve" anything. The only allowed change anywhere in this file is the import header above.
+Copy every one of these function/constant bodies **exactly** as they appear in the current `my_localmcp/tools.py` (available to read at that path until Task 12 deletes it) — do not paraphrase, reformat, or "improve" anything. The only allowed change anywhere in this file is the import header above.
 
 - [x] **Step 2: Compile-check**
 
 ```bash
-python -m compileall -q neo_localmcp/mcp_commands
+python -m compileall -q my_localmcp/mcp_commands
 ```
 
 - [x] **Step 3: Sanity-check for accidental omissions**
@@ -1544,8 +1544,8 @@ python -m compileall -q neo_localmcp/mcp_commands
 ```bash
 python -c "
 import ast
-old = ast.parse(open('neo_localmcp/tools.py').read())
-new = ast.parse(open('neo_localmcp/mcp_commands/memory.py').read())
+old = ast.parse(open('my_localmcp/tools.py').read())
+new = ast.parse(open('my_localmcp/mcp_commands/memory.py').read())
 old_names = {n.name for n in ast.walk(old) if isinstance(n, (ast.FunctionDef,))}
 new_names = {n.name for n in ast.walk(new) if isinstance(n, (ast.FunctionDef,))}
 expected = {
@@ -1571,7 +1571,7 @@ Expected output: `OK: all 33 expected functions present in memory.py` (the `expe
 - [x] **Step 4: Commit**
 
 ```bash
-git add neo_localmcp/mcp_commands/memory.py
+git add my_localmcp/mcp_commands/memory.py
 git commit -m "refactor(mcp-commands): add memory.py (context_prepare/prepare_context/file_excerpts/record_change/test_determinism)"
 ```
 
@@ -1579,12 +1579,12 @@ git commit -m "refactor(mcp-commands): add memory.py (context_prepare/prepare_co
 
 ---
 
-### Task 10: Create `neo_localmcp/mcp_commands/editing.py` ✅ COMPLETE (commit c80e88e)
+### Task 10: Create `my_localmcp/mcp_commands/editing.py` ✅ COMPLETE (commit c80e88e)
 
 **Why:** `summarize_file` and `apply_unified_patch` are both "operate on file content" tools — chosen over the originally-proposed `misc.py` name because "misc" hides what the file does.
 
 **Files:**
-- Create: `neo_localmcp/mcp_commands/editing.py`
+- Create: `my_localmcp/mcp_commands/editing.py`
 
 **Interfaces:**
 - Produces: `summarize_file(path: str, repo_root: str = "auto", model: str | None = None, heading: str | None = None) -> str`, `apply_unified_patch(patch_text: str, repo_root: str = "auto", check_only: bool = False) -> str` — identical signatures to today's `tools.*` equivalents. Also produces (private): `_cap_keyword_terms`, `_split_summary_keywords`, `_summarize_section`.
@@ -1594,7 +1594,7 @@ git commit -m "refactor(mcp-commands): add memory.py (context_prepare/prepare_co
 
 - [x] **Step 1: Write `editing.py`**
 
-Create `neo_localmcp/mcp_commands/editing.py`:
+Create `my_localmcp/mcp_commands/editing.py`:
 
 ```python
 from __future__ import annotations
@@ -1751,24 +1751,24 @@ from ..utils import read_text_file, rel, repo_root_or_cwd, run_command, safe_pat
 - [x] **Step 2: Compile-check**
 
 ```bash
-python -m compileall -q neo_localmcp/mcp_commands
+python -m compileall -q my_localmcp/mcp_commands
 ```
 
 - [x] **Step 3: Commit**
 
 ```bash
-git add neo_localmcp/mcp_commands/editing.py
+git add my_localmcp/mcp_commands/editing.py
 git commit -m "refactor(mcp-commands): add editing.py (summarize_file/apply_unified_patch)"
 ```
 
 ---
 
-### Task 11: Create `neo_localmcp/mcp_commands/ollama.py` ✅ COMPLETE (commit 85f7b00) — all 4 mcp_commands/ category files now exist
+### Task 11: Create `my_localmcp/mcp_commands/ollama.py` ✅ COMPLETE (commit 85f7b00) — all 4 mcp_commands/ category files now exist
 
 **Why:** `set_ollama`, `ollama_status`, `ollama_ensure`, `ollama_control` are the MCP/CLI-facing Ollama surface — distinct from `ollama_client.py` (daemon RPC primitives) and `installer/ollama.py` (lifecycle-scoped config), per the design doc's disambiguation.
 
 **Files:**
-- Create: `neo_localmcp/mcp_commands/ollama.py`
+- Create: `my_localmcp/mcp_commands/ollama.py`
 
 **Interfaces:**
 - Produces: `set_ollama(base_url: str | None = None, summary_model: str | None = None, fast_model: str | None = None, num_ctx: int | None = None) -> str`, `ollama_status(model: str | None = None, purpose: str = "ranking") -> str`, `ollama_ensure(model: str | None = None, purpose: str = "ranking") -> str`, `ollama_control(action: str, model: str | None = None, purpose: str = "ranking") -> str` — identical signatures to today's `tools.*` equivalents.
@@ -1776,7 +1776,7 @@ git commit -m "refactor(mcp-commands): add editing.py (summarize_file/apply_unif
 
 - [x] **Step 1: Write `ollama.py`**
 
-Create `neo_localmcp/mcp_commands/ollama.py`:
+Create `my_localmcp/mcp_commands/ollama.py`:
 
 ```python
 from __future__ import annotations
@@ -1819,13 +1819,13 @@ def ollama_control(action: str, model: str | None = None, purpose: str = "rankin
 - [x] **Step 2: Compile-check**
 
 ```bash
-python -m compileall -q neo_localmcp/mcp_commands
+python -m compileall -q my_localmcp/mcp_commands
 ```
 
 - [x] **Step 3: Commit**
 
 ```bash
-git add neo_localmcp/mcp_commands/ollama.py
+git add my_localmcp/mcp_commands/ollama.py
 git commit -m "refactor(mcp-commands): add ollama.py (set_ollama/ollama_status/ollama_ensure/ollama_control)"
 ```
 
@@ -1836,12 +1836,12 @@ git commit -m "refactor(mcp-commands): add ollama.py (set_ollama/ollama_status/o
 **Why:** All four category files now exist with verified-complete content (Tasks 8-11); this task is the atomic cutover — delete the monolith and fix every real caller in one pass so there is never a half-migrated state where some code imports `tools` and other code imports `mcp_commands`.
 
 **Files:**
-- Delete: `neo_localmcp/tools.py`
-- Modify: `neo_localmcp/server.py` (imports + 8 call sites)
-- Modify: `neo_localmcp/cli.py` (imports + 19 call sites)
-- Modify: `neo_localmcp/context_worker.py` (import + 1 call site)
-- Modify: `neo_localmcp/benchmark.py` (import + 6 call sites)
-- Modify: `neo_localmcp/installer/verification.py` (one string literal, `_DOCTOR_SNIPPET`)
+- Delete: `my_localmcp/tools.py`
+- Modify: `my_localmcp/server.py` (imports + 8 call sites)
+- Modify: `my_localmcp/cli.py` (imports + 19 call sites)
+- Modify: `my_localmcp/context_worker.py` (import + 1 call site)
+- Modify: `my_localmcp/benchmark.py` (import + 6 call sites)
+- Modify: `my_localmcp/installer/verification.py` (one string literal, `_DOCTOR_SNIPPET`)
 - Modify: `tests/test_context.py` (import + all call sites)
 - Modify: `tests/test_retrieval_memory.py` (import + all call sites + monkeypatch targets)
 
@@ -1850,7 +1850,7 @@ git commit -m "refactor(mcp-commands): add ollama.py (set_ollama/ollama_status/o
 - [x] **Step 1: Delete `tools.py`**
 
 ```bash
-git rm neo_localmcp/tools.py
+git rm my_localmcp/tools.py
 ```
 
 (Before running this, double check every function it contained has a home: cross-reference against the "Interfaces: Produces" lists in Tasks 8, 9, 10, 11 — 11 + 32 + 2 + 4 = every public function accounted for, plus the 3 shared helpers from Task 7. If anything is missing, stop and add it to the appropriate category file before proceeding.)
@@ -1884,7 +1884,7 @@ Then update each call site:
 | 200 | `return tools.ollama_status(model, purpose)` | `return ollama.ollama_status(model, purpose)` |
 | 206 | `return tools.ollama_ensure(model, purpose)` | `return ollama.ollama_ensure(model, purpose)` |
 
-(`_context_prepare_worker` at line 81 does not call `tools.*` directly — it subprocess-invokes `neo_localmcp.context_worker`, fixed separately in Step 4 below — no change needed in `server.py` for that function.)
+(`_context_prepare_worker` at line 81 does not call `tools.*` directly — it subprocess-invokes `my_localmcp.context_worker`, fixed separately in Step 4 below — no change needed in `server.py` for that function.)
 
 - [x] **Step 3: Fix `cli.py`**
 
@@ -1990,13 +1990,13 @@ Also update the comment at (was line 397): `"# same precedent as mcpb_build.py's
 Change:
 
 ```python
-_DOCTOR_SNIPPET = "import sys; from neo_localmcp.tools import doctor; sys.stdout.write(doctor())"
+_DOCTOR_SNIPPET = "import sys; from my_localmcp.tools import doctor; sys.stdout.write(doctor())"
 ```
 
 to:
 
 ```python
-_DOCTOR_SNIPPET = "import sys; from neo_localmcp.mcp_commands.system import doctor; sys.stdout.write(doctor())"
+_DOCTOR_SNIPPET = "import sys; from my_localmcp.mcp_commands.system import doctor; sys.stdout.write(doctor())"
 ```
 
 This snippet is executed as a subprocess script inside a candidate/managed venv during post-install verification (`_check_doctor`) — it must reference the doctor() function's real new location, or every install's verification step would start failing with an `ImportError`.
@@ -2006,14 +2006,14 @@ This snippet is executed as a subprocess script inside a candidate/managed venv 
 Change:
 
 ```python
-from neo_localmcp import repo_memory, tools
+from my_localmcp import repo_memory, tools
 ```
 
 to:
 
 ```python
-from neo_localmcp import repo_memory
-from neo_localmcp.mcp_commands import memory
+from my_localmcp import repo_memory
+from my_localmcp.mcp_commands import memory
 ```
 
 Then replace every `tools.prepare_context(...)` and `tools.test_determinism(...)` call site with `memory.prepare_context(...)` / `memory.test_determinism(...)` respectively (mechanical prefix swap; there are ~15 call sites, all `tools.prepare_context(` or `tools.test_determinism(`).
@@ -2023,14 +2023,14 @@ Then replace every `tools.prepare_context(...)` and `tools.test_determinism(...)
 Change:
 
 ```python
-from neo_localmcp import repo_memory, tools
+from my_localmcp import repo_memory, tools
 ```
 
 to:
 
 ```python
-from neo_localmcp import repo_memory
-from neo_localmcp.mcp_commands import editing, memory
+from my_localmcp import repo_memory
+from my_localmcp.mcp_commands import editing, memory
 ```
 
 Then:
@@ -2059,19 +2059,19 @@ Expected: all PASS (this exercises the `_DOCTOR_SNIPPET` fix from Step 6).
 python -m pytest -q -m "not slow" --deselect tests/test_distribution.py::test_built_mcpb_embeds_current_package_bytes
 ```
 
-Expected: full fast suite PASSES. (The `--deselect` skips the stale-bundle byte-check, regenerated + run for real in Task 14 — see the same note in Task 6, Step 5. The bundle is still stale here because Tasks 7-12 changed `neo_localmcp/` further.)
+Expected: full fast suite PASSES. (The `--deselect` skips the stale-bundle byte-check, regenerated + run for real in Task 14 — see the same note in Task 6, Step 5. The bundle is still stale here because Tasks 7-12 changed `my_localmcp/` further.)
 
 - [x] **Step 10: Compile-check**
 
 ```bash
-python -m compileall -q neo_localmcp setup.py setup_wizard.py
+python -m compileall -q my_localmcp setup.py setup_wizard.py
 ```
 
 - [x] **Step 11: Manual smoke test (per `CLAUDE.md`)**
 
 ```bash
-python -m neo_localmcp.cli doctor
-python -m neo_localmcp.cli context "debug repository indexing: index_repo, refresh" --repo-root . --token-budget 1000
+python -m my_localmcp.cli doctor
+python -m my_localmcp.cli context "debug repository indexing: index_repo, refresh" --repo-root . --token-budget 1000
 ```
 
 Expected: both commands produce their normal JSON/text output with no `ImportError`/`ModuleNotFoundError`.
@@ -2091,29 +2091,29 @@ git commit -m "refactor(mcp-commands): delete tools.py, repoint server/cli/conte
 
 **Why:** Colocates the runner with its fixture data under one package name, matching the "benchmarker" concept from the design.
 
-**Critical gotcha:** `benchmark.py`'s `_default_queries_path()` does `Path(__file__).resolve().parent / "benchmark_queries" / "default.jsonl"`. Since both the file and its data directory move down one level together (from `neo_localmcp/` to `neo_localmcp/benchmarker/`), the *relative* relationship is unchanged — only the folder name string changes, no `.parent` depth change needed.
+**Critical gotcha:** `benchmark.py`'s `_default_queries_path()` does `Path(__file__).resolve().parent / "benchmark_queries" / "default.jsonl"`. Since both the file and its data directory move down one level together (from `my_localmcp/` to `my_localmcp/benchmarker/`), the *relative* relationship is unchanged — only the folder name string changes, no `.parent` depth change needed.
 
 **Files:**
-- Move: `neo_localmcp/benchmark.py` → `neo_localmcp/benchmarker/__init__.py`
-- Move: `neo_localmcp/benchmark_queries/` → `neo_localmcp/benchmarker/queries/`
-- Modify: `neo_localmcp/cli.py` (import line only)
+- Move: `my_localmcp/benchmark.py` → `my_localmcp/benchmarker/__init__.py`
+- Move: `my_localmcp/benchmark_queries/` → `my_localmcp/benchmarker/queries/`
+- Modify: `my_localmcp/cli.py` (import line only)
 - Modify: `tests/test_benchmark.py` (import line only)
 - Modify: `pyproject.toml` (`package-data` glob)
 
 **Interfaces:**
-- Produces: `neo_localmcp.benchmarker.run_benchmark(groups: list[str], repo_root: str = "auto", out_dir: str | None = None, queries_path: str | None = None) -> dict[str, Any]`, `.resolve_groups(requested: list[str]) -> list[str]`, `.GROUPS: dict[str, Callable[[Path, dict[str, Any]], list[CheckResult]]]` — identical to today's `neo_localmcp.benchmark` equivalents, just at the new module path.
+- Produces: `my_localmcp.benchmarker.run_benchmark(groups: list[str], repo_root: str = "auto", out_dir: str | None = None, queries_path: str | None = None) -> dict[str, Any]`, `.resolve_groups(requested: list[str]) -> list[str]`, `.GROUPS: dict[str, Callable[[Path, dict[str, Any]], list[CheckResult]]]` — identical to today's `my_localmcp.benchmark` equivalents, just at the new module path.
 
 - [x] **Step 1: Move the directory and file**
 
 ```bash
-mkdir -p neo_localmcp/benchmarker
-git mv neo_localmcp/benchmark.py neo_localmcp/benchmarker/__init__.py
-git mv neo_localmcp/benchmark_queries neo_localmcp/benchmarker/queries
+mkdir -p my_localmcp/benchmarker
+git mv my_localmcp/benchmark.py my_localmcp/benchmarker/__init__.py
+git mv my_localmcp/benchmark_queries my_localmcp/benchmarker/queries
 ```
 
 - [x] **Step 2: Update the queries-path folder name**
 
-In `neo_localmcp/benchmarker/__init__.py`, change:
+In `my_localmcp/benchmarker/__init__.py`, change:
 
 ```python
 def _default_queries_path() -> Path:
@@ -2129,7 +2129,7 @@ def _default_queries_path() -> Path:
 
 - [x] **Step 3: Update `benchmarker/__init__.py`'s own imports for the new depth**
 
-This file was `neo_localmcp/benchmark.py` (direct child of `neo_localmcp/`); it is now `neo_localmcp/benchmarker/__init__.py` (one level deeper). Its imports change from:
+This file was `my_localmcp/benchmark.py` (direct child of `my_localmcp/`); it is now `my_localmcp/benchmarker/__init__.py` (one level deeper). Its imports change from:
 
 ```python
 from . import repo_memory
@@ -2166,13 +2166,13 @@ from .benchmarker import run_benchmark
 Change:
 
 ```python
-from neo_localmcp import benchmark
+from my_localmcp import benchmark
 ```
 
 to:
 
 ```python
-from neo_localmcp import benchmarker as benchmark
+from my_localmcp import benchmarker as benchmark
 ```
 
 (Aliasing to `benchmark` keeps every call site in this test file — `benchmark.resolve_groups(...)`, `benchmark.GROUPS`, etc. — unchanged, since only the import needs to move; there's no value in touching 20+ call sites in this file for a pure rename.)
@@ -2183,14 +2183,14 @@ Change:
 
 ```toml
 [tool.setuptools.package-data]
-neo_localmcp = ["neo.toml", "templates/claude-code/commands/neo-localmcp/*.md", "benchmark_queries/*.jsonl"]
+my_localmcp = ["my.toml", "templates/claude-code/commands/my-localmcp/*.md", "benchmark_queries/*.jsonl"]
 ```
 
 to:
 
 ```toml
 [tool.setuptools.package-data]
-neo_localmcp = ["neo.toml", "templates/claude-code/commands/neo-localmcp/*.md", "benchmarker/queries/*.jsonl"]
+my_localmcp = ["my.toml", "templates/claude-code/commands/my-localmcp/*.md", "benchmarker/queries/*.jsonl"]
 ```
 
 - [x] **Step 7: Run the affected tests**
@@ -2202,15 +2202,15 @@ python -m pytest -q tests/test_benchmark.py -v
 Expected: all PASS.
 
 ```bash
-python -m neo_localmcp.cli benchmark sys --repo-root .
+python -m my_localmcp.cli benchmark sys --repo-root .
 ```
 
-Expected: runs to completion, writes a report under `./neo-localmcp_benchmarks/`, no `ImportError`.
+Expected: runs to completion, writes a report under `./my-localmcp_benchmarks/`, no `ImportError`.
 
 - [x] **Step 8: Compile-check**
 
 ```bash
-python -m compileall -q neo_localmcp setup.py setup_wizard.py
+python -m compileall -q my_localmcp setup.py setup_wizard.py
 ```
 
 - [x] **Step 9: Full fast suite**
@@ -2219,7 +2219,7 @@ python -m compileall -q neo_localmcp setup.py setup_wizard.py
 python -m pytest -q -m "not slow" --deselect tests/test_distribution.py::test_built_mcpb_embeds_current_package_bytes
 ```
 
-Expected: all PASS. (Last checkpoint with the stale-bundle deselect — Task 14 regenerates the bundle and runs this test for real. This is the final `neo_localmcp/` change, so the bundle rebuilt in Task 14 will be current.)
+Expected: all PASS. (Last checkpoint with the stale-bundle deselect — Task 14 regenerates the bundle and runs this test for real. This is the final `my_localmcp/` change, so the bundle rebuilt in Task 14 will be current.)
 
 - [x] **Step 10: Commit**
 
@@ -2244,7 +2244,7 @@ git commit -m "refactor(benchmark): rename benchmark.py + benchmark_queries/ to 
 
 - [x] **Step 1: Rewrite `CLAUDE.md`'s Module map section**
 
-Read the current "## Module map (`neo_localmcp/`)" section and replace it with an accurate description of the post-reorg layout: `server.py` (unchanged description), `mcp_commands/system.py`+`memory.py`+`ollama.py`+`editing.py`+`_shared.py` (replacing the single `tools.py` bullet, one line per file describing its category), `cli.py` (unchanged description, note it's now unambiguous since the installer CLI moved), `repo_memory.py`/`ollama_client.py`/`lifecycle.py`/`client_setup.py`/`config.py` (unchanged descriptions — these did not move), `installer/` (new bullet: the lifecycle package, now also home to `cli.py` — the installer CLI frontend — and `wizard/` — the interactive UI frontend, plus `mcpb.py`), `benchmarker/` (new bullet, replacing any `benchmark.py` mention if one exists), `query.py`/`identity.py` (unchanged). Do not describe internal `installer/` submodules exhaustively here — that level of detail belongs in the design spec, not this always-loaded file; keep each bullet to 1-2 sentences, matching the existing style of every other bullet in this section.
+Read the current "## Module map (`my_localmcp/`)" section and replace it with an accurate description of the post-reorg layout: `server.py` (unchanged description), `mcp_commands/system.py`+`memory.py`+`ollama.py`+`editing.py`+`_shared.py` (replacing the single `tools.py` bullet, one line per file describing its category), `cli.py` (unchanged description, note it's now unambiguous since the installer CLI moved), `repo_memory.py`/`ollama_client.py`/`lifecycle.py`/`client_setup.py`/`config.py` (unchanged descriptions — these did not move), `installer/` (new bullet: the lifecycle package, now also home to `cli.py` — the installer CLI frontend — and `wizard/` — the interactive UI frontend, plus `mcpb.py`), `benchmarker/` (new bullet, replacing any `benchmark.py` mention if one exists), `query.py`/`identity.py` (unchanged). Do not describe internal `installer/` submodules exhaustively here — that level of detail belongs in the design spec, not this always-loaded file; keep each bullet to 1-2 sentences, matching the existing style of every other bullet in this section.
 
 - [x] **Step 2: Fix `README.md`'s stale `--fake` mention (review-pass addition, Task 5)**
 
@@ -2255,7 +2255,7 @@ The wizard is plain-stdlib — there is no UI toolkit to install. If you run
 `python setup_wizard.py` on a bare clone and `psutil` is missing, the wizard
 detects it and offers to install it for you before starting. Add `--fake` to walk
 the entire flow as a safe simulation that touches nothing on disk
-(`NEO_LOCALMCP_WIZARD_FAKE_STATE=healthy` simulates a returning, already-installed
+(`MY_LOCALMCP_WIZARD_FAKE_STATE=healthy` simulates a returning, already-installed
 user).
 ```
 
@@ -2266,7 +2266,7 @@ The wizard is plain-stdlib — there is no UI toolkit to install. If you run
 `python setup_wizard.py` on a bare clone and `psutil` is missing, the wizard
 detects it and offers to install it for you before starting. Add `--preview` to walk
 the entire flow as a safe simulation that touches nothing on disk
-(`NEO_LOCALMCP_WIZARD_PREVIEW_STATE=healthy` simulates a returning, already-installed
+(`MY_LOCALMCP_WIZARD_PREVIEW_STATE=healthy` simulates a returning, already-installed
 user).
 ```
 
@@ -2280,21 +2280,21 @@ Add a single dated bullet (today's date) summarizing: installer's two frontends 
 
 - [x] **Step 5: Regenerate the `.mcpb` bundle**
 
-Every task since Task 1 changed `neo_localmcp/`'s contents, so the committed `packages/claude-desktop/neo-localmcp-v<version>.mcpb` is stale (this is why the intermediate checkpoints deselected `test_built_mcpb_embeds_current_package_bytes`). Regenerate it now, from the source checkout, using the moved builder (`neo_localmcp.installer.mcpb`, relocated in Task 1). Delete the stale file first — `build_mcpb`'s `_next_free_path` never overwrites, so without the delete it would write `neo-localmcp-v<version>-2.mcpb` instead of regenerating the canonical name:
+Every task since Task 1 changed `my_localmcp/`'s contents, so the committed `packages/claude-desktop/my-localmcp-v<version>.mcpb` is stale (this is why the intermediate checkpoints deselected `test_built_mcpb_embeds_current_package_bytes`). Regenerate it now, from the source checkout, using the moved builder (`my_localmcp.installer.mcpb`, relocated in Task 1). Delete the stale file first — `build_mcpb`'s `_next_free_path` never overwrites, so without the delete it would write `my-localmcp-v<version>-2.mcpb` instead of regenerating the canonical name:
 
 ```bash
 python3 -c "
 import os
-from neo_localmcp import __version__
-from neo_localmcp.installer.mcpb import build_mcpb
-stale = f'packages/claude-desktop/neo-localmcp-v{__version__}.mcpb'
+from my_localmcp import __version__
+from my_localmcp.installer.mcpb import build_mcpb
+stale = f'packages/claude-desktop/my-localmcp-v{__version__}.mcpb'
 if os.path.exists(stale):
     os.remove(stale)
 print('rebuilt:', build_mcpb('.', __version__))
 "
 ```
 
-Expected: prints `rebuilt: packages/claude-desktop/neo-localmcp-v<version>.mcpb`. (The `__version__` is unchanged by this refactor — `1.1.1` is still unreleased per `PROJECT_STATUS.md`, so this reorg folds into it with no version bump; the bundle filename is the same, only its contents are regenerated.)
+Expected: prints `rebuilt: packages/claude-desktop/my-localmcp-v<version>.mcpb`. (The `__version__` is unchanged by this refactor — `1.1.1` is still unreleased per `PROJECT_STATUS.md`, so this reorg folds into it with no version bump; the bundle filename is the same, only its contents are regenerated.)
 
 - [x] **Step 6: Full final verification (bundle byte-check now runs for real)**
 
@@ -2305,7 +2305,7 @@ python -m pytest -q
 Expected: full suite (including `-m slow` lifecycle tests AND the previously-deselected `test_built_mcpb_embeds_current_package_bytes`, which now passes against the freshly-rebuilt bundle) PASSES. This is the first point in the whole plan where the slow `tests/installer/test_*_lifecycle.py` tests run — they build a real venv and exercise the real `install`/`reinstall`/`uninstall` path end-to-end through the new `installer/cli.py`, which is the highest-value regression check for Tasks 1-6's path-arithmetic fixes. If `test_built_mcpb_embeds_current_package_bytes` still fails here, the bundle rebuild in Step 5 did not take — re-run Step 5 and confirm no stray `.DS_Store` or `-2.mcpb` file was created.
 
 ```bash
-python -m compileall -q neo_localmcp setup.py setup_wizard.py
+python -m compileall -q my_localmcp setup.py setup_wizard.py
 ```
 
 Expected: no output (success).
@@ -2313,15 +2313,15 @@ Expected: no output (success).
 - [x] **Step 7: Verify no stray references remain**
 
 ```bash
-grep -rn "neo_localmcp\.wizard\b\|neo_localmcp\.setup_cli\b\|neo_localmcp\.mcpb_build\b\|neo_localmcp\.tools\b\|neo_localmcp\.benchmark\b\|FakeBackend\|RealBackend\|allow_dummy_toggle\|_ToggleDummy\|NEO_LOCALMCP_WIZARD_FAKE_STATE\|--fake\|wizard/real_backend\|wizard/fake_backend\|tools\.set_ollama\|tools\.doctor\|tools\.prepare_context\|tools\.summarize_file\|tools\.apply_unified_patch\|\btools\.py\b" neo_localmcp tests setup.py setup_wizard.py pyproject.toml CLAUDE.md README.md 2>/dev/null
+grep -rn "my_localmcp\.wizard\b\|my_localmcp\.setup_cli\b\|my_localmcp\.mcpb_build\b\|my_localmcp\.tools\b\|my_localmcp\.benchmark\b\|FakeBackend\|RealBackend\|allow_dummy_toggle\|_ToggleDummy\|MY_LOCALMCP_WIZARD_FAKE_STATE\|--fake\|wizard/real_backend\|wizard/fake_backend\|tools\.set_ollama\|tools\.doctor\|tools\.prepare_context\|tools\.summarize_file\|tools\.apply_unified_patch\|\btools\.py\b" my_localmcp tests setup.py setup_wizard.py pyproject.toml CLAUDE.md README.md 2>/dev/null
 ```
 
-Expected: no output. If anything matches, it is a missed call site OR a stale docstring/comment from an earlier task — fix it and re-run this grep before proceeding. This step's original pattern only matched dotted module paths (`neo_localmcp.wizard`, `neo_localmcp.tools`, etc.); Task 6's review found two production-code docstrings that reference the old layout in prose that wouldn't match those patterns: `neo_localmcp/installer/ollama.py`'s docstring says `` ``wizard/real_backend.py`` `` (slash-style path, not a dotted import) and `` ``tools.set_ollama`` `` (bare `tools.`, no `neo_localmcp.` prefix — also now wrong regardless of path style, since Task 12 deletes `tools.py` and moves `set_ollama` to `mcp_commands/ollama.py`). The added patterns (`wizard/real_backend`, `wizard/fake_backend`, and the specific `tools.<function>`/`tools.py` prose mentions) are a backstop for this class of docstring-prose staleness, not just code-level imports. When you find a match, fix the prose to name the actual current location (e.g. `` ``installer/wizard/live_backend.py`` ``, `` ``mcp_commands/ollama.set_ollama`` ``) rather than deleting the cross-reference. (`NEO_LOCALMCP_WIZARD_FAKE_STATE` is in this grep specifically because Task 4 renames all of its occurrences in `preview_backend.py` — code, docstring, and comment — plus one in `setup_wizard.py`; `--fake` is included because of the `README.md` fix in Step 2; this is the backstop that catches anything either missed. `PROJECT_STATUS.md` is deliberately NOT in this grep's file list — its `--fake` mentions are dated historical status entries left untouched per Step 3's note.)
+Expected: no output. If anything matches, it is a missed call site OR a stale docstring/comment from an earlier task — fix it and re-run this grep before proceeding. This step's original pattern only matched dotted module paths (`my_localmcp.wizard`, `my_localmcp.tools`, etc.); Task 6's review found two production-code docstrings that reference the old layout in prose that wouldn't match those patterns: `my_localmcp/installer/ollama.py`'s docstring says `` ``wizard/real_backend.py`` `` (slash-style path, not a dotted import) and `` ``tools.set_ollama`` `` (bare `tools.`, no `my_localmcp.` prefix — also now wrong regardless of path style, since Task 12 deletes `tools.py` and moves `set_ollama` to `mcp_commands/ollama.py`). The added patterns (`wizard/real_backend`, `wizard/fake_backend`, and the specific `tools.<function>`/`tools.py` prose mentions) are a backstop for this class of docstring-prose staleness, not just code-level imports. When you find a match, fix the prose to name the actual current location (e.g. `` ``installer/wizard/live_backend.py`` ``, `` ``mcp_commands/ollama.set_ollama`` ``) rather than deleting the cross-reference. (`MY_LOCALMCP_WIZARD_FAKE_STATE` is in this grep specifically because Task 4 renames all of its occurrences in `preview_backend.py` — code, docstring, and comment — plus one in `setup_wizard.py`; `--fake` is included because of the `README.md` fix in Step 2; this is the backstop that catches anything either missed. `PROJECT_STATUS.md` is deliberately NOT in this grep's file list — its `--fake` mentions are dated historical status entries left untouched per Step 3's note.)
 
 - [x] **Step 8: Commit (includes the regenerated bundle from Step 5)**
 
 ```bash
-git add CLAUDE.md README.md PROJECT_STATUS.md PROJECT_NOTES.md "packages/claude-desktop/neo-localmcp-v*.mcpb"
+git add CLAUDE.md README.md PROJECT_STATUS.md PROJECT_NOTES.md "packages/claude-desktop/my-localmcp-v*.mcpb"
 git commit -m "docs: update module map and status/notes for installer/mcp-command reorg; rebuild .mcpb"
 ```
 
@@ -2331,7 +2331,7 @@ git commit -m "docs: update module map and status/notes for installer/mcp-comman
 
 - **Spec coverage:** All spec sections implemented — installer frontends consolidated (Tasks 2, 3), `mcpb.py` moved (Task 1), wizard renamed with full terminology purge (Tasks 3-5), MCP command split into 4 categories + shared (Tasks 7-11), `tools.py` deleted with all callers repointed (Task 12), `benchmarker/` rename (Task 13), docs updated (Task 14).
 - **Two real bugs the spec's prose flagged were traced to exact fixes:** `setup_cli.py`'s `_source_root()` path depth (Task 2), `fake_backend.py`'s `_STATE_DIR` path depth (Task 4) — both verified against actual `__file__`-relative arithmetic, not assumed.
-- **One bug not in the original spec, found only by reading `installer/verification.py` directly:** the `_DOCTOR_SNIPPET` string literal embedding `neo_localmcp.tools` as executable subprocess code (Task 12, Step 6) — this would have silently broken every future install's post-install verification if missed, since it's a string, not a static import a simple grep for `from neo_localmcp.tools` would necessarily catch on the first pass (a grep for the bare word "tools" was needed).
+- **One bug not in the original spec, found only by reading `installer/verification.py` directly:** the `_DOCTOR_SNIPPET` string literal embedding `my_localmcp.tools` as executable subprocess code (Task 12, Step 6) — this would have silently broken every future install's post-install verification if missed, since it's a string, not a static import a simple grep for `from my_localmcp.tools` would necessarily catch on the first pass (a grep for the bare word "tools" was needed).
 - **One dependency not in the original spec, found only by reading `context_worker.py` directly:** it imports `tools.context_prepare` and is invoked as a subprocess by `server.py` — fixed in Task 12, Step 4.
 - **One dead import found while tracing `tools.py`:** `save_config` is imported but never called directly in `tools.py`'s body (`set_ollama` goes through `installer_configure_models`, which calls `save_config` itself, in a different file) — correctly dropped rather than carried into any new file.
-- **Review-pass catch (blocker, now fixed):** `tests/test_distribution.py::test_built_mcpb_embeds_current_package_bytes` byte-checks the committed `.mcpb` against `neo_localmcp/`; it is unmarked, so it runs in every `-m "not slow"`. The reorg staled the bundle, so the intermediate full-suite checkpoints (Tasks 6, 12, 13) now `--deselect` it and Task 14 Step 4 regenerates the bundle (via the moved `neo_localmcp.installer.mcpb.build_mcpb`, deleting the stale file first) before running the full suite un-deselected. Only ~6 of 32 test files are import-affected by the whole reorg; the rest stay green throughout and are the behavior-preservation net — a broad red suite mid-reorg would signal a real regression, not expected churn.
+- **Review-pass catch (blocker, now fixed):** `tests/test_distribution.py::test_built_mcpb_embeds_current_package_bytes` byte-checks the committed `.mcpb` against `my_localmcp/`; it is unmarked, so it runs in every `-m "not slow"`. The reorg staled the bundle, so the intermediate full-suite checkpoints (Tasks 6, 12, 13) now `--deselect` it and Task 14 Step 4 regenerates the bundle (via the moved `my_localmcp.installer.mcpb.build_mcpb`, deleting the stale file first) before running the full suite un-deselected. Only ~6 of 32 test files are import-affected by the whole reorg; the rest stay green throughout and are the behavior-preservation net — a broad red suite mid-reorg would signal a real regression, not expected churn.

@@ -156,7 +156,7 @@ Add the same `if:` line to each test step's mapping (as the first key under the 
         run: python -m pytest -q -m slow ${{ matrix.lifecycle }}
       - name: Compile
         if: github.event_name == 'push' || steps.changes.outputs.code == 'true'
-        run: python -m compileall -q neo_localmcp setup.py
+        run: python -m compileall -q my_localmcp setup.py
 ```
 
 Note: `actions/setup-python` is intentionally **not** guarded — it is fast and keeping it unconditional preserves the pip cache warmth for the next real run.
@@ -236,7 +236,7 @@ git checkout chore/ci-docs-skip-issue-14
 
 - [ ] **Step 6: Confirm branch protection still enforces**
 
-Run: `gh api repos/NeelAPatel/neo-localmcp/branches/main/protection --jq '.required_status_checks.contexts'`
+Run: `gh api repos/kartikeyajay2006/my-localmcp/branches/main/protection --jq '.required_status_checks.contexts'`
 Expected: still lists `macos-latest / Python 3.12` and `windows-latest / Python 3.12` — unchanged by Phase 0, because the job (and thus its check names) is untouched. No branch-protection edit is required for Phase 0. (Phase 1 is where names change and a `ci-gate` context is introduced.)
 
 - [ ] **Step 7: Report status and hand off for merge**

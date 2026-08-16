@@ -12,12 +12,12 @@ from pathlib import Path
 
 import pytest
 
-import neo_localmcp
-from neo_localmcp.installer.paths import ManagedPaths
-from neo_localmcp.installer.processes import discover_owned_processes, stop_owned_processes
-from neo_localmcp.installer.runtime import build_candidate, promote_candidate
-from neo_localmcp.installer.state import begin_operation
-from neo_localmcp.installer.types import Operation
+import my_localmcp
+from my_localmcp.installer.paths import ManagedPaths
+from my_localmcp.installer.processes import discover_owned_processes, stop_owned_processes
+from my_localmcp.installer.runtime import build_candidate, promote_candidate
+from my_localmcp.installer.state import begin_operation
+from my_localmcp.installer.types import Operation
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -40,7 +40,7 @@ def _setup(home: Path, *args: str, stdin: str | None = None) -> subprocess.Compl
     appdata.mkdir(parents=True, exist_ok=True)
     env = {
         **os.environ,
-        "NEO_LOCALMCP_HOME": str(home),
+        "MY_LOCALMCP_HOME": str(home),
         "HOME": str(test_user),
         "USERPROFILE": str(test_user),
         "APPDATA": str(appdata),
@@ -122,11 +122,11 @@ def _wait_for_exit(pid: int, timeout: float = 30.0) -> bool:
 
 def _start_managed_server(home: Path) -> tuple[subprocess.Popen[bytes], int]:
     process = subprocess.Popen(
-        [str(home / "venv" / "Scripts" / "neo-localmcp-server.exe")],
+        [str(home / "venv" / "Scripts" / "my-localmcp-server.exe")],
         stdin=subprocess.PIPE,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        env={**os.environ, "NEO_LOCALMCP_HOME": str(home)},
+        env={**os.environ, "MY_LOCALMCP_HOME": str(home)},
     )
     return process, _wait_for_server(home)
 
@@ -137,7 +137,7 @@ def test_promoted_windows_launchers_do_not_reference_staging(tmp_path: Path) -> 
     """A moved venv must remain usable after its staging tree is removed."""
 
     paths = ManagedPaths(
-        root=tmp_path / ".neo-localmcp",
+        root=tmp_path / ".my-localmcp",
         platform="windows",
         home=tmp_path,
         allow_test_root=True,
@@ -154,7 +154,7 @@ def test_promoted_windows_launchers_do_not_reference_staging(tmp_path: Path) -> 
     promotion = promote_candidate(
         paths,
         candidate,
-        expected_version=neo_localmcp.__version__,
+        expected_version=my_localmcp.__version__,
     )
     assert promotion.ok, promotion.error
     assert not candidate.venv.exists()
@@ -182,7 +182,7 @@ def test_promoted_windows_launchers_do_not_reference_staging(tmp_path: Path) -> 
 @pytest.mark.skipif(os.name != "nt", reason="Windows lifecycle evidence")
 @pytest.mark.slow
 def test_full_windows_lifecycle_via_setup(tmp_path: Path) -> None:
-    home = tmp_path / ".neo-localmcp"
+    home = tmp_path / ".my-localmcp"
     marker = "phase14-preserved-data"
     unrelated = subprocess.Popen(
         [sys.executable, "-c", "import time; time.sleep(600)"],
@@ -236,7 +236,7 @@ def test_full_windows_lifecycle_via_setup(tmp_path: Path) -> None:
         begin_operation(
             managed_paths,
             Operation.REINSTALL,
-            source_version=neo_localmcp.__version__,
+            source_version=my_localmcp.__version__,
         )
         result = _setup(home, "install", "--yes")
         assert result.returncode == 0, result.stdout + result.stderr
@@ -264,7 +264,7 @@ def test_full_windows_lifecycle_via_setup(tmp_path: Path) -> None:
 
 def paths_are_runnable(home: Path) -> bool:
     python = home / "venv" / "Scripts" / "python.exe"
-    cli = home / "venv" / "Scripts" / "neo-localmcp.exe"
+    cli = home / "venv" / "Scripts" / "my-localmcp.exe"
     return _run(python, "-c", "print('ok')").returncode == 0 and _run(cli, "--help").returncode == 0
 
 
@@ -307,7 +307,7 @@ def test_registered_tree_escalates_without_killing_unrelated_python(tmp_path: Pa
             "source": "phase14-forced-escalation",
         },)
         paths = ManagedPaths(
-            root=tmp_path / ".neo-localmcp",
+            root=tmp_path / ".my-localmcp",
             platform="windows",
             home=tmp_path,
             allow_test_root=True,

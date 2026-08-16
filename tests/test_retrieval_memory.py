@@ -4,8 +4,8 @@ import json
 
 import pytest
 
-from neo_localmcp.retrieval import repo_memory
-from neo_localmcp.mcp import editing, memory
+from my_localmcp.retrieval import repo_memory
+from my_localmcp.mcp import editing, memory
 
 pytestmark = pytest.mark.retrieval
 
@@ -42,7 +42,7 @@ def test_prepare_context_records_a_task_query_by_default(tmp_path, isolated_conf
 
 
 def test_query_recording_can_be_disabled_via_config(tmp_path, isolated_config):
-    from neo_localmcp import config
+    from my_localmcp import config
 
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -75,7 +75,7 @@ def test_recorded_query_payload_is_compact_not_full_response(tmp_path, isolated_
 
 
 def test_task_query_retention_prunes_oldest_rows(tmp_path, isolated_config):
-    from neo_localmcp import config
+    from my_localmcp import config
 
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -213,7 +213,7 @@ def test_boost_below_min_shown_threshold_stays_zero(tmp_path, isolated_config):
 def test_min_shown_and_cap_are_config_overridable(tmp_path, isolated_config):
     """1.0.9 (P9g): memory.retrieval_boost_min_shown / retrieval_boost_cap override the
     module-constant defaults so the boost can be calibrated without a code change."""
-    from neo_localmcp import config
+    from my_localmcp import config
 
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -427,7 +427,7 @@ def test_num_predict_is_sent_on_the_outgoing_request(tmp_path, isolated_config, 
 
 def test_ollama_client_includes_num_predict_in_request_options(monkeypatch, isolated_config):
     """Lower-level contract: ollama_client.chat must forward num_predict into the request body options."""
-    from neo_localmcp import ollama_client
+    from my_localmcp import ollama_client
 
     monkeypatch.setattr(ollama_client, "ensure", lambda *args, **kwargs: {"ok": True, "state": "ready", "model": "fake-model"})
     captured = {}
@@ -443,7 +443,7 @@ def test_ollama_client_includes_num_predict_in_request_options(monkeypatch, isol
 
 def test_ollama_client_omits_num_predict_when_not_requested(monkeypatch, isolated_config):
     """Existing callers (ranking, whole-file summary) must be unaffected -- no default cap forced on them."""
-    from neo_localmcp import ollama_client
+    from my_localmcp import ollama_client
 
     monkeypatch.setattr(ollama_client, "ensure", lambda *args, **kwargs: {"ok": True, "state": "ready", "model": "fake-model"})
     captured = {}

@@ -1,10 +1,10 @@
 {
   "manifest_version": "0.4",
-  "name": "neo-localmcp",
-  "display_name": "neo-localmcp",
+  "name": "my-localmcp",
+  "display_name": "my-localmcp",
   "version": "1.2.1",
   "description": "Bounded repository context and optional Ollama preprocessing for Claude Desktop.",
-  "author": { "name": "neo-localmcp" },
+  "author": { "name": "my-localmcp" },
   "server": {
     "type": "uv",
     "entry_point": "server.py",

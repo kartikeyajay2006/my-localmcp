@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from neo_localmcp import benchmarker as benchmark
+from my_localmcp import benchmarker as benchmark
 
 
 def _seed_repo(repo):

@@ -21,7 +21,7 @@ from .test_macos_lifecycle import (
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux lifecycle evidence")
 @pytest.mark.slow
 def test_full_linux_lifecycle_via_setup(tmp_path: Path) -> None:
-    home = tmp_path / ".neo-localmcp"
+    home = tmp_path / ".my-localmcp"
     marker = "linux-preserved-data"
 
     result = _run_setup(["install", "--yes"], home=home)

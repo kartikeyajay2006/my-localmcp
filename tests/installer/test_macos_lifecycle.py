@@ -3,7 +3,7 @@
 This is the Task 13 Gate: prove the entire install -> reinstall -> uninstall ->
 install -> install --clean -> uninstall --delete-memory lifecycle works on this
 Mac end to end, driven exclusively through ``setup.py`` (never `.ps1`/`.sh`),
-against a temporary ``NEO_LOCALMCP_HOME``, without losing seeded durable data
+against a temporary ``MY_LOCALMCP_HOME``, without losing seeded durable data
 along the way (except where a full wipe is explicitly requested).
 
 It builds real venvs and is therefore slow (multiple full pip installs) --
@@ -24,17 +24,17 @@ from pathlib import Path
 
 import pytest
 
-import neo_localmcp
+import my_localmcp
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SETUP = REPO_ROOT / "setup.py"
-EXPECTED_VERSION = neo_localmcp.__version__
+EXPECTED_VERSION = my_localmcp.__version__
 
 SETUP_TIMEOUT_SECONDS = 600.0
 
 
 def _run_setup(argv: list[str], *, home: Path) -> subprocess.CompletedProcess:
-    env = {**os.environ, "NEO_LOCALMCP_HOME": str(home)}
+    env = {**os.environ, "MY_LOCALMCP_HOME": str(home)}
     return subprocess.run(
         [sys.executable, str(SETUP), *argv],
         capture_output=True,
@@ -54,7 +54,7 @@ def _seed_durable_data(home: Path, *, marker: str) -> None:
     sqlite_dir.mkdir(parents=True, exist_ok=True)
     clients_dir.mkdir(parents=True, exist_ok=True)
 
-    # config.yaml is actually loaded as JSON (see neo_localmcp/config.py); it must
+    # config.yaml is actually loaded as JSON (see my_localmcp/config.py); it must
     # stay valid JSON so real code paths (e.g. Ollama-model lookups during
     # reinstall's unload step) keep working, with the marker embedded in an
     # unused custom field purely for this test's own before/after assertions.
@@ -136,7 +136,7 @@ def _managed_python(home: Path) -> Path:
 
 
 def _pid_alive(pid: int) -> bool:
-    from neo_localmcp import mcp_server_lifecycle as lifecycle
+    from my_localmcp import mcp_server_lifecycle as lifecycle
 
     return lifecycle.pid_alive(pid)
 
@@ -174,8 +174,8 @@ async def _start_session_get_pid(home: Path):
     python_executable = _managed_python(home)
     assert python_executable.exists(), f"managed python missing: {python_executable}"
 
-    env = {**os.environ, "NEO_LOCALMCP_HOME": str(home)}
-    params = StdioServerParameters(command=str(python_executable), args=["-m", "neo_localmcp.mcp.server"], env=env)
+    env = {**os.environ, "MY_LOCALMCP_HOME": str(home)}
+    params = StdioServerParameters(command=str(python_executable), args=["-m", "my_localmcp.mcp.server"], env=env)
 
     context = stdio_client(params)
     read, write = await context.__aenter__()
@@ -215,7 +215,7 @@ async def _drive_start_and_close(home: Path) -> int:
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS lifecycle evidence")
 @pytest.mark.slow
 def test_full_macos_lifecycle_via_setup(tmp_path: Path) -> None:
-    home = tmp_path / ".neo-localmcp"
+    home = tmp_path / ".my-localmcp"
     marker_a = "marker-a-original-data"
 
     # ---------------------------------------------------------------- #

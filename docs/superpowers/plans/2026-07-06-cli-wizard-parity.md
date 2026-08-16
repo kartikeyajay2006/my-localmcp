@@ -2,21 +2,21 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Give `setup.py` (via `neo_localmcp/setup_cli.py`) the same five operations the wizard (`neo_localmcp/wizard/console.py`) already exposes — `install`, `reinstall`, `uninstall`, **`config-ollama`**, and **`manage-clients`** — with the underlying logic for the last two living in `installer/` and shared by every caller (including the previously-separate `neo_localmcp/cli.py` / `tools.py` runtime surface for Ollama config), not duplicated per front door.
+**Goal:** Give `setup.py` (via `my_localmcp/setup_cli.py`) the same five operations the wizard (`my_localmcp/wizard/console.py`) already exposes — `install`, `reinstall`, `uninstall`, **`config-ollama`**, and **`manage-clients`** — with the underlying logic for the last two living in `installer/` and shared by every caller (including the previously-separate `my_localmcp/cli.py` / `tools.py` runtime surface for Ollama config), not duplicated per front door.
 
-**Architecture:** Full design rationale and rejected alternatives are in `docs/superpowers/specs/2026-07-06-cli-wizard-parity-design.md` — read that first if anything below is unclear. Summary: `installer/ollama.py` gains `configure_models()` (paired with its existing `configured_models()` getter) and `installer/clients.py` gains `apply_client_selection()` + `ClientChangeOutcome`. `wizard/real_backend.py` is refactored to call both (behavior-preserving, no policy of its own left). `setup_cli.py` grows two new subcommands calling the exact same functions. `tools.py`'s `set_ollama()` (the separate `neo-localmcp set-ollama` runtime command) is refactored to call `configure_models()` too, for full 3-way dedup. No files are renamed in this change.
+**Architecture:** Full design rationale and rejected alternatives are in `docs/superpowers/specs/2026-07-06-cli-wizard-parity-design.md` — read that first if anything below is unclear. Summary: `installer/ollama.py` gains `configure_models()` (paired with its existing `configured_models()` getter) and `installer/clients.py` gains `apply_client_selection()` + `ClientChangeOutcome`. `wizard/real_backend.py` is refactored to call both (behavior-preserving, no policy of its own left). `setup_cli.py` grows two new subcommands calling the exact same functions. `tools.py`'s `set_ollama()` (the separate `my-localmcp set-ollama` runtime command) is refactored to call `configure_models()` too, for full 3-way dedup. No files are renamed in this change.
 
 **Tech Stack:** Python 3.12+, stdlib `argparse`, existing `pytest` suite (`isolated_config` / `isolated_app_home` / `client_home` fixtures already in `tests/conftest.py` / `tests/installer/`).
 
 ## Global Constraints
 
 - Python 3.12+ floor applies to every file touched (repo-wide).
-- `setup.py` remains the sole lifecycle policy surface for macOS/Windows — the two new subcommands go in `setup_cli.py`, not `neo_localmcp/cli.py`.
-- No new third-party dependencies. (`psutil` is already an unconditional base dependency in `pyproject.toml`, so `tools.py` importing from `neo_localmcp.installer` — which transitively imports `installer/processes.py`'s `psutil` usage — introduces no new install requirement, only earlier import-time cost.)
+- `setup.py` remains the sole lifecycle policy surface for macOS/Windows — the two new subcommands go in `setup_cli.py`, not `my_localmcp/cli.py`.
+- No new third-party dependencies. (`psutil` is already an unconditional base dependency in `pyproject.toml`, so `tools.py` importing from `my_localmcp.installer` — which transitively imports `installer/processes.py`'s `psutil` usage — introduces no new install requirement, only earlier import-time cost.)
 - No file renames — deferred per the design doc's Decision 3.
-- Run `python -m pytest -q` and `python -m compileall -q neo_localmcp setup.py` after every task; both must be clean before moving to the next task.
+- Run `python -m pytest -q` and `python -m compileall -q my_localmcp setup.py` after every task; both must be clean before moving to the next task.
 - This work happens on its own branch, lands via its own PR — **do not merge the PR**, leave it open for review.
-- Issue/PR title format is `type(area): description`. This spans `neo_localmcp/tools.py`, `neo_localmcp/installer/ollama.py`, `neo_localmcp/installer/clients.py`, `neo_localmcp/wizard/real_backend.py`, and `neo_localmcp/setup_cli.py` — label `type:feat` with **both** `area:installer` and `area:wizard`.
+- Issue/PR title format is `type(area): description`. This spans `my_localmcp/tools.py`, `my_localmcp/installer/ollama.py`, `my_localmcp/installer/clients.py`, `my_localmcp/wizard/real_backend.py`, and `my_localmcp/setup_cli.py` — label `type:feat` with **both** `area:installer` and `area:wizard`.
 - Every function that performs a state-changing action degrades to a visible warning/failure, never raises uncaught (matches the existing `# noqa: BLE001` convention throughout `real_backend.py` and `installer/operations.py`) — preserve that pattern in all new code.
 
 ---
@@ -24,13 +24,13 @@
 ### Task 1: `configure_models()` in `installer/ollama.py`, deduplicating all three Ollama-config callers
 
 **Files:**
-- Modify: `neo_localmcp/installer/ollama.py` (add function + `save_config` import)
-- Modify: `neo_localmcp/installer/__init__.py` (re-export the new name)
-- Modify: `neo_localmcp/tools.py:1136-1147` (`set_ollama` delegates to the new function)
+- Modify: `my_localmcp/installer/ollama.py` (add function + `save_config` import)
+- Modify: `my_localmcp/installer/__init__.py` (re-export the new name)
+- Modify: `my_localmcp/tools.py:1136-1147` (`set_ollama` delegates to the new function)
 - Test: `tests/installer/test_ollama.py` (new file)
 
 **Interfaces:**
-- Produces: `configure_models(*, base_url: str | None = None, fast_model: str | None = None, summary_model: str | None = None, num_ctx: int | None = None) -> dict[str, Any]`, importable as `from neo_localmcp.installer import configure_models`. Only given (truthy) fields are changed; omitted fields keep their current persisted value. Returns the updated `ollama` config block.
+- Produces: `configure_models(*, base_url: str | None = None, fast_model: str | None = None, summary_model: str | None = None, num_ctx: int | None = None) -> dict[str, Any]`, importable as `from my_localmcp.installer import configure_models`. Only given (truthy) fields are changed; omitted fields keep their current persisted value. Returns the updated `ollama` config block.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -38,8 +38,8 @@
 # tests/installer/test_ollama.py
 from __future__ import annotations
 
-from neo_localmcp import config
-from neo_localmcp.installer import configure_models
+from my_localmcp import config
+from my_localmcp.installer import configure_models
 
 
 def test_configure_models_sets_only_given_fields(isolated_config):
@@ -81,11 +81,11 @@ def test_configure_models_with_nothing_given_is_a_noop(isolated_config):
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `python -m pytest tests/installer/test_ollama.py -v`
-Expected: FAIL with `ImportError: cannot import name 'configure_models' from 'neo_localmcp.installer'`
+Expected: FAIL with `ImportError: cannot import name 'configure_models' from 'my_localmcp.installer'`
 
 - [ ] **Step 3: Implement `configure_models`**
 
-In `neo_localmcp/installer/ollama.py`, change the import line:
+In `my_localmcp/installer/ollama.py`, change the import line:
 
 ```python
 from ..config import load_config, save_config
@@ -105,7 +105,7 @@ def configure_models(
 
     Only fields that are given (truthy) are changed; omitted fields keep
     their current persisted value. Returns the updated ``ollama`` config
-    block. Shared by ``tools.set_ollama`` (the ``neo-localmcp set-ollama``
+    block. Shared by ``tools.set_ollama`` (the ``my-localmcp set-ollama``
     runtime command), the wizard's "Configure Ollama models" operation
     (``wizard/real_backend.py``), and ``setup.py config-ollama`` -- the three
     surfaces that let a user change these settings -- so there is exactly one
@@ -125,7 +125,7 @@ def configure_models(
     return ollama_cfg
 ```
 
-Add `from typing import Any` to this file's imports if not already present (check with `grep -n "^from typing" neo_localmcp/installer/ollama.py` first — the existing `ModelUnloadResult` dataclass doesn't use `Any`, so this import is likely missing).
+Add `from typing import Any` to this file's imports if not already present (check with `grep -n "^from typing" my_localmcp/installer/ollama.py` first — the existing `ModelUnloadResult` dataclass doesn't use `Any`, so this import is likely missing).
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -138,7 +138,7 @@ Extend the existing `from .ollama import (...)` block (currently lines 45-50) to
 
 - [ ] **Step 6: Refactor `tools.set_ollama` to delegate (behavior-preserving)**
 
-In `neo_localmcp/tools.py`, replace lines 1136-1147:
+In `my_localmcp/tools.py`, replace lines 1136-1147:
 
 ```python
 def set_ollama(base_url: str | None = None, summary_model: str | None = None, fast_model: str | None = None, num_ctx: int | None = None) -> str:
@@ -163,13 +163,13 @@ Expected: PASS, no new failures (confirmed by `grep -rn "set_ollama" tests/` ret
 
 - [ ] **Step 8: Compile check**
 
-Run: `python -m compileall -q neo_localmcp setup.py`
+Run: `python -m compileall -q my_localmcp setup.py`
 Expected: clean
 
 - [ ] **Step 9: Commit**
 
 ```bash
-git add neo_localmcp/installer/ollama.py neo_localmcp/installer/__init__.py neo_localmcp/tools.py tests/installer/test_ollama.py
+git add my_localmcp/installer/ollama.py my_localmcp/installer/__init__.py my_localmcp/tools.py tests/installer/test_ollama.py
 git commit -m "feat(installer): add configure_models shared by tools/wizard/CLI"
 ```
 
@@ -178,8 +178,8 @@ git commit -m "feat(installer): add configure_models shared by tools/wizard/CLI"
 ### Task 2: `apply_client_selection()` in `installer/clients.py`
 
 **Files:**
-- Modify: `neo_localmcp/installer/clients.py` (add dataclass + function after `restore_recorded_registrations`, ~line 321; extend `typing` import)
-- Modify: `neo_localmcp/installer/__init__.py` (re-export the two new names)
+- Modify: `my_localmcp/installer/clients.py` (add dataclass + function after `restore_recorded_registrations`, ~line 321; extend `typing` import)
+- Modify: `my_localmcp/installer/__init__.py` (re-export the two new names)
 - Test: `tests/installer/test_clients.py` (append)
 
 **Interfaces:**
@@ -187,7 +187,7 @@ git commit -m "feat(installer): add configure_models shared by tools/wizard/CLI"
 - Produces:
   - `ClientChangeOutcome` frozen dataclass: `ok: bool`, `connected: tuple[str, ...]`, `added: tuple[str, ...]`, `removed: tuple[str, ...]`, `manual: tuple[str, ...]`, `failures: tuple[str, ...]`.
   - `apply_client_selection(paths: ManagedPaths, target: Sequence[str], *, server_command: str | Path, on_event: Callable[[str, str], None] | None = None) -> ClientChangeOutcome`. `on_event`, when given, is called with `(level, message)` for every action/warning/error/info line — `level` is one of `"info"`, `"action"`, `"warning"`, `"error"` (the same vocabulary `installer/output.py::Reporter` already uses).
-  - Both importable as `from neo_localmcp.installer import apply_client_selection, ClientChangeOutcome`.
+  - Both importable as `from my_localmcp.installer import apply_client_selection, ClientChangeOutcome`.
 
 - [ ] **Step 1: Check existing fixtures/imports in the target test file**
 
@@ -201,7 +201,7 @@ Append to `tests/installer/test_clients.py`:
 
 ```python
 def test_apply_client_selection_connects_and_disconnects(client_home, tmp_path, monkeypatch):
-    from neo_localmcp.installer import clients
+    from my_localmcp.installer import clients
 
     paths = ManagedPaths.from_environment()
     clients.record_selection(paths, ["claude-code"])
@@ -218,7 +218,7 @@ def test_apply_client_selection_connects_and_disconnects(client_home, tmp_path, 
 
     events = []
     outcome = clients.apply_client_selection(
-        paths, ["codex"], server_command="neo-localmcp-server",
+        paths, ["codex"], server_command="my-localmcp-server",
         on_event=lambda level, message: events.append((level, message)),
     )
 
@@ -231,7 +231,7 @@ def test_apply_client_selection_connects_and_disconnects(client_home, tmp_path, 
 
 
 def test_apply_client_selection_records_failures_without_raising(client_home, tmp_path, monkeypatch):
-    from neo_localmcp.installer import clients
+    from my_localmcp.installer import clients
 
     paths = ManagedPaths.from_environment()
 
@@ -240,35 +240,35 @@ def test_apply_client_selection_records_failures_without_raising(client_home, tm
 
     monkeypatch.setattr(clients.client_setup, "setup_client", _boom)
 
-    outcome = clients.apply_client_selection(paths, ["claude-code"], server_command="neo-localmcp-server")
+    outcome = clients.apply_client_selection(paths, ["claude-code"], server_command="my-localmcp-server")
 
     assert not outcome.ok
     assert "claude-code" in outcome.failures[0]
 
 
 def test_apply_client_selection_with_no_changes_still_records_target(client_home, tmp_path, monkeypatch):
-    from neo_localmcp.installer import clients
+    from my_localmcp.installer import clients
 
     paths = ManagedPaths.from_environment()
     clients.record_selection(paths, ["claude-code"])
 
-    outcome = clients.apply_client_selection(paths, ["claude-code"], server_command="neo-localmcp-server")
+    outcome = clients.apply_client_selection(paths, ["claude-code"], server_command="my-localmcp-server")
 
     assert outcome.ok
     assert outcome.added == ()
     assert outcome.removed == ()
 ```
 
-If Step 1 showed `ManagedPaths` is not already imported at module level in this test file, add `from neo_localmcp.installer.paths import ManagedPaths` to its top-level imports.
+If Step 1 showed `ManagedPaths` is not already imported at module level in this test file, add `from my_localmcp.installer.paths import ManagedPaths` to its top-level imports.
 
 - [ ] **Step 3: Run tests to verify they fail**
 
 Run: `python -m pytest tests/installer/test_clients.py -k apply_client_selection -v`
-Expected: FAIL with `AttributeError: module 'neo_localmcp.installer.clients' has no attribute 'apply_client_selection'`
+Expected: FAIL with `AttributeError: module 'my_localmcp.installer.clients' has no attribute 'apply_client_selection'`
 
 - [ ] **Step 4: Implement `ClientChangeOutcome` and `apply_client_selection`**
 
-Add to `neo_localmcp/installer/clients.py` immediately after `restore_recorded_registrations`:
+Add to `my_localmcp/installer/clients.py` immediately after `restore_recorded_registrations`:
 
 ```python
 @dataclass(frozen=True)
@@ -293,9 +293,9 @@ def apply_client_selection(
     """Reconcile live client registrations to match ``target``.
 
     Diffs ``target`` against the currently recorded clients, connects newly
-    selected surfaces via :func:`neo_localmcp.client_setup.setup_client`,
+    selected surfaces via :func:`my_localmcp.client_setup.setup_client`,
     disconnects deselected ones via
-    :func:`neo_localmcp.client_setup.remove_client`, and persists the new
+    :func:`my_localmcp.client_setup.remove_client`, and persists the new
     target via :func:`record_selection`. Used by both the wizard's "Manage
     connected clients" operation and ``setup.py manage-clients`` so both
     surfaces reconcile client registrations identically.
@@ -370,7 +370,7 @@ Expected: PASS
 - [ ] **Step 8: Commit**
 
 ```bash
-git add neo_localmcp/installer/clients.py neo_localmcp/installer/__init__.py tests/installer/test_clients.py
+git add my_localmcp/installer/clients.py my_localmcp/installer/__init__.py tests/installer/test_clients.py
 git commit -m "feat(installer): add apply_client_selection shared by wizard and CLI"
 ```
 
@@ -379,11 +379,11 @@ git commit -m "feat(installer): add apply_client_selection shared by wizard and 
 ### Task 3: Refactor `real_backend.py` to use both shared helpers
 
 **Files:**
-- Modify: `neo_localmcp/wizard/real_backend.py:328-405` (`_write_ollama_config` and `apply_client_changes`)
+- Modify: `my_localmcp/wizard/real_backend.py:328-405` (`_write_ollama_config` and `apply_client_changes`)
 - Test: `tests/test_wizard.py` (append)
 
 **Interfaces:**
-- Consumes: `installer.configure_models(...)` (Task 1), `installer.clients.apply_client_selection(...)` + `ClientChangeOutcome` (Task 2) — both already imported into this file's namespace as `config`/`clients_mod` per its existing top-of-file imports (`from .. import client_setup, config, ollama_client` and `from ..installer import clients as clients_mod`) — check `grep -n "^from \.\.\|^import" neo_localmcp/wizard/real_backend.py` to confirm exact current names before editing, since `configure_models` needs to be reachable too (either via the existing `from ..installer import (...)` block, extended, or a new `from .. import installer` style import — prefer extending the existing block).
+- Consumes: `installer.configure_models(...)` (Task 1), `installer.clients.apply_client_selection(...)` + `ClientChangeOutcome` (Task 2) — both already imported into this file's namespace as `config`/`clients_mod` per its existing top-of-file imports (`from .. import client_setup, config, ollama_client` and `from ..installer import clients as clients_mod`) — check `grep -n "^from \.\.\|^import" my_localmcp/wizard/real_backend.py` to confirm exact current names before editing, since `configure_models` needs to be reachable too (either via the existing `from ..installer import (...)` block, extended, or a new `from .. import installer` style import — prefer extending the existing block).
 - Produces: no new public interface — this task is a behavior-preserving refactor. The existing `WizardBackend.apply_ollama_config` / `apply_client_changes` signatures and `OperationOutcome` shapes are unchanged.
 
 - [ ] **Step 1: Write the failing/characterization tests**
@@ -392,9 +392,9 @@ Append to `tests/test_wizard.py` (this file already imports `real_backend` and u
 
 ```python
 def test_real_backend_apply_client_changes_uses_shared_helper(isolated_app_home, monkeypatch):
-    from neo_localmcp.installer import clients as clients_mod
-    from neo_localmcp.wizard.backend import WizardState
-    from neo_localmcp.wizard.real_backend import RealBackend
+    from my_localmcp.installer import clients as clients_mod
+    from my_localmcp.wizard.backend import WizardState
+    from my_localmcp.wizard.real_backend import RealBackend
 
     calls = []
     monkeypatch.setattr(
@@ -413,9 +413,9 @@ def test_real_backend_apply_client_changes_uses_shared_helper(isolated_app_home,
 
 
 def test_real_backend_apply_ollama_config_uses_shared_helper(isolated_app_home):
-    from neo_localmcp import config
-    from neo_localmcp.wizard.backend import WizardState
-    from neo_localmcp.wizard.real_backend import RealBackend
+    from my_localmcp import config
+    from my_localmcp.wizard.backend import WizardState
+    from my_localmcp.wizard.real_backend import RealBackend
 
     backend = RealBackend()
     state = WizardState(
@@ -436,7 +436,7 @@ Expected: PASS (these characterize *current* behavior — both tests must pass *
 
 - [ ] **Step 3: Refactor `_write_ollama_config`**
 
-In `neo_localmcp/wizard/real_backend.py`, replace the `_write_ollama_config` method (lines 328-340):
+In `my_localmcp/wizard/real_backend.py`, replace the `_write_ollama_config` method (lines 328-340):
 
 ```python
     def _write_ollama_config(self, state: WizardState, emit: EmitFn) -> None:
@@ -490,7 +490,7 @@ Expected: PASS
 - [ ] **Step 7: Commit**
 
 ```bash
-git add neo_localmcp/wizard/real_backend.py tests/test_wizard.py
+git add my_localmcp/wizard/real_backend.py tests/test_wizard.py
 git commit -m "refactor(wizard): real_backend delegates to shared installer helpers"
 ```
 
@@ -499,7 +499,7 @@ git commit -m "refactor(wizard): real_backend delegates to shared installer help
 ### Task 4: `config-ollama` and `manage-clients` subcommands in `setup_cli.py`
 
 **Files:**
-- Modify: `neo_localmcp/setup_cli.py` (parser additions in `build_parser()`, two new dispatch helpers, `main()` restructure)
+- Modify: `my_localmcp/setup_cli.py` (parser additions in `build_parser()`, two new dispatch helpers, `main()` restructure)
 - Test: `tests/installer/test_setup_cli.py` (append)
 
 **Interfaces:**
@@ -545,7 +545,7 @@ Expected: FAIL with argparse `error: argument operation: invalid choice: 'config
 
 - [ ] **Step 3: Add the two subparsers**
 
-In `neo_localmcp/setup_cli.py`, inside `build_parser()`, immediately before the final `return parser` (after the existing `uninstall_parser` block):
+In `my_localmcp/setup_cli.py`, inside `build_parser()`, immediately before the final `return parser` (after the existing `uninstall_parser` block):
 
 ```python
     config_ollama_parser = sub.add_parser(
@@ -577,7 +577,7 @@ Add these functions right before `main()`:
 
 ```python
 def _run_config_ollama(args: argparse.Namespace, reporter: Reporter) -> int:
-    from neo_localmcp.installer import configure_models
+    from my_localmcp.installer import configure_models
 
     ollama_cfg = configure_models(
         base_url=args.base_url, fast_model=args.fast_model, summary_model=args.summary_model,
@@ -600,7 +600,7 @@ _LEVEL_METHODS = {
 def _run_manage_clients(
     args: argparse.Namespace, context: OperationContext, reporter: Reporter,
 ) -> int:
-    from neo_localmcp.installer import apply_client_selection
+    from my_localmcp.installer import apply_client_selection
 
     outcome = apply_client_selection(
         context.paths,
@@ -637,13 +637,13 @@ Expected: PASS, no regressions in the pre-existing tests in this file
 
 - [ ] **Step 7: Run the full test suite and compileall**
 
-Run: `python -m pytest -q && python -m compileall -q neo_localmcp setup.py`
+Run: `python -m pytest -q && python -m compileall -q my_localmcp setup.py`
 Expected: both clean
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add neo_localmcp/setup_cli.py tests/installer/test_setup_cli.py
+git add my_localmcp/setup_cli.py tests/installer/test_setup_cli.py
 git commit -m "feat(installer): add config-ollama and manage-clients to setup.py CLI"
 ```
 
@@ -669,7 +669,7 @@ python3 setup.py manage-clients --client claude-code --client codex   # disconne
 
 - [ ] **Step 2: Update PROJECT_STATUS.md**
 
-Add a line noting `setup.py` now exposes all five wizard operations (install/reinstall/uninstall/config-ollama/manage-clients), and that the underlying Ollama-config logic is shared across the wizard, `setup.py`, and the separate `neo-localmcp set-ollama` runtime command (one implementation, three callers).
+Add a line noting `setup.py` now exposes all five wizard operations (install/reinstall/uninstall/config-ollama/manage-clients), and that the underlying Ollama-config logic is shared across the wizard, `setup.py`, and the separate `my-localmcp set-ollama` runtime command (one implementation, three callers).
 
 - [ ] **Step 3: Append a dated entry to PROJECT_NOTES.md**
 
@@ -695,13 +695,13 @@ Expected: all pass, zero new failures relative to the pre-plan baseline.
 
 - [ ] **Step 2: Compile check**
 
-Run: `python -m compileall -q neo_localmcp setup.py`
+Run: `python -m compileall -q my_localmcp setup.py`
 Expected: clean, no syntax errors.
 
 - [ ] **Step 3: Manual smoke test against an isolated home**
 
 ```bash
-export NEO_LOCALMCP_HOME=/tmp/neo-localmcp-parity-smoke
+export MY_LOCALMCP_HOME=/tmp/my-localmcp-parity-smoke
 python3 setup.py config-ollama --fast-model qwen2.5:3b --summary-model qwen2.5-coder:7b
 python3 setup.py manage-clients --client claude-code
 python3 setup.py manage-clients   # no --client at all -> disconnects claude-code again
@@ -727,8 +727,8 @@ See `docs/superpowers/specs/2026-07-06-cli-wizard-parity-design.md` for the full
 
 ## Test plan
 - [ ] `python -m pytest -q` passes
-- [ ] `python -m compileall -q neo_localmcp setup.py` passes
-- [ ] Manual smoke test: `setup.py config-ollama` and `setup.py manage-clients` against an isolated `NEO_LOCALMCP_HOME`
+- [ ] `python -m compileall -q my_localmcp setup.py` passes
+- [ ] Manual smoke test: `setup.py config-ollama` and `setup.py manage-clients` against an isolated `MY_LOCALMCP_HOME`
 - [ ] `setup.py --help` and the wizard's menu expose the same five operations
 EOF
 )"

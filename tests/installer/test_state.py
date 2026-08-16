@@ -6,20 +6,20 @@ from pathlib import Path
 
 import pytest
 
-from neo_localmcp.installer.paths import ManagedPaths
-from neo_localmcp.installer.state import (
+from my_localmcp.installer.paths import ManagedPaths
+from my_localmcp.installer.state import (
     MetadataCorruptError,
     begin_operation,
     complete_operation,
     detect_state,
     fail_operation,
 )
-from neo_localmcp.installer.types import InstallStateKind, Operation
+from my_localmcp.installer.types import InstallStateKind, Operation
 
 
 def _paths(tmp_path: Path) -> ManagedPaths:
     return ManagedPaths(
-        root=tmp_path / ".neo-localmcp",
+        root=tmp_path / ".my-localmcp",
         platform="posix",
         home=tmp_path,
     )
@@ -147,7 +147,7 @@ def test_metadata_transitions_are_atomic_and_preserve_schema(
         replacements.append((Path(source), Path(destination)))
         original_replace(source, destination)
 
-    monkeypatch.setattr("neo_localmcp.installer.state.os.replace", recording_replace)
+    monkeypatch.setattr("my_localmcp.installer.state.os.replace", recording_replace)
 
     started = begin_operation(
         paths,

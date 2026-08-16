@@ -18,23 +18,23 @@ from typing import Any
 
 import pytest
 
-from neo_localmcp.installer import operations
-from neo_localmcp.installer.operations import OperationContext, install, reinstall, uninstall
-from neo_localmcp.installer.output import Reporter
-from neo_localmcp.installer.paths import ManagedPaths
-from neo_localmcp.installer.runtime import (
+from my_localmcp.installer import operations
+from my_localmcp.installer.operations import OperationContext, install, reinstall, uninstall
+from my_localmcp.installer.output import Reporter
+from my_localmcp.installer.paths import ManagedPaths
+from my_localmcp.installer.runtime import (
     PromotionResult,
     RuntimeValidation,
     RemovalResult,
 )
-from neo_localmcp.installer.state import complete_operation, detect_state
-from neo_localmcp.installer.types import (
+from my_localmcp.installer.state import complete_operation, detect_state
+from my_localmcp.installer.types import (
     DetectedState,
     InstallStateKind,
     Operation,
     OperationStatus,
 )
-from neo_localmcp.installer.verification import VerificationCheck, VerificationReport
+from my_localmcp.installer.verification import VerificationCheck, VerificationReport
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -43,7 +43,7 @@ EXPECTED_VERSION = "1.0.9"
 
 def _paths(tmp_path: Path) -> ManagedPaths:
     return ManagedPaths(
-        root=tmp_path / ".neo-localmcp",
+        root=tmp_path / ".my-localmcp",
         platform="posix",
         home=tmp_path,
         allow_test_root=True,
@@ -382,10 +382,10 @@ def test_explicit_install_actually_connects_the_client_end_to_end(tmp_path, monk
     # apply_client_selection ran, so apply_client_selection's own diff (recorded "current"
     # clients vs. target) saw the just-selected client as already-current and never called
     # setup_client at all. A real explicit-selection install silently registered nothing
-    # while still reporting success. This test wires in the real neo_localmcp.installer.clients
+    # while still reporting success. This test wires in the real my_localmcp.installer.clients
     # orchestration (registrations.json read/write, the real diff) instead of the Recorder, so
     # the interaction between the two seams is actually exercised.
-    from neo_localmcp.installer import clients as clients_mod
+    from my_localmcp.installer import clients as clients_mod
 
     connected: list[str] = []
     monkeypatch.setattr(
@@ -526,11 +526,11 @@ def test_client_restore_failure_keeps_runtime_and_fails_visibly(tmp_path):
     assert not recorder.venv_removed
     assert not recorder.root_deleted
     # recovery guidance surfaced, and points at the real setup entrypoint
-    # rather than the removed `neo-localmcp setup` command.
+    # rather than the removed `my-localmcp setup` command.
     joined = "\n".join(messages).lower()
     assert "recover" in joined or "recovery" in joined
     assert "setup.py" in joined
-    assert "neo-localmcp setup" not in joined
+    assert "my-localmcp setup" not in joined
     # failure recorded in metadata
     state = detect_state(ctx.paths)
     assert state.kind is not InstallStateKind.PARTIAL_OPERATION
@@ -634,9 +634,9 @@ def test_delete_managed_root_targets_only_validated_root(tmp_path):
 
 
 def test_delete_managed_root_refuses_unvalidated_root(tmp_path):
-    from neo_localmcp.installer.paths import UnsafeManagedRoot
+    from my_localmcp.installer.paths import UnsafeManagedRoot
 
-    # allow_test_root=False + non ".neo-localmcp" name => must refuse
+    # allow_test_root=False + non ".my-localmcp" name => must refuse
     paths = ManagedPaths(root=tmp_path / "not-managed", platform="posix", home=tmp_path)
     (tmp_path / "not-managed").mkdir()
     with pytest.raises(UnsafeManagedRoot):

@@ -4,7 +4,7 @@
 
 ## Verification
 
-**Code edits made** (`neo_localmcp/` or `tests/`)
+**Code edits made** (`my_localmcp/` or `tests/`)
 - [ ] `pytest -q -m "not slow"` passes locally
 
 **No code edits** (root/docs-only, `.github/`, non-code files)

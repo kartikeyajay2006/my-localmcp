@@ -118,7 +118,7 @@ and rebuilding. Make each install offline wheel-unpacking without changing what
 the tests assert.
 
 **Mechanism (no production-code change):** at CI-job start, build a wheelhouse —
-a wheel of `neo-localmcp` plus its deps (`mcp[cli]`, `psutil`) — then set
+a wheel of `my-localmcp` plus its deps (`mcp[cli]`, `psutil`) — then set
 `PIP_NO_INDEX=1` and `PIP_FIND_LINKS=<wheelhouse>` in the job environment. pip
 honors both env vars **natively**, so every `pip install` the lifecycle runs
 (including the `--force-reinstall` in `installer/runtime.py`'s `install_command`,
@@ -157,7 +157,7 @@ narrower idea not designed here.
 **Separately discovered, unrelated to the above (spun off, not fixed here):**
 `tests/installer/test_verification.py`'s `_base_kwargs()` never injects
 `ollama_status_fn`, so ~14 tests call the **real** `ollama_client.status()` —
-a live network probe against whatever `~/.neo-localmcp/config.yaml` exists on
+a live network probe against whatever `~/.my-localmcp/config.yaml` exists on
 the running machine. Confirmed live: a single such test takes 3.08s in
 isolation (config.py's `connect_timeout_seconds=3` against an unreachable
 default host); ~11-14 of these account for roughly a third of the fast suite's
@@ -206,7 +206,7 @@ is now genuine per-cycle test work, not waste. Skipping per the spec's own
 ## Non-goals / deferred
 
 - **#13 (per-area CI reporting)** — deferred entirely. Needs test-tree
-  reorganization by area + backfilling the currently-absent `neo_localmcp/wizard/`
+  reorganization by area + backfilling the currently-absent `my_localmcp/wizard/`
   pytest tests. Its own effort later.
 - **Structural refactors** — #29, #30, #31, #32, #33 and the `tools.py`
   god-file / per-command split. Separate track, only where proven to help CI.

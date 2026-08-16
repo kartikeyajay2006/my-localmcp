@@ -4,11 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from neo_localmcp.installer.paths import ManagedPaths, UnsafeManagedRoot
+from my_localmcp.installer.paths import ManagedPaths, UnsafeManagedRoot
 
 
 def test_posix_layout_uses_one_venv_and_durable_subdirectories(tmp_path: Path) -> None:
-    root = tmp_path / ".neo-localmcp"
+    root = tmp_path / ".my-localmcp"
     paths = ManagedPaths(root=root, platform="posix", home=tmp_path)
 
     assert paths.venv == root / "venv"
@@ -21,24 +21,24 @@ def test_posix_layout_uses_one_venv_and_durable_subdirectories(tmp_path: Path) -
     assert paths.install_metadata == root / "config" / "install.json"
     assert paths.process_registry == root / "cache" / "processes"
     assert paths.candidate_venv == root / "cache" / "runtime-staging" / "venv"
-    assert paths.cli_executable == root / "venv" / "bin" / "neo-localmcp"
-    assert paths.server_executable == root / "venv" / "bin" / "neo-localmcp-server"
+    assert paths.cli_executable == root / "venv" / "bin" / "my-localmcp"
+    assert paths.server_executable == root / "venv" / "bin" / "my-localmcp-server"
 
 
 def test_windows_layout_uses_scripts_executables(tmp_path: Path) -> None:
-    root = tmp_path / ".neo-localmcp"
+    root = tmp_path / ".my-localmcp"
     paths = ManagedPaths(root=root, platform="windows", home=tmp_path)
 
-    assert paths.cli_executable == root / "venv" / "Scripts" / "neo-localmcp.exe"
-    assert paths.server_executable == root / "venv" / "Scripts" / "neo-localmcp-server.exe"
+    assert paths.cli_executable == root / "venv" / "Scripts" / "my-localmcp.exe"
+    assert paths.server_executable == root / "venv" / "Scripts" / "my-localmcp-server.exe"
     assert paths.python_executable == root / "venv" / "Scripts" / "python.exe"
 
 
 def test_from_environment_prefers_explicit_managed_home(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    root = tmp_path / ".neo-localmcp"
-    monkeypatch.setenv("NEO_LOCALMCP_HOME", str(root))
+    root = tmp_path / ".my-localmcp"
+    monkeypatch.setenv("MY_LOCALMCP_HOME", str(root))
 
     paths = ManagedPaths.from_environment(platform="posix", home=tmp_path)
 
@@ -47,7 +47,7 @@ def test_from_environment_prefers_explicit_managed_home(
 
 def test_ensure_directories_never_creates_venv(tmp_path: Path) -> None:
     paths = ManagedPaths(
-        root=tmp_path / ".neo-localmcp", platform="posix", home=tmp_path
+        root=tmp_path / ".my-localmcp", platform="posix", home=tmp_path
     )
 
     paths.ensure_directories()
@@ -76,7 +76,7 @@ def test_destructive_validation_refuses_home_directory(tmp_path: Path) -> None:
 
 
 def test_destructive_validation_refuses_symlink_resolving_to_home(tmp_path: Path) -> None:
-    link = tmp_path.parent / ".neo-localmcp"
+    link = tmp_path.parent / ".my-localmcp"
     try:
         link.symlink_to(tmp_path, target_is_directory=True)
     except FileExistsError:
@@ -91,7 +91,7 @@ def test_destructive_validation_refuses_symlink_resolving_to_home(tmp_path: Path
 
 
 def test_destructive_validation_accepts_expected_root(tmp_path: Path) -> None:
-    root = tmp_path / ".neo-localmcp"
+    root = tmp_path / ".my-localmcp"
     paths = ManagedPaths(root=root, platform="posix", home=tmp_path)
 
     assert paths.validate_destructive_root() == root.resolve()

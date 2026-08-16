@@ -110,7 +110,7 @@ jobs:
         run: python -m pytest -q -m "not slow" -n auto
       - name: Compile
         if: github.event_name == 'push' || steps.changes.outputs.code == 'true'
-        run: python -m compileall -q neo_localmcp setup.py
+        run: python -m compileall -q my_localmcp setup.py
 
   slow:
     name: ${{ matrix.os }} / lifecycle
@@ -283,7 +283,7 @@ Do not proceed to Task 4 until Steps 2 and 4 both passed (happy-path green ci-ga
 
 - [ ] **Step 1: Record the current protection for rollback**
 
-Run: `gh api repos/NeelAPatel/neo-localmcp/branches/main/protection/required_status_checks --jq '{strict, contexts}'`
+Run: `gh api repos/kartikeyajay2006/my-localmcp/branches/main/protection/required_status_checks --jq '{strict, contexts}'`
 Expected (record this exact value for rollback): `{"strict":true,"contexts":["macos-latest / Python 3.12","windows-latest / Python 3.12","Validate PR title"]}`
 
 - [ ] **Step 2: Repoint required status checks to `ci-gate` (surgical endpoint)**
@@ -292,7 +292,7 @@ This endpoint updates ONLY the status-check list; `enforce_admins`, `required_pu
 
 ```bash
 gh api --method PATCH \
-  repos/NeelAPatel/neo-localmcp/branches/main/protection/required_status_checks \
+  repos/kartikeyajay2006/my-localmcp/branches/main/protection/required_status_checks \
   --input - <<'JSON'
 {"strict": true, "contexts": ["ci-gate", "Validate PR title"]}
 JSON
@@ -300,11 +300,11 @@ JSON
 
 - [ ] **Step 3: Verify the swap**
 
-Run: `gh api repos/NeelAPatel/neo-localmcp/branches/main/protection/required_status_checks --jq '.contexts'`
+Run: `gh api repos/kartikeyajay2006/my-localmcp/branches/main/protection/required_status_checks --jq '.contexts'`
 Expected: `["ci-gate","Validate PR title"]` (the two per-OS `Python 3.12` contexts are gone).
 
 Also confirm the rest of protection survived:
-Run: `gh api repos/NeelAPatel/neo-localmcp/branches/main/protection --jq '{admins: .enforce_admins.enabled, reviews: (.required_pull_request_reviews != null)}'`
+Run: `gh api repos/kartikeyajay2006/my-localmcp/branches/main/protection --jq '{admins: .enforce_admins.enabled, reviews: (.required_pull_request_reviews != null)}'`
 Expected: `{"admins":true,"reviews":true}`.
 
 - [ ] **Step 4: Confirm the Phase 1 PR is now mergeable**
@@ -333,7 +333,7 @@ If, at any point, PRs become unmergeable because `ci-gate` is required but the w
 
 ```bash
 gh api --method PATCH \
-  repos/NeelAPatel/neo-localmcp/branches/main/protection/required_status_checks \
+  repos/kartikeyajay2006/my-localmcp/branches/main/protection/required_status_checks \
   --input - <<'JSON'
 {"strict": true, "contexts": ["macos-latest / Python 3.12", "windows-latest / Python 3.12", "Validate PR title"]}
 JSON

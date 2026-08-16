@@ -1,4 +1,4 @@
-"""Packaging-compatible front door for the neo-localmcp setup lifecycle."""
+"""Packaging-compatible front door for the my-localmcp setup lifecycle."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ _SETUPTOOLS_COMMANDS = {
 
 def _python_floor_message(required: tuple[int, int]) -> str:
     return (
-        f"neo-localmcp requires Python {required[0]}.{required[1]} or newer.\n"
+        f"my-localmcp requires Python {required[0]}.{required[1]} or newer.\n"
         "Install a supported system Python, then run:\n"
         "    python3.12 setup.py install"
     )
@@ -41,6 +41,6 @@ if __name__ == "__main__":
 
         setup()
     else:
-        from neo_localmcp.installer.cli import main
+        from my_localmcp.installer.cli import main
 
         raise SystemExit(main())

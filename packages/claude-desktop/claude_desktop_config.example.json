@@ -1,10 +1,10 @@
 {
   "mcpServers": {
-    "neo-localmcp": {
+    "my-localmcp": {
       "command": "/absolute/path/to/python",
-      "args": ["-m", "neo_localmcp.mcp.server"],
+      "args": ["-m", "my_localmcp.mcp.server"],
       "env": {
-        "NEO_LOCALMCP_CONFIG": "/absolute/path/to/config.yaml"
+        "MY_LOCALMCP_CONFIG": "/absolute/path/to/config.yaml"
       }
     }
   }

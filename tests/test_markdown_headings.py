@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from neo_localmcp.repo_utils import extract_markdown_headings, extract_symbols
+from my_localmcp.repo_utils import extract_markdown_headings, extract_symbols
 
 pytestmark = pytest.mark.retrieval
 

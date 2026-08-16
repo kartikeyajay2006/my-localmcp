@@ -4,7 +4,7 @@ import copy
 import json
 import re
 
-from neo_localmcp import config, repo_utils as utils
+from my_localmcp import config, repo_utils as utils
 
 
 def _seed(repo, real_files, excluded_dirs):
@@ -42,7 +42,7 @@ def test_claude_worktree_dir_is_excluded(tmp_path, isolated_config):
     _seed(
         repo,
         ["real.py"],
-        [(".claude", "worktrees/agent-abc123/neo_localmcp/repo_memory.py")],
+        [(".claude", "worktrees/agent-abc123/my_localmcp/repo_memory.py")],
     )
 
     found, eligible, complete = utils.scan_repo_files(repo)
@@ -72,7 +72,7 @@ def test_stale_persisted_exclude_dirs_cannot_defeat_code_owned_excludes(tmp_path
 
     repo = tmp_path / "repo"
     repo.mkdir()
-    _seed(repo, ["real.py"], [(".claude", "worktrees/agent-abc123/neo_localmcp/repo_memory.py")])
+    _seed(repo, ["real.py"], [(".claude", "worktrees/agent-abc123/my_localmcp/repo_memory.py")])
 
     found, eligible, complete = utils.scan_repo_files(repo)
     rels = {utils.rel(p, repo) for p in found}

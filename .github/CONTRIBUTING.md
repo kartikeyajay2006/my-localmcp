@@ -33,9 +33,9 @@ and `meta` is explicitly about the project, not the codebase.
 ## Areas
 
 ```
-wizard                (setup_wizard.py, neo_localmcp/wizard/)
-├─ installer          (setup.py, neo_localmcp/installer/, + packaging/.mcpb)
-└─ client-integration (neo_localmcp/ai_client_config.py)
+wizard                (setup_wizard.py, my_localmcp/wizard/)
+├─ installer          (setup.py, my_localmcp/installer/, + packaging/.mcpb)
+└─ client-integration (my_localmcp/ai_client_config.py)
 
 mcp-tools             (tools.py, runtime_cli.py, server.py, slash-command templates)
 ├─ mcp-mgmt           (doctor, status, index/refresh/reindex, servers/stop, config)
@@ -74,11 +74,11 @@ it's missing). To scan the full history manually at any point:
 ## Verification before opening a PR
 
 See `.github/pull_request_template.md` for the actual checklist. Short version:
-touched `neo_localmcp/` or `tests/` → run `pytest -q -m "not slow"` locally;
+touched `my_localmcp/` or `tests/` → run `pytest -q -m "not slow"` locally;
 docs/meta-only changes need neither. CI (not this checklist) is what's actually
 required before merging — branch protection enforces it. The `.mcpb` bundle is
 rebuilt automatically by `setup.py install`/`reinstall` from a source checkout
-(`neo_localmcp/installer/mcpb.py`), not a manual step, and never overwrites —
+(`my_localmcp/installer/mcpb.py`), not a manual step, and never overwrites —
 a rebuild against an already-present filename gets a `-2`/`-3`/... suffix
 instead, so delete any such incidental duplicate before committing (it's a
 byte-identical rebuild of the same source, safe to discard). On any source

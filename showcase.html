@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>my-localmcp | Interactive 3D Showcase</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    
+    <!-- Three.js CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <style>
+        :root {
+            --bg-color: #030712;
+            --primary: #00f0ff;
+            --primary-glow: rgba(0, 240, 255, 0.4);
+            --secondary: #bd00ff;
+            --secondary-glow: rgba(189, 0, 255, 0.3);
+            --accent: #00ff88;
+            --accent-glow: rgba(0, 255, 136, 0.3);
+            --card-bg: rgba(15, 23, 42, 0.45);
+            --card-border: rgba(255, 255, 255, 0.08);
+            --text-main: #f3f4f6;
+            --text-muted: #9ca3af;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            overflow-x: hidden;
+            height: 100vh;
+            width: 100vw;
+            display: flex;
+            justify-content: flex-start;
+            align-items: stretch;
+        }
+
+        /* 3D WebGL Canvas */
+        #webgl-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+            pointer-events: none;
+        }
+
+        /* Layout Grid */
+        .dashboard {
+            position: relative;
+            z-index: 2;
+            width: 100%;
+            height: 100vh;
+            display: grid;
+            grid-template-columns: 420px 1fr 480px;
+            grid-template-rows: 80px 1fr;
+            padding: 20px;
+            gap: 20px;
+            pointer-events: none; /* Let canvas capture scroll/mouse if needed, but enable specifically on cards */
+        }
+
+        /* Interactive Elements Enable */
+        .interactive-element {
+            pointer-events: auto;
+        }
+
+        /* Glassmorphism Common */
+        .glass-panel {
+            background: var(--card-bg);
+            backdrop-filter: blur(16px) saturate(120%);
+            -webkit-backdrop-filter: blur(16px) saturate(120%);
+            border: 1px solid var(--card-border);
+            border-radius: 16px;
+            padding: 24px;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+            transition: border-color 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .glass-panel:hover {
+            border-color: rgba(0, 240, 255, 0.25);
+            box-shadow: 0 8px 32px 0 rgba(0, 240, 255, 0.05);
+        }
+
+        /* Header */
+        header {
+            grid-column: 1 / -1;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            height: 100%;
+            padding: 0 10px;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo-mark {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            box-shadow: 0 0 15px var(--primary-glow);
+            position: relative;
+            animation: logo-pulse 4s infinite alternate;
+        }
+
+        @keyframes logo-pulse {
+            0% { transform: scale(1); filter: hue-rotate(0deg); }
+            100% { transform: scale(1.05); filter: hue-rotate(30deg); }
+        }
+
+        .brand h1 {
+            font-size: 24px;
+            font-weight: 800;
+            background: linear-gradient(to right, #ffffff, var(--primary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: 0.5px;
+        }
+
+        .system-status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            padding: 8px 16px;
+            border-radius: 99px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: var(--accent);
+            box-shadow: 0 0 10px var(--accent);
+            animation: blink 1.5s infinite alternate;
+        }
+
+        @keyframes blink {
+            0% { opacity: 0.3; }
+            100% { opacity: 1; }
+        }
+
+        /* Sidebar - Left (Control Center) */
+        .sidebar-left {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            height: calc(100vh - 120px);
+            overflow-y: auto;
+        }
+
+        .sidebar-left::-webkit-scrollbar {
+            width: 4px;
+        }
+        .sidebar-left::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 2px;
+        }
+
+        .section-title {
+            font-size: 12px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: var(--primary);
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .section-title::after {
+            content: '';
+            flex-grow: 1;
+            height: 1px;
+            background: linear-gradient(to right, rgba(0, 240, 255, 0.3), transparent);
+        }
+
+        /* Features List */
+        .feature-card {
+            margin-bottom: 12px;
+            position: relative;
+            cursor: pointer;
+            transform-style: preserve-3d;
+            perspective: 1000px;
+        }
+
+        .feature-card h3 {
+            font-size: 16px;
+            font-weight: 600;
+            color: #ffffff;
+            margin-bottom: 6px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .feature-card p {
+            font-size: 13px;
+            color: var(--text-muted);
+            line-height: 1.5;
+        }
+
+        .feature-card .icon {
+            color: var(--primary);
+            font-weight: bold;
+        }
+
+        /* Center Area (3D Core Interactive Zone) */
+        .center-stage {
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-end;
+            align-items: center;
+            position: relative;
+            padding-bottom: 40px;
+        }
+
+        .interactive-hint {
+            background: rgba(0, 0, 0, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 10px 20px;
+            border-radius: 99px;
+            font-size: 14px;
+            color: var(--primary);
+            text-shadow: 0 0 10px var(--primary-glow);
+            animation: pulse-glow 2s infinite;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+        }
+
+        @keyframes pulse-glow {
+            0% { transform: translateY(0); box-shadow: 0 0 5px rgba(0, 240, 255, 0.2); }
+            50% { transform: translateY(-4px); box-shadow: 0 0 15px rgba(0, 240, 255, 0.5); }
+            100% { transform: translateY(0); box-shadow: 0 0 5px rgba(0, 240, 255, 0.2); }
+        }
+
+        /* Sidebar - Right (HUD Terminal & Metrics) */
+        .sidebar-right {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            height: calc(100vh - 120px);
+        }
+
+        .hud-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+        }
+
+        .hud-stat {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            padding: 14px;
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .hud-stat .label {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-muted);
+        }
+
+        .hud-stat .value {
+            font-size: 20px;
+            font-weight: 700;
+            color: #ffffff;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .hud-stat.neon-blue .value { color: var(--primary); text-shadow: 0 0 8px var(--primary-glow); }
+        .hud-stat.neon-purple .value { color: var(--secondary); text-shadow: 0 0 8px var(--secondary-glow); }
+        .hud-stat.neon-green .value { color: var(--accent); text-shadow: 0 0 8px var(--accent-glow); }
+
+        /* Mock Terminal */
+        .terminal-panel {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            background: rgba(5, 5, 10, 0.8) !important;
+            border: 1px solid rgba(0, 240, 255, 0.15) !important;
+            font-family: 'JetBrains Mono', monospace;
+            padding: 16px;
+            overflow: hidden;
+        }
+
+        .terminal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            padding-bottom: 8px;
+            margin-bottom: 12px;
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .terminal-dots {
+            display: flex;
+            gap: 6px;
+        }
+
+        .terminal-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #ef4444;
+        }
+        .terminal-dot:nth-child(2) { background: #eab308; }
+        .terminal-dot:nth-child(3) { background: #22c55e; }
+
+        .terminal-body {
+            flex-grow: 1;
+            font-size: 12px;
+            line-height: 1.6;
+            overflow-y: auto;
+            color: #a7f3d0; /* emerald-200 */
+        }
+
+        .terminal-line {
+            margin-bottom: 6px;
+            white-space: pre-wrap;
+        }
+
+        .terminal-prompt {
+            color: var(--primary);
+        }
+
+        .terminal-input {
+            color: #ffffff;
+        }
+
+        /* Buttons & Controls */
+        .btn {
+            background: linear-gradient(135deg, rgba(0, 240, 255, 0.1), rgba(189, 0, 255, 0.1));
+            border: 1px solid var(--primary);
+            color: #ffffff;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            text-decoration: none;
+            box-shadow: 0 0 10px rgba(0, 240, 255, 0.15);
+        }
+
+        .btn:hover {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            box-shadow: 0 0 20px var(--primary-glow);
+            transform: translateY(-2px);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .actions-group {
+            margin-top: 10px;
+            display: flex;
+            gap: 12px;
+        }
+
+        .github-btn {
+            border-color: rgba(255, 255, 255, 0.2);
+            background: transparent;
+            box-shadow: none;
+        }
+
+        .github-btn:hover {
+            border-color: #ffffff;
+            background: rgba(255, 255, 255, 0.05);
+            box-shadow: 0 0 15px rgba(255, 255, 255, 0.1);
+        }
+
+        /* Responsive Design */
+        @media (max-width: 1200px) {
+            body {
+                overflow-y: auto;
+                height: auto;
+            }
+            .dashboard {
+                grid-template-columns: 1fr;
+                height: auto;
+            }
+            .sidebar-left, .sidebar-right {
+                height: auto;
+            }
+            #webgl-container {
+                height: 100vh;
+                position: fixed;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 3D WebGL Canvas Layer -->
+    <div id="webgl-container"></div>
+
+    <!-- Interactive dashboard Overlay -->
+    <div class="dashboard">
+        
+        <!-- Header -->
+        <header class="glass-panel interactive-element">
+            <div class="brand">
+                <div class="logo-mark"></div>
+                <h1>my-localmcp</h1>
+            </div>
+            <div class="system-status">
+                <div class="status-dot"></div>
+                <span>MCP ENGINE STATUS: ACTIVE</span>
+            </div>
+        </header>
+
+        <!-- Sidebar Left: Product features -->
+        <div class="sidebar-left">
+            
+            <div class="glass-panel interactive-element">
+                <div class="section-title">Core Operations</div>
+                
+                <!-- Card 1 -->
+                <div class="feature-card glass-panel" data-tilt>
+                    <h3><span class="icon">⚡</span> FTS5 Fast Search</h3>
+                    <p>Sub-millisecond keyword lookup. SQLite full-text search indexes your code structure and text, enabling instant identification of files, symbols, and functions.</p>
+                </div>
+
+                <!-- Card 2 -->
+                <div class="feature-card glass-panel" data-tilt>
+                    <h3><span class="icon">📦</span> Context Compressor</h3>
+                    <p>Extracts localized code excerpts around matched symbols. Bounds context size to fit smaller LLM windows, reducing prompt tokens by 8x-10x.</p>
+                </div>
+
+                <!-- Card 3 -->
+                <div class="feature-card glass-panel" data-tilt>
+                    <h3><span class="icon">🧠</span> Semantic Re-ranking</h3>
+                    <p>Leverages local Ollama embeddings to re-rank search results. Ranks matched files according to conceptual relevance, keeping prompts highly focused.</p>
+                </div>
+
+                <!-- Card 4 -->
+                <div class="feature-card glass-panel" data-tilt>
+                    <h3><span class="icon">🧙‍♂️</span> TUI Setup Wizard</h3>
+                    <p>A simple interactive installer to setup, configure, repair, or uninstall client integrations with Claude Desktop, Claude Code, and Codex.</p>
+                </div>
+            </div>
+
+            <!-- Call to Actions -->
+            <div class="glass-panel interactive-element">
+                <div class="section-title">Deployment</div>
+                <p style="font-size: 13px; color: var(--text-muted); line-height: 1.6; margin-bottom: 16px;">
+                    Integrate local AI power with your editor in minutes. Completely private, secure, and offline.
+                </p>
+                <div class="actions-group">
+                    <button class="btn" onclick="triggerPulse()">⚡ Reindex Core</button>
+                    <a href="README.md" class="btn github-btn">Read Doc</a>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Center Stage: 3D Globe HUD Hint -->
+        <div class="center-stage">
+            <div class="interactive-hint interactive-element" onclick="triggerPulse()">
+                <span>✦</span> Click Core to Trigger Scan Pulse <span>✦</span>
+            </div>
+        </div>
+
+        <!-- Sidebar Right: HUD Monitor and Terminal -->
+        <div class="sidebar-right">
+            
+            <!-- Real-time HUD Grid -->
+            <div class="glass-panel interactive-element">
+                <div class="section-title">Telemetry Monitor</div>
+                <div class="hud-grid">
+                    <div class="hud-stat neon-blue">
+                        <span class="label">Indexed Files</span>
+                        <span class="value" id="stat-files">0</span>
+                    </div>
+                    <div class="hud-stat neon-green">
+                        <span class="label">DB Size</span>
+                        <span class="value">1.24 MB</span>
+                    </div>
+                    <div class="hud-stat neon-purple">
+                        <span class="label">Latency</span>
+                        <span class="value" id="stat-latency">12ms</span>
+                    </div>
+                    <div class="hud-stat">
+                        <span class="label">Token Reduction</span>
+                        <span class="value">89.4%</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Interactive Terminal Panel -->
+            <div class="glass-panel terminal-panel interactive-element">
+                <div class="terminal-header">
+                    <div class="terminal-dots">
+                        <div class="terminal-dot"></div>
+                        <div class="terminal-dot"></div>
+                        <div class="terminal-dot"></div>
+                    </div>
+                    <span>bash - my-localmcp wizard</span>
+                </div>
+                <div class="terminal-body" id="terminal-text">
+                    <div class="terminal-line"><span class="terminal-prompt">kartikeya@workstation:~$</span> python setup_wizard.py</div>
+                    <div class="terminal-line">=== my-localmcp Installation Wizard ===</div>
+                    <div class="terminal-line">[info] Detecting current installation state...</div>
+                    <div class="terminal-line">[info] Status: Healthy (Version 1.2.1)</div>
+                    <div class="terminal-line"></div>
+                    <div class="terminal-line">1) Reinstall or Repair Runtime</div>
+                    <div class="terminal-line">2) Configure Ollama Models</div>
+                    <div class="terminal-line">3) Manage Connected Clients (Claude Code, Codex)</div>
+                    <div class="terminal-line">4) Uninstall Full System</div>
+                    <div class="terminal-line">5) Exit</div>
+                    <div class="terminal-line"></div>
+                    <div class="terminal-line"><span class="terminal-prompt">Choose an option [1-5, b:back]:</span> <span class="terminal-input">3</span></div>
+                    <div class="terminal-line">=== Connected Clients Status ===</div>
+                    <div class="terminal-line">● Claude Code          [Connected]</div>
+                    <div class="terminal-line">● Codex CLI            [Connected]</div>
+                    <div class="terminal-line">○ Claude Desktop       [Manual Setup Needed]</div>
+                </div>
+            </div>
+
+        </div>
+
+    </div>
+
+    <!-- Three.js Visualizer Script -->
+    <script>
+        // Setup Three.js Scene
+        const container = document.getElementById('webgl-container');
+        const scene = new THREE.Scene();
+        
+        // Fog for depth
+        scene.fog = new THREE.FogExp2(0x030712, 0.015);
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.z = 8;
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        container.appendChild(renderer.domElement);
+
+        // Lights
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.2);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0x00f0ff, 0.8);
+        dirLight.position.set(5, 5, 5);
+        scene.add(dirLight);
+
+        const pointLight = new THREE.PointLight(0xbd00ff, 1.5, 30);
+        pointLight.position.set(-2, -2, 2);
+        scene.add(pointLight);
+
+        // Core Object (Digital database/index core)
+        const coreGroup = new THREE.Group();
+        scene.add(coreGroup);
+
+        // Central Wireframe Sphere
+        const coreGeo = new THREE.IcosahedronGeometry(2, 2);
+        const coreMat = new THREE.MeshPhongMaterial({
+            color: 0x00f0ff,
+            wireframe: true,
+            transparent: true,
+            opacity: 0.35,
+            shininess: 100
+        });
+        const coreMesh = new THREE.Mesh(coreGeo, coreMat);
+        coreGroup.add(coreMesh);
+
+        // Outer Ring / Shell
+        const ringGeo = new THREE.TorusGeometry(3.5, 0.02, 16, 100);
+        const ringMat = new THREE.MeshBasicMaterial({
+            color: 0xbd00ff,
+            transparent: true,
+            opacity: 0.4
+        });
+        const ringMesh = new THREE.Mesh(ringGeo, ringMat);
+        ringMesh.rotation.x = Math.PI / 2;
+        coreGroup.add(ringMesh);
+
+        const ring2Mesh = ringMesh.clone();
+        ring2Mesh.rotation.y = Math.PI / 4;
+        coreGroup.add(ring2Mesh);
+
+        // Floating Node Particles representing files/symbols
+        const particlesCount = 250;
+        const positions = new Float32Array(particlesCount * 3);
+        const colors = new Float32Array(particlesCount * 3);
+        const randoms = new Float32Array(particlesCount);
+
+        for (let i = 0; i < particlesCount; i++) {
+            // spherical distribution
+            const u = Math.random();
+            const v = Math.random();
+            const theta = u * 2.0 * Math.PI;
+            const phi = Math.acos(2.0 * v - 1.0);
+            const r = 2.2 + Math.random() * 2.5; // Orbit radius between 2.2 and 4.7
+
+            positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+            positions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
+            positions[i * 3 + 2] = r * Math.cos(phi);
+
+            // Color mix
+            const colorMix = Math.random();
+            if (colorMix < 0.4) {
+                colors[i * 3] = 0.0;     // R
+                colors[i * 3 + 1] = 0.94; // G
+                colors[i * 3 + 2] = 1.0;  // B (cyan)
+            } else if (colorMix < 0.8) {
+                colors[i * 3] = 0.74;    // R
+                colors[i * 3 + 1] = 0.0;  // G
+                colors[i * 3 + 2] = 1.0;  // B (purple)
+            } else {
+                colors[i * 3] = 0.0;     // R
+                colors[i * 3 + 1] = 1.0;  // G
+                colors[i * 3 + 2] = 0.53; // B (green)
+            }
+
+            randoms[i] = Math.random() * 10;
+        }
+
+        const particlesGeo = new THREE.BufferGeometry();
+        particlesGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        particlesGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+        // Texture for particles
+        const pTexture = createCircleTexture();
+        const particlesMat = new THREE.PointsMaterial({
+            size: 0.12,
+            map: pTexture,
+            vertexColors: true,
+            transparent: true,
+            opacity: 0.75,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending
+        });
+
+        const particleSystem = new THREE.Points(particlesGeo, particlesMat);
+        scene.add(particleSystem);
+
+        // Helper to generate particle dot texture
+        function createCircleTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 16;
+            canvas.height = 16;
+            const ctx = canvas.getContext('2d');
+            const grad = ctx.createRadialGradient(8, 8, 0, 8, 8, 8);
+            grad.addColorStop(0, 'rgba(255, 255, 255, 1)');
+            grad.addColorStop(0.5, 'rgba(255, 255, 255, 0.5)');
+            grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, 16, 16);
+            const texture = new THREE.Texture(canvas);
+            texture.needsUpdate = true;
+            return texture;
+        }
+
+        // Interaction state
+        let pulseActive = false;
+        let pulseTime = 0;
+        let mouseX = 0;
+        let mouseY = 0;
+
+        document.addEventListener('mousemove', (e) => {
+            // Normalize mouse position between -1 and 1
+            mouseX = (e.clientX / window.innerWidth) * 2 - 1;
+            mouseY = -(e.clientY / window.innerHeight) * 2 + 1;
+        });
+
+        // Triggering index scan pulse
+        function triggerPulse() {
+            if (pulseActive) return;
+            pulseActive = true;
+            pulseTime = 0;
+
+            // Log event in terminal
+            logTerminalLine(" ");
+            logTerminalLine("[action] Triggering forced SQLite index scan...");
+            logTerminalLine("[system] Scanning workspace directories...");
+            
+            let files = 0;
+            const targetFiles = 166;
+            const fileInterval = setInterval(() => {
+                files += Math.floor(Math.random() * 25) + 5;
+                if (files >= targetFiles) {
+                    files = targetFiles;
+                    clearInterval(fileInterval);
+                    logTerminalLine(`[system] Completed! Indexed ${targetFiles} files.`);
+                    logTerminalLine(`[db] repo-context.sqlite updated. Index size: 1.24 MB`);
+                    logTerminalLine(`[doctor] All checks green. Latency: 2.1ms.`);
+                    document.getElementById('stat-latency').innerText = '2.1ms';
+                }
+                document.getElementById('stat-files').innerText = files;
+            }, 100);
+        }
+
+        function logTerminalLine(text) {
+            const terminal = document.getElementById('terminal-text');
+            const line = document.createElement('div');
+            line.className = 'terminal-line';
+            line.innerHTML = text.replace(/\[(info|action|system|db|doctor)\]/g, '<span style="color:#00f0ff;">$1</span>');
+            terminal.appendChild(line);
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+
+        // Animation Loop
+        const clock = new THREE.Clock();
+        const animPositions = particlesGeo.attributes.position.array;
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const elapsedTime = clock.getElapsedTime();
+
+            // Rotations
+            coreMesh.rotation.y = elapsedTime * 0.15;
+            coreMesh.rotation.x = elapsedTime * 0.08;
+
+            ringMesh.rotation.z = elapsedTime * 0.2;
+            ring2Mesh.rotation.z = -elapsedTime * 0.15;
+
+            // Slow rotate particles
+            particleSystem.rotation.y = elapsedTime * 0.04;
+            particleSystem.rotation.x = elapsedTime * 0.02;
+
+            // Pulse Expansion
+            if (pulseActive) {
+                pulseTime += 0.05;
+                const scale = 1.0 + Math.sin(pulseTime) * 0.4;
+                coreGroup.scale.set(scale, scale, scale);
+
+                if (pulseTime > Math.PI) {
+                    coreGroup.scale.set(1, 1, 1);
+                    pulseActive = false;
+                }
+            }
+
+            // Move central core based on mouse coordinates (parallax)
+            coreGroup.position.x += (mouseX * 2.5 - coreGroup.position.x) * 0.05;
+            coreGroup.position.y += (mouseY * 1.5 - coreGroup.position.y) * 0.05;
+
+            // Wave/Breathe particles
+            for (let i = 0; i < particlesCount; i++) {
+                const r = randoms[i];
+                // slight offset animation
+                animPositions[i * 3 + 1] += Math.sin(elapsedTime + r) * 0.003;
+            }
+            particlesGeo.attributes.position.needsUpdate = true;
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+        // Window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // 3D Card Hover-Tilt Physics (Vanilla JS)
+        const tiltCards = document.querySelectorAll('[data-tilt]');
+        tiltCards.forEach(card => {
+            card.addEventListener('mousemove', (e) => {
+                const rect = card.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                
+                const xc = rect.width / 2;
+                const yc = rect.height / 2;
+                
+                const angleX = (yc - y) / 10;
+                const angleY = (x - xc) / 10;
+                
+                card.style.transform = `perspective(1000px) rotateX(${angleX}deg) rotateY(${angleY}deg) scale3d(1.02, 1.02, 1.02)`;
+            });
+
+            card.addEventListener('mouseleave', () => {
+                card.style.transform = 'perspective(1000px) rotateX(0deg) rotateY(0deg) scale3d(1, 1, 1)';
+            });
+        });
+
+        // Initial setup stats animate
+        setTimeout(() => {
+            let filesCount = 0;
+            const target = 166;
+            const timer = setInterval(() => {
+                filesCount += 4;
+                if (filesCount >= target) {
+                    filesCount = target;
+                    clearInterval(timer);
+                }
+                document.getElementById('stat-files').innerText = filesCount;
+            }, 25);
+        }, 500);
+
+    </script>
+</body>
+</html>

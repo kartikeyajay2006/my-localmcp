@@ -4,15 +4,15 @@ from pathlib import Path
 
 import pytest
 
-from neo_localmcp import ai_client_config as client_setup
-from neo_localmcp.installer import clients
-from neo_localmcp.installer.clients import ClientRegistrationRecord
-from neo_localmcp.installer.paths import ManagedPaths
+from my_localmcp import ai_client_config as client_setup
+from my_localmcp.installer import clients
+from my_localmcp.installer.clients import ClientRegistrationRecord
+from my_localmcp.installer.paths import ManagedPaths
 
 
 def _paths(tmp_path: Path, platform: str = "posix") -> ManagedPaths:
     return ManagedPaths(
-        root=tmp_path / ".neo-localmcp",
+        root=tmp_path / ".my-localmcp",
         platform=platform,  # type: ignore[arg-type]
         home=tmp_path,
         allow_test_root=True,
@@ -38,7 +38,7 @@ def client_home(tmp_path, monkeypatch):
 
 
 def test_record_json_roundtrips():
-    record = ClientRegistrationRecord("codex", True, False, "/venv/bin/neo-localmcp-server", "/x/config.toml", "note")
+    record = ClientRegistrationRecord("codex", True, False, "/venv/bin/my-localmcp-server", "/x/config.toml", "note")
     assert ClientRegistrationRecord.from_json(record.to_json()) == record
 
 
@@ -57,7 +57,7 @@ def test_read_registrations_corrupt_is_empty(tmp_path):
 def test_write_read_roundtrip(tmp_path):
     paths = _paths(tmp_path)
     records = (
-        ClientRegistrationRecord("codex", True, False, "/venv/bin/neo-localmcp-server", "/c.toml", "x"),
+        ClientRegistrationRecord("codex", True, False, "/venv/bin/my-localmcp-server", "/c.toml", "x"),
         ClientRegistrationRecord("claude-desktop", True, True, None, None, "manual"),
     )
     clients.write_registrations(paths, records)
@@ -84,16 +84,16 @@ def _toml_path(path: Path) -> str:
 def test_codex_block_uses_injected_posix_venv_launcher(tmp_path):
     paths = _paths(tmp_path, "posix")
     block = client_setup._codex_block(server_command=paths.server_executable, config_path=paths.config / "config.yaml")
-    assert paths.server_executable.as_posix().endswith("venv/bin/neo-localmcp-server")
+    assert paths.server_executable.as_posix().endswith("venv/bin/my-localmcp-server")
     assert _toml_path(paths.server_executable) in block
 
 
 def test_mcp_block_uses_injected_windows_venv_launcher(tmp_path):
     paths = _paths(tmp_path, "windows")
     block = client_setup._mcp_server_block(server_command=paths.server_executable, config_path=paths.config / "config.yaml")
-    command = block["neo-localmcp"]["command"]
+    command = block["my-localmcp"]["command"]
     assert Path(command) == paths.server_executable
-    assert Path(block["neo-localmcp"]["env"]["NEO_LOCALMCP_CONFIG"]) == paths.config / "config.yaml"
+    assert Path(block["my-localmcp"]["env"]["MY_LOCALMCP_CONFIG"]) == paths.config / "config.yaml"
 
 
 def test_setup_claude_code_manual_uses_injected_launcher(client_home, monkeypatch, tmp_path):
@@ -108,7 +108,7 @@ def test_injected_launcher_never_infers_legacy_bin_shim(tmp_path):
     block = client_setup._codex_block(server_command=paths.server_executable)
     # The legacy side-by-side layout wrote the launcher under <root>/bin; the
     # injected venv launcher must be used verbatim instead.
-    assert _toml_path(paths.root / "bin" / "neo-localmcp-server") not in block
+    assert _toml_path(paths.root / "bin" / "my-localmcp-server") not in block
     assert _toml_path(paths.server_executable) in block
 
 
@@ -185,7 +185,7 @@ def test_remove_active_registrations_strips_codex_block_and_retains_records(clie
     results = clients.remove_active_registrations(paths, apply=True)
 
     text = codex.read_text(encoding="utf-8")
-    assert "# BEGIN neo-localmcp" not in text
+    assert "# BEGIN my-localmcp" not in text
     assert '[user]' in text and 'keep = "me"' in text
     # Records are retained so a later reinstall can reconnect the same surfaces.
     assert clients.registrations_path(paths).exists()
@@ -224,7 +224,7 @@ def test_remove_active_registrations_can_forget_only_a_selected_subset(client_ho
 
 def test_restore_points_registrations_at_new_launcher(client_home, tmp_path):
     paths = _paths(tmp_path)
-    old_launcher = tmp_path / "old" / "venv" / "bin" / "neo-localmcp-server"
+    old_launcher = tmp_path / "old" / "venv" / "bin" / "my-localmcp-server"
     client_setup.setup_codex_cli(apply=True, server_command=old_launcher, config_path=paths.config / "config.yaml")
     clients.snapshot_clients(paths)
     clients.remove_active_registrations(paths, apply=True)
@@ -266,7 +266,7 @@ def test_restore_preserves_user_codex_content_byte_for_byte(client_home, tmp_pat
 
 def test_verify_registrations_detects_stale_codex_launcher(client_home, tmp_path):
     paths = _paths(tmp_path)
-    old_launcher = tmp_path / "old" / "venv" / "bin" / "neo-localmcp-server"
+    old_launcher = tmp_path / "old" / "venv" / "bin" / "my-localmcp-server"
     client_setup.setup_codex_cli(apply=True, server_command=old_launcher, config_path=paths.config / "config.yaml")
     clients.snapshot_clients(paths)
 
@@ -283,7 +283,7 @@ def test_verify_registrations_detects_stale_codex_launcher(client_home, tmp_path
 
 
 def test_apply_client_selection_connects_and_disconnects(client_home, tmp_path, monkeypatch):
-    from neo_localmcp.installer import clients
+    from my_localmcp.installer import clients
 
     paths = ManagedPaths.from_environment()
     clients.record_selection(paths, ["claude-code"])
@@ -300,7 +300,7 @@ def test_apply_client_selection_connects_and_disconnects(client_home, tmp_path, 
 
     events = []
     outcome = clients.apply_client_selection(
-        paths, ["codex"], server_command="neo-localmcp-server",
+        paths, ["codex"], server_command="my-localmcp-server",
         on_event=lambda level, message: events.append((level, message)),
     )
 
@@ -315,7 +315,7 @@ def test_apply_client_selection_connects_and_disconnects(client_home, tmp_path, 
 def test_apply_client_selection_uses_label_fn_for_connect_and_disconnect_messages(
     client_home, tmp_path, monkeypatch
 ):
-    from neo_localmcp.installer import clients
+    from my_localmcp.installer import clients
 
     paths = ManagedPaths.from_environment()
     clients.record_selection(paths, ["claude-code"])
@@ -331,7 +331,7 @@ def test_apply_client_selection_uses_label_fn_for_connect_and_disconnect_message
 
     events = []
     clients.apply_client_selection(
-        paths, ["codex"], server_command="neo-localmcp-server",
+        paths, ["codex"], server_command="my-localmcp-server",
         on_event=lambda level, message: events.append((level, message)),
         label_fn=lambda client: labels.get(client, client),
     )
@@ -344,7 +344,7 @@ def test_apply_client_selection_uses_label_fn_for_connect_and_disconnect_message
 def test_apply_client_selection_without_label_fn_uses_raw_client_keys(
     client_home, tmp_path, monkeypatch
 ):
-    from neo_localmcp.installer import clients
+    from my_localmcp.installer import clients
 
     paths = ManagedPaths.from_environment()
     monkeypatch.setattr(
@@ -354,7 +354,7 @@ def test_apply_client_selection_without_label_fn_uses_raw_client_keys(
 
     events = []
     clients.apply_client_selection(
-        paths, ["codex"], server_command="neo-localmcp-server",
+        paths, ["codex"], server_command="my-localmcp-server",
         on_event=lambda level, message: events.append((level, message)),
     )
 
@@ -363,7 +363,7 @@ def test_apply_client_selection_without_label_fn_uses_raw_client_keys(
 
 
 def test_apply_client_selection_records_failures_without_raising(client_home, tmp_path, monkeypatch):
-    from neo_localmcp.installer import clients
+    from my_localmcp.installer import clients
 
     paths = ManagedPaths.from_environment()
 
@@ -372,19 +372,19 @@ def test_apply_client_selection_records_failures_without_raising(client_home, tm
 
     monkeypatch.setattr(clients.client_setup, "setup_client", _boom)
 
-    outcome = clients.apply_client_selection(paths, ["claude-code"], server_command="neo-localmcp-server")
+    outcome = clients.apply_client_selection(paths, ["claude-code"], server_command="my-localmcp-server")
 
     assert not outcome.ok
     assert "claude-code" in outcome.failures[0]
 
 
 def test_apply_client_selection_with_no_changes_still_records_target(client_home, tmp_path, monkeypatch):
-    from neo_localmcp.installer import clients
+    from my_localmcp.installer import clients
 
     paths = ManagedPaths.from_environment()
     clients.record_selection(paths, ["claude-code"])
 
-    outcome = clients.apply_client_selection(paths, ["claude-code"], server_command="neo-localmcp-server")
+    outcome = clients.apply_client_selection(paths, ["claude-code"], server_command="my-localmcp-server")
 
     assert outcome.ok
     assert outcome.added == ()
@@ -402,7 +402,7 @@ def test_apply_client_selection_reconnects_a_client_still_recorded_but_no_longer
     # same client selected would see nothing to add and never call setup_client --
     # silently leaving the live registration missing even though the record claims
     # it's active.
-    from neo_localmcp.installer import clients
+    from my_localmcp.installer import clients
 
     paths = ManagedPaths.from_environment()
     # Simulates post-uninstall state: record present and "active", but nothing live.
@@ -414,7 +414,7 @@ def test_apply_client_selection_reconnects_a_client_still_recorded_but_no_longer
         lambda client, apply=True, **kw: calls.append(client) or {"client": client, "ok": True},
     )
 
-    outcome = clients.apply_client_selection(paths, ["claude-code"], server_command="neo-localmcp-server")
+    outcome = clients.apply_client_selection(paths, ["claude-code"], server_command="my-localmcp-server")
 
     assert outcome.ok
     assert calls == ["claude-code"]

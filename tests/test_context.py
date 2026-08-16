@@ -4,10 +4,10 @@ import json
 
 import pytest
 
-from neo_localmcp.retrieval import repo_memory
-from neo_localmcp.mcp import memory
-from neo_localmcp.retrieval.query import INTENT_KEYWORDS, FILLER_WORDS, normalize_query
-from neo_localmcp.repo_utils import extract_markdown_headings
+from my_localmcp.retrieval import repo_memory
+from my_localmcp.mcp import memory
+from my_localmcp.retrieval.query import INTENT_KEYWORDS, FILLER_WORDS, normalize_query
+from my_localmcp.repo_utils import extract_markdown_headings
 
 pytestmark = pytest.mark.retrieval
 
@@ -236,7 +236,7 @@ def test_fenced_decoy_heading_does_not_get_matched_as_a_section(tmp_path, isolat
 
 
 def test_section_boundaries_update_after_heading_insert_and_removal(tmp_path, isolated_config):
-    from neo_localmcp.retrieval import repo_memory
+    from my_localmcp.retrieval import repo_memory
 
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -271,7 +271,7 @@ def test_section_boundaries_update_after_heading_insert_and_removal(tmp_path, is
 
 
 def test_reindexing_unchanged_markdown_file_is_a_cheap_noop(tmp_path, isolated_config):
-    from neo_localmcp.retrieval import repo_memory
+    from my_localmcp.retrieval import repo_memory
 
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -368,7 +368,7 @@ def test_index_repo_stamps_indexed_commit(tmp_path, isolated_config):
     repo_memory.index_repo(repo)
     conn = repo_memory.connect()
     rid = repo_memory.upsert_repo(conn, repo)
-    from neo_localmcp.repo_utils import git_info
+    from my_localmcp.repo_utils import git_info
     head = git_info(repo)["commit"]
     assert head
     assert repo_memory.get_repo_meta(conn, rid, "indexed_commit") == head

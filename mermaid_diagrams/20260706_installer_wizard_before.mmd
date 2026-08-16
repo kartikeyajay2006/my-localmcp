@@ -7,7 +7,7 @@ graph TD
         setup_wizard_py["setup_wizard.py"]
     end
 
-    subgraph WIZARD["neo_localmcp/wizard/"]
+    subgraph WIZARD["my_localmcp/wizard/"]
         backend["backend.py<br/>(Protocol + data shapes, zero deps)"]
         console["console.py<br/>(pure UI state machine, zero business logic)"]
         real_backend["real_backend.py<br/>(live adapter, ~400 lines)"]
@@ -18,7 +18,7 @@ graph TD
 
     setup_cli["setup_cli.py<br/>(installer argparse, 449 lines)"]
 
-    subgraph INSTALLER["neo_localmcp/installer/ (12 files, already clean)"]
+    subgraph INSTALLER["my_localmcp/installer/ (12 files, already clean)"]
         operations["operations.py"]
         types_mod["types.py"]
         paths_mod["paths.py"]
