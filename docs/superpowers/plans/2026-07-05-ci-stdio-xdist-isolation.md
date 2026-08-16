@@ -68,7 +68,7 @@ Run:
 ```bash
 .venv/bin/python -m pytest -q -m "not slow and not serial" -n auto
 .venv/bin/python -m pytest -q -m "serial and not slow"
-.venv/bin/python -m compileall -q neo_localmcp setup.py
+.venv/bin/python -m compileall -q my_localmcp setup.py
 ```
 
 Expected: both pytest partitions pass and compileall exits 0.

@@ -6,14 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from neo_localmcp.installer import migration
-from neo_localmcp.installer.migration import apply_migration, plan_migration
-from neo_localmcp.installer.paths import ManagedPaths
+from my_localmcp.installer import migration
+from my_localmcp.installer.migration import apply_migration, plan_migration
+from my_localmcp.installer.paths import ManagedPaths
 
 
 def _paths(tmp_path: Path) -> ManagedPaths:
     return ManagedPaths(
-        root=tmp_path / ".neo-localmcp",
+        root=tmp_path / ".my-localmcp",
         platform="posix",
         home=tmp_path,
     )
@@ -40,7 +40,7 @@ def _seed_legacy_layout(paths: ManagedPaths) -> None:
     (paths.root / "venvs").mkdir()
     (paths.root / "bin").mkdir()
     (paths.root / "current-venv.txt").write_text("old", encoding="utf-8")
-    (paths.root / "neo-localmcp.mcpb").write_bytes(b"bundle")
+    (paths.root / "my-localmcp.mcpb").write_bytes(b"bundle")
     (paths.root / "user-notes.txt").write_text("keep me", encoding="utf-8")
 
 
@@ -58,7 +58,7 @@ def test_plan_classifies_known_paths_without_mutating(tmp_path: Path) -> None:
         ("move", "repo-context.sqlite"),
         ("move", "servers"),
         ("move", "ollama-supervisor.json"),
-        ("move", "neo-localmcp.mcpb"),
+        ("move", "my-localmcp.mcpb"),
         ("discard", ".venv-nlm-v1.0.9"),
         ("discard", "venvs"),
         ("discard", "bin"),
@@ -148,7 +148,7 @@ def test_apply_moves_state_normalizes_config_and_preserves_unknown_files(
     )
     assert (paths.process_registry / "servers" / "123.json").exists()
     assert (paths.cache / "ollama" / "supervisor.json").exists()
-    assert (paths.cache / "packages" / "neo-localmcp.mcpb").read_bytes() == b"bundle"
+    assert (paths.cache / "packages" / "my-localmcp.mcpb").read_bytes() == b"bundle"
     assert (paths.root / "user-notes.txt").read_text(encoding="utf-8") == "keep me"
     assert not (paths.root / ".venv-nlm-v1.0.9").exists()
     assert not (paths.root / "venvs").exists()

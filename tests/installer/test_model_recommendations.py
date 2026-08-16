@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from neo_localmcp.installer.model_recommendations import recommend_models
+from my_localmcp.installer.model_recommendations import recommend_models
 
 
 def test_installed_candidate_resolves_to_exact_installed_tag():

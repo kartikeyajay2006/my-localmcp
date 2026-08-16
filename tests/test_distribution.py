@@ -13,11 +13,11 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 import pytest
 
-from neo_localmcp import ai_client_config as client_setup
-from neo_localmcp.mcp import context_worker
-from neo_localmcp import __version__
-from neo_localmcp import repo_utils as utils
-from neo_localmcp.mcp.server import mcp
+from my_localmcp import ai_client_config as client_setup
+from my_localmcp.mcp import context_worker
+from my_localmcp import __version__
+from my_localmcp import repo_utils as utils
+from my_localmcp.mcp.server import mcp
 
 
 def test_codex_app_and_cli_share_config():
@@ -25,24 +25,24 @@ def test_codex_app_and_cli_share_config():
 
 
 def test_client_configs_use_stable_server_launcher():
-    block = client_setup._mcp_server_block()["neo-localmcp"]
-    assert "neo-localmcp-server" in block["command"]
+    block = client_setup._mcp_server_block()["my-localmcp"]
+    assert "my-localmcp-server" in block["command"]
     assert block["args"] == []
-    assert "neo-localmcp-server" in client_setup._codex_block()
+    assert "my-localmcp-server" in client_setup._codex_block()
 
 
 def test_claude_manual_command_uses_stable_launcher(monkeypatch):
     monkeypatch.setattr(client_setup.shutil, "which", lambda name: None)
     result = client_setup.setup_claude_code(apply=False)
-    assert "neo-localmcp-server" in result["manual_mcp_user"]
+    assert "my-localmcp-server" in result["manual_mcp_user"]
 
 
 def test_client_blocks_honor_injected_server_command_and_config():
-    launcher = Path("/opt/.neo-localmcp/venv/bin/neo-localmcp-server")
-    config = Path("/opt/.neo-localmcp/config/config.yaml")
-    block = client_setup._mcp_server_block(server_command=launcher, config_path=config)["neo-localmcp"]
+    launcher = Path("/opt/.my-localmcp/venv/bin/my-localmcp-server")
+    config = Path("/opt/.my-localmcp/config/config.yaml")
+    block = client_setup._mcp_server_block(server_command=launcher, config_path=config)["my-localmcp"]
     assert block["command"] == str(launcher)
-    assert block["env"]["NEO_LOCALMCP_CONFIG"] == str(config)
+    assert block["env"]["MY_LOCALMCP_CONFIG"] == str(config)
     codex = client_setup._codex_block(server_command=launcher, config_path=config)
     assert str(launcher).replace("\\", "\\\\") in codex
     assert str(config).replace("\\", "\\\\") in codex
@@ -71,8 +71,8 @@ def test_repo_tools_respond_over_real_stdio(tmp_path):
 
 async def _assert_repo_tools_respond(repo: Path, app_home: Path) -> None:
     root = Path(__file__).parents[1]
-    env = {**os.environ, "NEO_LOCALMCP_HOME": str(app_home), "PYTHONPATH": str(root)}
-    params = StdioServerParameters(command=sys.executable, args=["-m", "neo_localmcp.mcp.server"], env=env)
+    env = {**os.environ, "MY_LOCALMCP_HOME": str(app_home), "PYTHONPATH": str(root)}
+    params = StdioServerParameters(command=sys.executable, args=["-m", "my_localmcp.mcp.server"], env=env)
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
@@ -87,7 +87,7 @@ async def _assert_repo_tools_respond(repo: Path, app_home: Path) -> None:
 
 
 def test_built_mcpb_contains_valid_manifest():
-    bundle = Path(__file__).parents[1] / "packages" / "claude-desktop" / f"neo-localmcp-v{__version__}.mcpb"
+    bundle = Path(__file__).parents[1] / "packages" / "claude-desktop" / f"my-localmcp-v{__version__}.mcpb"
     assert bundle.exists()
     with zipfile.ZipFile(bundle) as archive:
         manifest = json.loads(archive.read("manifest.json"))
@@ -96,15 +96,15 @@ def test_built_mcpb_contains_valid_manifest():
     assert manifest["version"] == __version__
     assert manifest["server"]["type"] == "uv"
     assert "server.py" in names
-    assert "neo_localmcp/mcp/server.py" in {name.replace("\\", "/") for name in names}
+    assert "my_localmcp/mcp/server.py" in {name.replace("\\", "/") for name in names}
 
 
 def test_built_mcpb_embeds_current_package_bytes():
     root = Path(__file__).parents[1]
-    bundle = root / "packages" / "claude-desktop" / f"neo-localmcp-v{__version__}.mcpb"
+    bundle = root / "packages" / "claude-desktop" / f"my-localmcp-v{__version__}.mcpb"
     with zipfile.ZipFile(bundle) as archive:
         names = {name.replace("\\", "/"): name for name in archive.namelist()}
-        for source in sorted((root / "neo_localmcp").rglob("*")):
+        for source in sorted((root / "my_localmcp").rglob("*")):
             if not source.is_file() or "__pycache__" in source.parts:
                 continue
             relative = source.relative_to(root).as_posix()
@@ -149,8 +149,8 @@ def test_helper_commands_never_inherit_protocol_stdin(monkeypatch):
 
 def test_claude_commands_have_distinct_menu_metadata():
     root = Path(__file__).parents[1]
-    templates = root / "neo_localmcp" / "templates" / "claude-code" / "commands" / "neo-localmcp"
-    distribution = root / "packages" / "claude-code" / "commands" / "neo-localmcp"
+    templates = root / "my_localmcp" / "templates" / "claude-code" / "commands" / "my-localmcp"
+    distribution = root / "packages" / "claude-code" / "commands" / "my-localmcp"
     descriptions = []
 
     for template in sorted(templates.glob("*.md")):

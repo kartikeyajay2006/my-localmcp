@@ -14,13 +14,13 @@ used to walk the whole flow safely. Two gaps prompted this change:
    they're looking at a real or simulated run.
 2. `FakeBackend`'s simulated state (installed? which clients? which Ollama
    models?) is purely in-memory per process (seeded once from
-   `NEO_LOCALMCP_WIZARD_FAKE_STATE`), so re-running `--fake` always starts
+   `MY_LOCALMCP_WIZARD_FAKE_STATE`), so re-running `--fake` always starts
    from the same canned state and never reflects what a *previous* simulated
    install/uninstall would have left behind.
 
 ## Scope
 
-Three independent, additive changes to `neo_localmcp/wizard/`:
+Three independent, additive changes to `my_localmcp/wizard/`:
 
 - **A. Mid-session toggle.** At the main menu only, typing `d`/`dummy`
   instead of a number switches the running wizard from the real backend to
@@ -91,7 +91,7 @@ readable directly in an editor.
   this shape, load it as the starting simulated state. This is what makes an
   install "stick" so a later `--fake` uninstall run sees the right before-state.
 - Otherwise (missing, unreadable, or blank), seed from
-  `NEO_LOCALMCP_WIZARD_FAKE_STATE` exactly as today (`absent` default,
+  `MY_LOCALMCP_WIZARD_FAKE_STATE` exactly as today (`absent` default,
   `healthy` for a pre-installed scenario), and immediately write that seed out
   as the initial file so it exists for next time.
 - A corrupt/partially-written file is treated the same as missing (falls back
@@ -115,7 +115,7 @@ the backend's post-mutation in-memory state:
     survives a runtime-only removal.
   - **Full wipe** (`state.full_wipe` true): resets the entire file back to
     the blank/`absent` shape (all fields as if freshly seeded with
-    `NEO_LOCALMCP_WIZARD_FAKE_STATE=absent`), matching "everything under the
+    `MY_LOCALMCP_WIZARD_FAKE_STATE=absent`), matching "everything under the
     managed root is gone."
 - Dry runs (`state.dry_run`) never touch the file — nothing "changed."
 
@@ -151,7 +151,7 @@ keeping the existing "no TUI toolkit" convention intact. A small
 
 | Role | Color | Used for |
 |---|---|---|
-| Header / section title | cyan, bold | Title bar (`" neo-localmcp setup wizard"`), `"="*_WIDTH` rules, question line in `_header` |
+| Header / section title | cyan, bold | Title bar (`" my-localmcp setup wizard"`), `"="*_WIDTH` rules, question line in `_header` |
 | `[Preview Dummy]` tag | yellow | The title-bar suffix from section B, both `--fake` and mid-session toggle |
 | Descriptions / hints | dim | `_explain(...)` blurbs, per-option `desc` lines in `_print_options`, path/detail lines under client options, `[Default: ...]` hints |
 | Success | green | Operation outcome title/detail lines when `outcome.ok` is true, `"(connected)"`/registered markers |

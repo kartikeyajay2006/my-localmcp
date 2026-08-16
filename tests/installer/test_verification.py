@@ -8,12 +8,12 @@ from typing import Sequence
 
 import pytest
 
-import neo_localmcp
-from neo_localmcp import mcp_server_lifecycle as lifecycle
-from neo_localmcp.installer.clients import ClientRegistrationRecord, write_registrations
-from neo_localmcp.installer.paths import ManagedPaths
-from neo_localmcp.installer.runtime import CommandResult
-from neo_localmcp.installer.verification import (
+import my_localmcp
+from my_localmcp import mcp_server_lifecycle as lifecycle
+from my_localmcp.installer.clients import ClientRegistrationRecord, write_registrations
+from my_localmcp.installer.paths import ManagedPaths
+from my_localmcp.installer.runtime import CommandResult
+from my_localmcp.installer.verification import (
     VerificationCheck,
     VerificationReport,
     verify_installation,
@@ -24,7 +24,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 def _paths(tmp_path: Path) -> ManagedPaths:
     platform = "windows" if os.name == "nt" else "posix"
-    paths = ManagedPaths(root=tmp_path / ".neo-localmcp", platform=platform, home=tmp_path)
+    paths = ManagedPaths(root=tmp_path / ".my-localmcp", platform=platform, home=tmp_path)
     paths.ensure_directories()
     return paths
 
@@ -51,11 +51,11 @@ class ScriptedCommandRunner:
         joined = " ".join(str(a) for a in args)
         if "sys.version_info" in joined:
             return "python-floor"
-        if "neo_localmcp.__version__" in joined:
+        if "my_localmcp.__version__" in joined:
             return "package-version"
         if joined.endswith("--help"):
             return "cli-startup"
-        if "import neo_localmcp.mcp.server" in joined:
+        if "import my_localmcp.mcp.server" in joined:
             return "server-import"
         return "other"
 
@@ -108,7 +108,7 @@ def _passing_runner(expected_version: str) -> ScriptedCommandRunner:
         {
             "python-floor": _ok("3.12.4"),
             "package-version": _ok(expected_version),
-            "cli-startup": _ok("usage: neo-localmcp"),
+            "cli-startup": _ok("usage: my-localmcp"),
             "server-import": _ok(""),
         }
     )
@@ -380,14 +380,14 @@ def test_client_targets_failure_when_launcher_stale(tmp_path: Path, monkeypatch:
                 client="codex",
                 active=True,
                 manual=False,
-                server_command="/stale/venv/bin/neo-localmcp-server",
+                server_command="/stale/venv/bin/my-localmcp-server",
                 config_path=str(tmp_path / "config.toml"),
                 detail="stale",
             ),
         ),
     )
     (tmp_path / "config.toml").write_text(
-        "# BEGIN neo-localmcp\ncommand = \"/stale/venv/bin/neo-localmcp-server\"\n# END neo-localmcp\n",
+        "# BEGIN my-localmcp\ncommand = \"/stale/venv/bin/my-localmcp-server\"\n# END my-localmcp\n",
         encoding="utf-8",
     )
     kwargs = _base_kwargs(paths)
@@ -618,7 +618,7 @@ def test_all_checks_passing_yields_successful_report(tmp_path: Path) -> None:
         assert hasattr(check, "recovery")
 
 
-def test_env_runner_receives_neo_localmcp_home(tmp_path: Path) -> None:
+def test_env_runner_receives_my_localmcp_home(tmp_path: Path) -> None:
     paths = _paths(tmp_path)
     _touch_runtime_files(paths)
     kwargs = _base_kwargs(paths)
@@ -628,7 +628,7 @@ def test_env_runner_receives_neo_localmcp_home(tmp_path: Path) -> None:
 
     assert env_runner.calls, "expected doctor/canonical-path probes to run"
     for _args, env in env_runner.calls:
-        assert env.get("NEO_LOCALMCP_HOME") == str(paths.root)
+        assert env.get("MY_LOCALMCP_HOME") == str(paths.root)
 
 
 # --------------------------------------------------------------------------- #
@@ -641,12 +641,12 @@ def test_real_installed_endpoint_verifies_and_leaves_no_registered_pid(tmp_path:
     """Build a real managed runtime in a temporary home, then verify it end to
     end with the real subprocess and MCP handshake probes -- no fakes. The
     handshake probe must never leave a registered server PID behind."""
-    from neo_localmcp.installer.runtime import build_candidate, promote_candidate
+    from my_localmcp.installer.runtime import build_candidate, promote_candidate
 
     platform = "windows" if os.name == "nt" else "posix"
-    paths = ManagedPaths(root=tmp_path / ".neo-localmcp", platform=platform, home=tmp_path)
+    paths = ManagedPaths(root=tmp_path / ".my-localmcp", platform=platform, home=tmp_path)
     paths.ensure_directories()
-    expected_version = neo_localmcp.__version__
+    expected_version = my_localmcp.__version__
 
     candidate = build_candidate(
         paths,

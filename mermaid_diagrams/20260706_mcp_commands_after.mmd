@@ -5,7 +5,7 @@ graph TD
     server_py["server.py"]
     cli_py["cli.py (general CLI, now unambiguous vs installer/cli.py)"]
 
-    subgraph MCPCMDS["neo_localmcp/mcp_commands/"]
+    subgraph MCPCMDS["my_localmcp/mcp_commands/"]
         shared["_shared.py<br/>(json_out, output formatting -- cross-category only)"]
         system_mod["system.py<br/>(init, status, where, doctor, model_status,<br/>repo_index/reindex/refresh, repo_lookup,<br/>reset_repo, reset_all)"]
         memory_mod["memory.py<br/>(prepare_context, context_prepare, file_context,<br/>file_excerpts, record_change, test_determinism)"]
@@ -13,7 +13,7 @@ graph TD
         editing_mod["editing.py<br/>(summarize_file, apply_unified_patch)"]
     end
 
-    subgraph BENCH["neo_localmcp/benchmarker/"]
+    subgraph BENCH["my_localmcp/benchmarker/"]
         bench_runner["__init__.py (run_benchmark and helpers)"]
         bench_queries["queries/*.jsonl<br/>(moved from benchmark_queries/)"]
     end

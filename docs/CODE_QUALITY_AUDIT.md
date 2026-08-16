@@ -1,4 +1,4 @@
-# neo-localmcp Code Quality Audit — Issue #10
+# my-localmcp Code Quality Audit — Issue #10
 
 A dedicated code-**quality** pass (not correctness — that was audited separately
 and passed). Scrutinizes KISS / SOLID / DRY, readability, comment quality against
@@ -8,7 +8,7 @@ module-boundary cleanliness, and docs-vs-code drift. Findings are concrete, with
 over breadth on core source, in the owner-chosen priority order.
 
 **Method:** every finding rests on a direct deterministic read of the source
-(`Read`), not on any model-generated summary. neo-localmcp's own CLI was used as
+(`Read`), not on any model-generated summary. my-localmcp's own CLI was used as
 the primary navigator (see `docs/dogfooding-notes-issue-10.md`) and Ollama
 fast/slow output was treated as a junior-dev signal to chase and then verify
 (see per-module "Ollama leads" notes and `docs/mcp-perf-log-issue-10.md`).
@@ -45,7 +45,7 @@ one-line `.claude`-exclusion (C.1), a live retrieval-quality bug. See the
 
 ---
 
-## 1. `neo_localmcp/tools.py` (1054 lines)
+## 1. `my_localmcp/tools.py` (1054 lines)
 
 **Verdict:** The MCP tool surface is functional and its comments are, on the
 whole, unusually good — most explain a genuine non-obvious WHY (determinism,
@@ -148,13 +148,13 @@ as a datapoint, not the basis for the finding, which stands on my own read). It
 also produced junior-dev-grade noise: it invented "audit logging" that does not
 exist in `tools.py`, and cited `server.py:105` vaguely. Net: right on the smell,
 wrong on specifics — chase-worthy, not authoritative. (Also notable: with
-`--ollama-rank` on, the reranker named the canonical `neo_localmcp/tools.py` #1,
+`--ollama-rank` on, the reranker named the canonical `my_localmcp/tools.py` #1,
 effectively *correcting* the deterministic worktree-copy pollution from Q5 — a
 point in the tool's favor, logged in the perf log.)
 
 ---
 
-## 2. `neo_localmcp/repo_memory.py` (774 lines)
+## 2. `my_localmcp/repo_memory.py` (774 lines)
 
 **Verdict:** The cleanest large module in the codebase and a good counter-example
 to tools.py. Despite being 774 lines it reads well: one function per concern,
@@ -214,12 +214,12 @@ exactly CLAUDE.md's standard. No noise comments found in this module.
 
 ---
 
-## Cross-cutting: `neo_localmcp/config.py` (183 lines)
+## Cross-cutting: `my_localmcp/config.py` (183 lines)
 
 Audited alongside repo_memory because it's the schema/tuning source of truth.
 
 **C.1 — `.claude/` (and `.claude/worktrees/`) is NOT in `exclude_dirs`; this is the root cause of the Q5 worktree-copy ranking pollution — `config.py:100-105` — severity: high**
-The default `exclude_dirs` list (100-105) covers `.git`, `.venv*`, `.neo-localmcp`,
+The default `exclude_dirs` list (100-105) covers `.git`, `.venv*`, `.my-localmcp`,
 etc. but not `.claude`. In this repo — an AI-led project that uses
 `.claude/worktrees/agent-*` for parallel agent sessions — every sibling worktree is
 a full second copy of the repo, so the indexer ingests N duplicate `tools.py`,
@@ -239,7 +239,7 @@ worktrees subtree.) This is a real retrieval-quality bug worth a filed issue.
 (23-53) recompute the same values as functions. Two of the functions
 (`config_path`, and the `_effective_default_config` db-path swap at 133-138) exist
 specifically to work around the fact that the *constants* are frozen at import time
-while `APP_DIR` can be overridden by `NEO_LOCALMCP_HOME` later (mainly in tests).
+while `APP_DIR` can be overridden by `MY_LOCALMCP_HOME` later (mainly in tests).
 The result is a confusing split where a reader can't tell whether to trust the
 constant or the function, and `CONFIG_PATH` (a constant) and `config_path()` (a
 function) can legitimately disagree. *Direction:* pick one. Either make the
@@ -270,7 +270,7 @@ neither especially helpful nor harmful — it neither found nor invented a findi
 
 ---
 
-## 3. `neo_localmcp/query.py` (197 lines)
+## 3. `my_localmcp/query.py` (197 lines)
 
 **Verdict:** Compact, readable, single-purpose. The parsing logic is honest and
 the two subtle comments (69, 91-92) explain real WHY decisions. The main quality
@@ -325,7 +325,7 @@ consistent with my read that it is not one.
 
 ---
 
-## 4. `neo_localmcp/cli.py` (319 lines)
+## 4. `my_localmcp/cli.py` (319 lines)
 
 **Verdict:** Clean, textbook. A thin argparse dispatcher: each `cmd_*` is a
 one-line delegation to `tools.*`, and `build_parser` is a flat, readable
@@ -361,7 +361,7 @@ a small doc inconsistency. *Direction:* hoist the choices to a module constant
 
 ---
 
-## 5. `neo_localmcp/server.py` (222 lines)
+## 5. `my_localmcp/server.py` (222 lines)
 
 **Verdict:** Clean and appropriately thin — a FastMCP tool registry over `tools.*`
 plus the one genuinely subtle piece, `_resolve_repo_root`, which is well-commented
@@ -381,7 +381,7 @@ don't). *Direction:* a small decorator `@_tool_guard` (or a helper
 one worthwhile refactor in the file.
 
 **5.2 — `prepare_context` runs in a subprocess while every other tool runs in-process — an undocumented asymmetry — `server.py:60-91` vs `110-197` — severity: med**
-`prepare_context` shells out to `python -m neo_localmcp.context_worker` (60-91)
+`prepare_context` shells out to `python -m my_localmcp.context_worker` (60-91)
 with its own timeout + safety cap, but `file_excerpts`, `repo_lookup`,
 `repo_status`, `summarize_file`, etc. call `tools.*` directly in-process. There IS
 a real WHY (isolating the heaviest/Ollama-touching call so a hang or crash can't
@@ -412,7 +412,7 @@ vague to be the basis for it. Recorded as a datapoint.
 
 ---
 
-## 6. `neo_localmcp/ollama_client.py` (343 lines)
+## 6. `my_localmcp/ollama_client.py` (343 lines)
 
 **Verdict:** A well-designed local-service supervisor: atomic-directory lock,
 failure-cooldown circuit breaker, per-purpose bounded timeouts, and a strict
@@ -470,7 +470,7 @@ the state machine works as written.
 
 ---
 
-## 7. `neo_localmcp/lifecycle.py` (304 lines)
+## 7. `my_localmcp/lifecycle.py` (304 lines)
 
 **Verdict: clean, nothing actionable.** This is the best-documented module in the
 repo and a model for the rest of it. The module docstring (1-25) explains the entire
@@ -489,7 +489,7 @@ explanation; harmless and arguably helpful at the call site.)
 
 ---
 
-## 8. `neo_localmcp/client_setup.py` (460 lines)
+## 8. `my_localmcp/client_setup.py` (460 lines)
 
 **Verdict:** Mostly clean with good WHY-comments on the genuinely tricky I/O
 (`_read_config_for_edit` 53-61, `_atomic_write_text` 64-77, the marked-block
@@ -501,7 +501,7 @@ config file three times to build one return dict. Scope-detection is also duplic
 
 **8.1 - `remove_codex` re-reads + re-parses the config file 3x inside one return dict - `client_setup.py:340, 350, 355` - severity: med**
 `block_present` is computed at 340 (`path.read_text(...)`), then the return dict
-recomputes essentially the same `"# BEGIN neo-localmcp" in path.read_text(...)`
+recomputes essentially the same `"# BEGIN my-localmcp" in path.read_text(...)`
 check TWICE more - once in the `ok` expression (350) and once in `block_present_after`
 (355) - each doing a fresh disk read + full-file parse. Three reads of the same file
 in one function, and the `ok`/`block_present_after` expressions are near-identical
@@ -548,7 +548,7 @@ both modules were fully read). No leads to record.
 
 ---
 
-## 9. `neo_localmcp/wizard/*` (console 572, real_backend 406, fake_backend 316, backend 195, preflight 100)
+## 9. `my_localmcp/wizard/*` (console 572, real_backend 406, fake_backend 316, backend 195, preflight 100)
 
 **Verdict:** The wizard is well-architected and the `WizardBackend` Protocol seam
 is real, not aspirational - `console.py` depends only on the Protocol, and
@@ -623,7 +623,7 @@ Checked CLAUDE.md's module map and conventions against the actual code:
   `summarize_file`/`apply_patch` (all present); `repo_memory.py`'s named functions
   `get_boost_map`/`record_task_query`/`record_retrieval_feedback` all exist as
   described; `client_setup.py`'s `setup_*`/`remove_*` + `remove_client`/
-  `remove_clients` dispatchers all present; `lifecycle.py`'s `neo-localmcp stop`
+  `remove_clients` dispatchers all present; `lifecycle.py`'s `my-localmcp stop`
   graceful-stop is real. No stale module-map claims found.
 - **CLAUDE.md "administration is CLI-only, never exposed as an MCP tool"** - verified
   true: `server.py`'s `@mcp.tool()` set exposes only context/lookup/status/doctor/

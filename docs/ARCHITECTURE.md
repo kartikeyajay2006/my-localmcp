@@ -1,14 +1,14 @@
-# neo-localmcp Architecture
+# my-localmcp Architecture
 
 ## Product name
 
-The product/MCP name is always `neo-localmcp` unless explicitly changed later.
+The product/MCP name is always `my-localmcp` unless explicitly changed later.
 
 ## V4/V4.2 boundary
 
-`neo-localmcp` is a deterministic repository context layer. It is not a coding agent.
+`my-localmcp` is a deterministic repository context layer. It is not a coding agent.
 
-> `neo-localmcp` never generates source code. It only retrieves, indexes, summarizes, ranks, and applies developer-approved patches.
+> `my-localmcp` never generates source code. It only retrieves, indexes, summarizes, ranks, and applies developer-approved patches.
 
 ## Roles
 
@@ -28,7 +28,7 @@ Linux support is deferred beyond 1.0.10.
 - Design changes
 - Produce exact patches
 
-### neo-localmcp
+### my-localmcp
 
 - Detect repo root
 - Index files and symbols
@@ -110,7 +110,7 @@ Docs/status files can promote source files when they mention real file paths.
 Stored under the configured app home, normally:
 
 ```text
-~/.neo-localmcp/repo-context.sqlite
+~/.my-localmcp/repo-context.sqlite
 ```
 
 Main tables:
@@ -129,5 +129,5 @@ File entries are hash-aware. Changed files are re-indexed.
 - Cached context narrows reads; it does not replace source truth.
 - The current source file and git diff are authoritative.
 - Patches must come from Claude/Codex/user as exact diffs.
-- `neo-localmcp apply-patch` uses `git apply --check` before applying.
+- `my-localmcp apply-patch` uses `git apply --check` before applying.
 - After patch application, changed files are re-indexed.

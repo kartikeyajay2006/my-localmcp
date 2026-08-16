@@ -71,7 +71,7 @@ jobs:
           filters: |
             installer:
               - 'setup.py'
-              - 'neo_localmcp/installer/**'
+              - 'my_localmcp/installer/**'
               - 'packaging/claude-desktop/**'
               - 'tests/installer/**'
               - '.github/workflows/setup-v2.yml'
@@ -98,7 +98,7 @@ jobs:
         run: python -m pytest -q -m "serial and not slow" --ignore=tests/installer
       - name: Compile
         if: (github.event_name == 'push' || steps.changes.outputs.code == 'true') && matrix.area == 'other'
-        run: python -m compileall -q neo_localmcp setup.py
+        run: python -m compileall -q my_localmcp setup.py
 
   slow:
     name: ${{ matrix.os }} / lifecycle
@@ -137,7 +137,7 @@ jobs:
           filters: |
             installer:
               - 'setup.py'
-              - 'neo_localmcp/installer/**'
+              - 'my_localmcp/installer/**'
               - 'packaging/claude-desktop/**'
               - 'tests/installer/**'
               - '.github/workflows/setup-v2.yml'
@@ -157,7 +157,7 @@ jobs:
         # each in-test install resolves offline from this dir (wheel-unpacking, no
         # PyPI round-trip). The installer's subprocesses inherit the env vars; no
         # production code changes. Verified locally: 41 wheels, no sdists, offline
-        # source-install of neo-localmcp succeeds (deps + build backend + pip-upgrade).
+        # source-install of my-localmcp succeeds (deps + build backend + pip-upgrade).
         if: github.event_name == 'push' || (steps.changes.outputs.code == 'true' && steps.installer_changes.outputs.installer == 'true')
         shell: bash
         run: python -m pip download -d "${{ runner.temp }}/wheelhouse" pip setuptools wheel "mcp[cli]" psutil

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from neo_localmcp.retrieval import repo_memory
+from my_localmcp.retrieval import repo_memory
 
 pytestmark = pytest.mark.retrieval
 

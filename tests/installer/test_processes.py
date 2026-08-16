@@ -4,8 +4,8 @@ import os
 from pathlib import Path
 from typing import Iterable
 
-from neo_localmcp.installer.paths import ManagedPaths
-from neo_localmcp.installer.processes import (
+from my_localmcp.installer.paths import ManagedPaths
+from my_localmcp.installer.processes import (
     ProcessIdentity,
     ProcessSnapshot,
     discover_owned_processes,
@@ -72,7 +72,7 @@ class FakeProcessProvider:
 
 def _paths(tmp_path: Path) -> ManagedPaths:
     return ManagedPaths(
-        root=tmp_path / ".neo-localmcp",
+        root=tmp_path / ".my-localmcp",
         platform="posix",
         home=tmp_path,
     )
@@ -100,7 +100,7 @@ def _snapshot(
 
 def test_discovery_owns_only_verified_roots_and_descendants(tmp_path: Path) -> None:
     paths = _paths(tmp_path)
-    extension_root = tmp_path / "Claude Extensions" / "local.mcpb.neo-localmcp.neo-localmcp"
+    extension_root = tmp_path / "Claude Extensions" / "local.mcpb.my-localmcp.my-localmcp"
     snapshots = (
         _snapshot(100, 1, 10.0, paths.python_executable),
         _snapshot(101, 100, 11.0, None, accessible=False),

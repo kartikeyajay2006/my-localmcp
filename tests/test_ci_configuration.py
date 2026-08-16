@@ -61,7 +61,7 @@ def test_installer_bucket_and_lifecycle_job_skip_on_non_installer_changes() -> N
 
     for path in (
         "'setup.py'",
-        "'neo_localmcp/installer/**'",
+        "'my_localmcp/installer/**'",
         "'packaging/claude-desktop/**'",
         "'tests/installer/**'",
         "'.github/workflows/setup-v2.yml'",

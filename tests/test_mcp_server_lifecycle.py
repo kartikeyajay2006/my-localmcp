@@ -6,7 +6,7 @@ import sys
 import time
 from pathlib import Path
 
-from neo_localmcp import mcp_server_lifecycle as lifecycle
+from my_localmcp import mcp_server_lifecycle as lifecycle
 
 
 # --- registry + liveness units (isolated) ------------------------------------
@@ -126,7 +126,7 @@ def test_spawned_server_stops_gracefully_and_unregisters(tmp_path):
     app_home = tmp_path / "app"
     env = {
         **os.environ,
-        "NEO_LOCALMCP_HOME": str(app_home),
+        "MY_LOCALMCP_HOME": str(app_home),
         "PYTHONPATH": str(root),
         "PYTHONUNBUFFERED": "1",
     }
@@ -137,7 +137,7 @@ async def _spawn_register_and_stop(app_home: Path, env: dict) -> None:
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
 
-    params = StdioServerParameters(command=sys.executable, args=["-m", "neo_localmcp.mcp.server"], env=env)
+    params = StdioServerParameters(command=sys.executable, args=["-m", "my_localmcp.mcp.server"], env=env)
     servers_dir = app_home / "cache" / "processes" / "servers"
 
     async with stdio_client(params) as (read, write):
@@ -158,7 +158,7 @@ async def _spawn_register_and_stop(app_home: Path, env: dict) -> None:
             assert pid is not None, "server never registered itself"
 
             # Request graceful stop from 'outside' by writing the stop file directly
-            # (this is exactly what `neo-localmcp stop` does), then confirm the process
+            # (this is exactly what `my-localmcp stop` does), then confirm the process
             # exits on its own within budget -- no force-kill.
             (servers_dir / f"{pid}.stop").write_text("{}", encoding="utf-8")
 

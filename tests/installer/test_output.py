@@ -4,20 +4,20 @@ from pathlib import Path
 
 import pytest
 
-from neo_localmcp.installer.output import (
+from my_localmcp.installer.output import (
     FULL_WIPE_CONFIRMATION,
     PRESERVED_MEMORY_MESSAGE,
     Reporter,
     confirm_full_wipe,
     operation_explanation,
 )
-from neo_localmcp.installer.paths import ManagedPaths, UnsafeManagedRoot
-from neo_localmcp.installer.types import Operation
+from my_localmcp.installer.paths import ManagedPaths, UnsafeManagedRoot
+from my_localmcp.installer.types import Operation
 
 
 def _paths(tmp_path: Path) -> ManagedPaths:
     return ManagedPaths(
-        root=tmp_path / ".neo-localmcp",
+        root=tmp_path / ".my-localmcp",
         platform="posix",
         home=tmp_path,
     )
@@ -42,7 +42,7 @@ def test_reporter_emits_exact_preserved_memory_message() -> None:
     event = reporter.existing_memory_detected()
 
     assert PRESERVED_MEMORY_MESSAGE == (
-        "Existing neo-localmcp memory detected. Reusing preserved memory/data."
+        "Existing my-localmcp memory detected. Reusing preserved memory/data."
     )
     assert event.message == PRESERVED_MEMORY_MESSAGE
     assert lines == [f"INFO: {PRESERVED_MEMORY_MESSAGE}"]

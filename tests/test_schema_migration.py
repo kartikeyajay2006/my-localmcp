@@ -25,7 +25,7 @@ import sqlite3
 
 import pytest
 
-from neo_localmcp.retrieval import repo_memory
+from my_localmcp.retrieval import repo_memory
 
 pytestmark = pytest.mark.retrieval
 
@@ -40,7 +40,7 @@ _EXPECTED_ADDED_TABLES = {"retrieval_boost", "section_summaries", "file_embeddin
 
 
 def _seed_pre_migration_db(db_file) -> None:
-    """Create a SQLite DB shaped like an early neo-localmcp install and seed rows.
+    """Create a SQLite DB shaped like an early my-localmcp install and seed rows.
 
     Intentionally NOT the current schema: `files` lacks the three `summary_*`
     columns, `task_queries` lacks `retrieval_id`/`term_key`, and the later

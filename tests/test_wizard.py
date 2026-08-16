@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from neo_localmcp.installer.wizard import live_backend, preview_backend
-from neo_localmcp.installer.wizard.backend import (
+from my_localmcp.installer.wizard import live_backend, preview_backend
+from my_localmcp.installer.wizard.backend import (
     OP_INSTALL,
     OP_REINSTALL,
     OP_UNINSTALL,
@@ -16,7 +16,7 @@ def _isolated_preview_backend(tmp_path, monkeypatch):
     # parameterize -- redirect it so tests don't read/write a real file in
     # this repo's working tree or leak state between tests (#13: this whole
     # module had zero pytest coverage before this file). Callers set
-    # NEO_LOCALMCP_WIZARD_PREVIEW_STATE themselves (via monkeypatch) before
+    # MY_LOCALMCP_WIZARD_PREVIEW_STATE themselves (via monkeypatch) before
     # calling this, if they want a seed other than the "absent" default.
     monkeypatch.setattr(preview_backend, "_STATE_PATH", tmp_path / "wizard_state.json")
     return preview_backend.PreviewBackend()
@@ -39,7 +39,7 @@ def test_preview_backend_detects_absent_by_default(tmp_path, monkeypatch):
 
 
 def test_preview_backend_detects_healthy_when_seeded(tmp_path, monkeypatch):
-    monkeypatch.setenv("NEO_LOCALMCP_WIZARD_PREVIEW_STATE", "healthy")
+    monkeypatch.setenv("MY_LOCALMCP_WIZARD_PREVIEW_STATE", "healthy")
     backend = _isolated_preview_backend(tmp_path, monkeypatch)
     info = backend.detect()
     assert info.state == "healthy"
@@ -74,8 +74,8 @@ def test_preview_backend_ollama_info_reports_model_capabilities(tmp_path, monkey
 
 
 def test_live_backend_ollama_info_reports_model_capabilities(isolated_app_home, monkeypatch):
-    from neo_localmcp import ollama_client
-    from neo_localmcp.installer.wizard.live_backend import LiveBackend
+    from my_localmcp import ollama_client
+    from my_localmcp.installer.wizard.live_backend import LiveBackend
 
     monkeypatch.setattr(ollama_client, "status", lambda: {
         "state": "ready", "installed_models": ["qwen3:8b", "nomic-embed-text:latest"],
@@ -119,9 +119,9 @@ def test_preview_backend_install_then_uninstall_round_trips_state(tmp_path, monk
 
 
 def test_live_backend_apply_client_changes_uses_shared_helper(isolated_app_home, monkeypatch):
-    from neo_localmcp.installer import clients as clients_mod
-    from neo_localmcp.installer.wizard.backend import WizardState
-    from neo_localmcp.installer.wizard.live_backend import LiveBackend
+    from my_localmcp.installer import clients as clients_mod
+    from my_localmcp.installer.wizard.backend import WizardState
+    from my_localmcp.installer.wizard.live_backend import LiveBackend
 
     calls = []
     monkeypatch.setattr(
@@ -141,9 +141,9 @@ def test_live_backend_apply_client_changes_uses_shared_helper(isolated_app_home,
 
 
 def test_live_backend_apply_ollama_config_uses_shared_helper(isolated_app_home):
-    from neo_localmcp import config
-    from neo_localmcp.installer.wizard.backend import WizardState
-    from neo_localmcp.installer.wizard.live_backend import LiveBackend
+    from my_localmcp import config
+    from my_localmcp.installer.wizard.backend import WizardState
+    from my_localmcp.installer.wizard.live_backend import LiveBackend
 
     backend = LiveBackend()
     state = WizardState(
@@ -161,9 +161,9 @@ def test_live_backend_writes_and_disables_embed_model(isolated_app_home):
     """The wizard's embed phase threads state.embed_model through to config:
     a model name enables the semantic layer; an empty string (user chose 'None')
     disables it back to None -- the tri-state configure_models honors."""
-    from neo_localmcp import config
-    from neo_localmcp.installer.wizard.backend import WizardState
-    from neo_localmcp.installer.wizard.live_backend import LiveBackend
+    from my_localmcp import config
+    from my_localmcp.installer.wizard.backend import WizardState
+    from my_localmcp.installer.wizard.live_backend import LiveBackend
 
     backend = LiveBackend()
     enable = WizardState(operation="config-ollama", fast_model="f", summary_model="s",
@@ -180,7 +180,7 @@ def test_live_backend_writes_and_disables_embed_model(isolated_app_home):
 def test_console_embed_phase_picks_and_disables(tmp_path, monkeypatch):
     """Smoke the interactive embed phase against the preview backend: choosing a
     numbered model enables it; choosing 0 leaves the semantic layer disabled."""
-    from neo_localmcp.installer.wizard.console import ConsoleWizard
+    from my_localmcp.installer.wizard.console import ConsoleWizard
 
     backend = _isolated_preview_backend(tmp_path, monkeypatch)
     wizard = ConsoleWizard(backend, fake=True)
@@ -204,8 +204,8 @@ def test_console_embed_phase_picks_and_disables(tmp_path, monkeypatch):
 
 
 def test_ollama_info_carries_embed_model(isolated_app_home):
-    from neo_localmcp import config
-    from neo_localmcp.installer.wizard.live_backend import LiveBackend
+    from my_localmcp import config
+    from my_localmcp.installer.wizard.live_backend import LiveBackend
 
     cfg = config.load_config(); cfg["ollama"]["embed_model"] = "mxbai-embed-large"; config.save_config(cfg)
     info = LiveBackend().ollama_info()
@@ -214,7 +214,7 @@ def test_ollama_info_carries_embed_model(isolated_app_home):
 
 def test_preview_backend_config_ollama_reports_embed(tmp_path, monkeypatch):
     backend = _isolated_preview_backend(tmp_path, monkeypatch)
-    from neo_localmcp.installer.wizard.backend import WizardState
+    from my_localmcp.installer.wizard.backend import WizardState
     state = WizardState(operation="config-ollama", fast_model="qwen3:8b",
                         summary_model="qwen3-coder:30b", embed_model="nomic-embed-text:latest")
     outcome = backend.apply_ollama_config(state, lambda e: None)
@@ -226,14 +226,14 @@ def test_preview_backend_config_ollama_reports_embed(tmp_path, monkeypatch):
 def test_isolated_app_home_actually_redirects_in_process_config_writes(isolated_app_home):
     """Regression: isolated_app_home must isolate in-process config reads/writes,
     not just the env var for subprocess children. config.py's APP_DIR/CONFIG_PATH
-    are computed once at module import time from NEO_LOCALMCP_HOME and are never
-    re-derived live -- unlike NEO_LOCALMCP_CONFIG, which config_path() does check
+    are computed once at module import time from MY_LOCALMCP_HOME and are never
+    re-derived live -- unlike MY_LOCALMCP_CONFIG, which config_path() does check
     live. Before this fix, setting only the env var left config.load_config()/
-    save_config() silently resolving to the real ~/.neo-localmcp/config/config.yaml
+    save_config() silently resolving to the real ~/.my-localmcp/config/config.yaml
     for any in-process caller (e.g. LiveBackend.apply_ollama_config above), which
     is exactly how a routine test run could stamp this fixture's hardcoded
     fast_model="new-fast"/summary_model="new-summary" into a real user's config."""
-    from neo_localmcp import config
+    from my_localmcp import config
 
     resolved = config.config_path()
     assert str(resolved).startswith(str(isolated_app_home))
@@ -246,9 +246,9 @@ def test_reinstall_now_offers_its_own_client_phase(tmp_path, monkeypatch):
     """Reinstall used to skip client selection entirely ('kept as-is'); it now
     gets the same _phase_clients screen as Install/Manage-clients, defaulted
     to the currently-registered set."""
-    from neo_localmcp.installer.wizard.console import ConsoleWizard
+    from my_localmcp.installer.wizard.console import ConsoleWizard
 
-    monkeypatch.setenv("NEO_LOCALMCP_WIZARD_PREVIEW_STATE", "healthy")
+    monkeypatch.setenv("MY_LOCALMCP_WIZARD_PREVIEW_STATE", "healthy")
     backend = _isolated_preview_backend(tmp_path, monkeypatch)
     backend._registered = ["claude-code"]
     wizard = ConsoleWizard(backend, fake=True)
@@ -264,7 +264,7 @@ def test_reinstall_now_offers_its_own_client_phase(tmp_path, monkeypatch):
 def test_uninstall_client_phase_skipped_unless_detach_only(tmp_path, monkeypatch):
     import pytest
 
-    from neo_localmcp.installer.wizard.console import ConsoleWizard, _Skip
+    from my_localmcp.installer.wizard.console import ConsoleWizard, _Skip
 
     backend = _isolated_preview_backend(tmp_path, monkeypatch)
     wizard = ConsoleWizard(backend, fake=True)
@@ -281,7 +281,7 @@ def test_uninstall_client_phase_skipped_unless_detach_only(tmp_path, monkeypatch
 
 
 def test_uninstall_scope_phase_sets_detach_only(tmp_path, monkeypatch):
-    from neo_localmcp.installer.wizard.console import ConsoleWizard
+    from my_localmcp.installer.wizard.console import ConsoleWizard
 
     backend = _isolated_preview_backend(tmp_path, monkeypatch)
     wizard = ConsoleWizard(backend, fake=True)
@@ -295,7 +295,7 @@ def test_uninstall_scope_phase_sets_detach_only(tmp_path, monkeypatch):
 def test_uninstall_mode_and_wipe_confirm_skipped_when_detach_only(tmp_path, monkeypatch):
     import pytest
 
-    from neo_localmcp.installer.wizard.console import ConsoleWizard, _Skip
+    from my_localmcp.installer.wizard.console import ConsoleWizard, _Skip
 
     backend = _isolated_preview_backend(tmp_path, monkeypatch)
     wizard = ConsoleWizard(backend, fake=True)
@@ -316,9 +316,9 @@ def test_uninstall_mode_and_wipe_confirm_skipped_when_detach_only(tmp_path, monk
 def test_uninstall_detach_only_selects_subset_and_preserves_runtime(tmp_path, monkeypatch):
     """End-to-end preview walk of the new detach-only uninstall path: choosing
     a client subset must not remove the runtime, only the selected clients."""
-    from neo_localmcp.installer.wizard.console import ConsoleWizard
+    from my_localmcp.installer.wizard.console import ConsoleWizard
 
-    monkeypatch.setenv("NEO_LOCALMCP_WIZARD_PREVIEW_STATE", "healthy")
+    monkeypatch.setenv("MY_LOCALMCP_WIZARD_PREVIEW_STATE", "healthy")
     backend = _isolated_preview_backend(tmp_path, monkeypatch)
     backend._registered = ["claude-code", "codex"]
     wizard = ConsoleWizard(backend, fake=True)
@@ -344,8 +344,8 @@ def test_live_backend_install_marks_client_selection_explicit(isolated_app_home,
     # False, so a wizard install with any leftover managed-root state silently snapshot
     # whatever was already on disk (nothing, on a broken/partial prior install) instead of
     # actually registering the user's chosen clients.
-    from neo_localmcp.installer.wizard import live_backend
-    from neo_localmcp.installer.types import Operation, OperationResult, OperationStatus
+    from my_localmcp.installer.wizard import live_backend
+    from my_localmcp.installer.types import Operation, OperationResult, OperationStatus
 
     backend = live_backend.LiveBackend()
     captured = {}
@@ -367,8 +367,8 @@ def test_live_backend_install_marks_client_selection_explicit(isolated_app_home,
 
 
 def test_live_backend_reinstall_marks_client_selection_explicit(isolated_app_home, monkeypatch):
-    from neo_localmcp.installer.wizard import live_backend
-    from neo_localmcp.installer.types import Operation, OperationResult, OperationStatus
+    from my_localmcp.installer.wizard import live_backend
+    from my_localmcp.installer.types import Operation, OperationResult, OperationStatus
 
     backend = live_backend.LiveBackend()
     captured = {}
@@ -390,8 +390,8 @@ def test_live_backend_reinstall_marks_client_selection_explicit(isolated_app_hom
 
 
 def test_live_backend_uninstall_detach_only_marks_explicit_selection(isolated_app_home, monkeypatch):
-    from neo_localmcp.installer.wizard import live_backend
-    from neo_localmcp.installer.types import Operation, OperationResult, OperationStatus
+    from my_localmcp.installer.wizard import live_backend
+    from my_localmcp.installer.types import Operation, OperationResult, OperationStatus
 
     backend = live_backend.LiveBackend()
     captured = {}
@@ -415,8 +415,8 @@ def test_live_backend_uninstall_detach_only_marks_explicit_selection(isolated_ap
 
 
 def test_live_backend_full_uninstall_does_not_mark_explicit_selection(isolated_app_home, monkeypatch):
-    from neo_localmcp.installer.wizard import live_backend
-    from neo_localmcp.installer.types import Operation, OperationResult, OperationStatus
+    from my_localmcp.installer.wizard import live_backend
+    from my_localmcp.installer.types import Operation, OperationResult, OperationStatus
 
     backend = live_backend.LiveBackend()
     captured = {}
@@ -442,7 +442,7 @@ def test_confirm_phase_asks_a_single_default_yes_question_no_dry_run_prompt(tmp_
     (a 'Preview only (dry run)?' toggle, then a separate proceed question) --
     confusing UX for a rarely-used capability. It must now ask exactly one
     question ('Install as shown?', default Yes), and never set dry_run."""
-    from neo_localmcp.installer.wizard.console import ConsoleWizard
+    from my_localmcp.installer.wizard.console import ConsoleWizard
 
     backend = _isolated_preview_backend(tmp_path, monkeypatch)
     wizard = ConsoleWizard(backend, fake=True)
@@ -466,7 +466,7 @@ def test_confirm_phase_asks_a_single_default_yes_question_no_dry_run_prompt(tmp_
 # --- #101: confirm-page pull reminder for not-yet-installed models --------
 
 def test_confirm_shows_no_pull_warning_when_all_selected_models_installed(tmp_path, monkeypatch, capsys):
-    from neo_localmcp.installer.wizard.console import ConsoleWizard
+    from my_localmcp.installer.wizard.console import ConsoleWizard
 
     backend = _isolated_preview_backend(tmp_path, monkeypatch)
     wizard = ConsoleWizard(backend, fake=True)
@@ -485,7 +485,7 @@ def test_confirm_shows_no_pull_warning_when_all_selected_models_installed(tmp_pa
 
 
 def test_confirm_shows_pull_warning_listing_exactly_the_missing_models(tmp_path, monkeypatch, capsys):
-    from neo_localmcp.installer.wizard.console import ConsoleWizard
+    from my_localmcp.installer.wizard.console import ConsoleWizard
 
     backend = _isolated_preview_backend(tmp_path, monkeypatch)
     wizard = ConsoleWizard(backend, fake=True)
@@ -507,7 +507,7 @@ def test_confirm_shows_pull_warning_listing_exactly_the_missing_models(tmp_path,
 def test_confirm_pull_warning_absent_when_ollama_config_untouched(tmp_path, monkeypatch, capsys):
     """configure_ollama False -> _missing_pull_models() must return [] even if
     stale fast/summary/embed_model values happen to be set on state."""
-    from neo_localmcp.installer.wizard.console import ConsoleWizard
+    from my_localmcp.installer.wizard.console import ConsoleWizard
 
     backend = _isolated_preview_backend(tmp_path, monkeypatch)
     wizard = ConsoleWizard(backend, fake=True)
@@ -523,7 +523,7 @@ def test_confirm_pull_warning_absent_when_ollama_config_untouched(tmp_path, monk
 
 
 def test_path_phase_defaults_to_adding_managed_cli_directory(tmp_path, monkeypatch):
-    from neo_localmcp.installer.wizard.console import ConsoleWizard
+    from my_localmcp.installer.wizard.console import ConsoleWizard
 
     backend = _isolated_preview_backend(tmp_path, monkeypatch)
     wizard = ConsoleWizard(backend, fake=True)
@@ -537,8 +537,8 @@ def test_path_phase_defaults_to_adding_managed_cli_directory(tmp_path, monkeypat
 
 
 def test_live_backend_updates_path_only_after_successful_opt_in(isolated_app_home, monkeypatch):
-    from neo_localmcp.installer.path import PathUpdate
-    from neo_localmcp.installer.types import Operation, OperationResult, OperationStatus
+    from my_localmcp.installer.path import PathUpdate
+    from my_localmcp.installer.types import Operation, OperationResult, OperationStatus
 
     backend = live_backend.LiveBackend()
     updates = []
@@ -560,7 +560,7 @@ def test_live_backend_updates_path_only_after_successful_opt_in(isolated_app_hom
 
 
 def test_live_backend_leaves_path_unchanged_when_wizard_opt_outs(isolated_app_home, monkeypatch):
-    from neo_localmcp.installer.types import Operation, OperationResult, OperationStatus
+    from my_localmcp.installer.types import Operation, OperationResult, OperationStatus
 
     backend = live_backend.LiveBackend()
     updates = []
@@ -580,7 +580,7 @@ def test_live_backend_leaves_path_unchanged_when_wizard_opt_outs(isolated_app_ho
 # --- Ollama URL validation + model-kind labeling (pure functions) ----------
 
 def test_is_valid_ollama_url_accepts_common_forms():
-    from neo_localmcp.installer.wizard.console import _is_valid_ollama_url
+    from my_localmcp.installer.wizard.console import _is_valid_ollama_url
 
     assert _is_valid_ollama_url("http://127.0.0.1:11434")
     assert _is_valid_ollama_url("https://ollama.example.com:11434")
@@ -589,7 +589,7 @@ def test_is_valid_ollama_url_accepts_common_forms():
 
 
 def test_is_valid_ollama_url_rejects_malformed_input():
-    from neo_localmcp.installer.wizard.console import _is_valid_ollama_url
+    from my_localmcp.installer.wizard.console import _is_valid_ollama_url
 
     assert not _is_valid_ollama_url("")
     assert not _is_valid_ollama_url("not a url")
@@ -599,7 +599,7 @@ def test_is_valid_ollama_url_rejects_malformed_input():
 
 
 def test_model_kind_label_distinguishes_embed_from_chat():
-    from neo_localmcp.installer.wizard.console import _model_kind_label
+    from my_localmcp.installer.wizard.console import _model_kind_label
 
     assert _model_kind_label(("completion", "tools")) == "chat"
     assert _model_kind_label(("embedding",)) == "embed"
@@ -608,7 +608,7 @@ def test_model_kind_label_distinguishes_embed_from_chat():
 
 def test_console_baseurl_phase_confirms_default_without_prompting_for_new_value(tmp_path, monkeypatch):
     """Saying 'yes, looks good' to the shown default must not ask for a new URL."""
-    from neo_localmcp.installer.wizard.console import ConsoleWizard
+    from my_localmcp.installer.wizard.console import ConsoleWizard
 
     backend = _isolated_preview_backend(tmp_path, monkeypatch)
     wizard = ConsoleWizard(backend, fake=True)
@@ -623,7 +623,7 @@ def test_console_baseurl_phase_confirms_default_without_prompting_for_new_value(
 def test_console_baseurl_phase_loops_on_invalid_then_accepts_valid(tmp_path, monkeypatch):
     """Saying 'no' prompts for a new URL, re-asks on an invalid one, then loops
     back to the confirm question with the new value until accepted."""
-    from neo_localmcp.installer.wizard.console import ConsoleWizard
+    from my_localmcp.installer.wizard.console import ConsoleWizard
 
     backend = _isolated_preview_backend(tmp_path, monkeypatch)
     wizard = ConsoleWizard(backend, fake=True)
@@ -640,7 +640,7 @@ def test_console_baseurl_phase_loops_on_invalid_then_accepts_valid(tmp_path, mon
 # --- model table: type awareness + colored current selection ----------------
 
 def test_format_model_table_labels_kind_and_shows_size(tmp_path, monkeypatch):
-    from neo_localmcp.installer.wizard.console import ConsoleWizard
+    from my_localmcp.installer.wizard.console import ConsoleWizard
 
     backend = _isolated_preview_backend(tmp_path, monkeypatch)
     wizard = ConsoleWizard(backend, fake=True)
@@ -656,8 +656,8 @@ def test_format_model_table_labels_kind_and_shows_size(tmp_path, monkeypatch):
 
 
 def test_format_model_table_colors_the_current_row(tmp_path, monkeypatch):
-    from neo_localmcp.installer.wizard import _ansi
-    from neo_localmcp.installer.wizard.console import ConsoleWizard
+    from my_localmcp.installer.wizard import _ansi
+    from my_localmcp.installer.wizard.console import ConsoleWizard
 
     monkeypatch.setattr(_ansi, "COLOR_ENABLED", True)
     backend = _isolated_preview_backend(tmp_path, monkeypatch)
@@ -674,7 +674,7 @@ def test_format_model_table_colors_the_current_row(tmp_path, monkeypatch):
 def test_pick_model_uses_the_colored_kind_aware_table(tmp_path, monkeypatch):
     """Smoke test: _pick_model still returns the chosen model name, now via the
     table renderer (regression -- picking must still work after the format change)."""
-    from neo_localmcp.installer.wizard.console import ConsoleWizard
+    from my_localmcp.installer.wizard.console import ConsoleWizard
 
     backend = _isolated_preview_backend(tmp_path, monkeypatch)
     wizard = ConsoleWizard(backend, fake=True)
@@ -690,7 +690,7 @@ def test_pick_model_uses_the_colored_kind_aware_table(tmp_path, monkeypatch):
 
 
 def _custom_ollama_info(**overrides):
-    from neo_localmcp.installer.wizard.backend import OllamaInfo
+    from my_localmcp.installer.wizard.backend import OllamaInfo
     defaults = dict(
         reachable=True, base_url="http://127.0.0.1:11434",
         installed_models=("bge-m3:latest", "gemma3:12b", "qwen3:8b"),
@@ -711,7 +711,7 @@ def test_pick_model_default_skips_embed_only_model_when_current_not_installed(tm
     """Regression: bge-m3:latest sorts alphabetically first but is embed-only.
     When the configured model (qwen3-coder:30b) isn't in the installed list,
     the default choice must not silently fall back to it."""
-    from neo_localmcp.installer.wizard.console import ConsoleWizard
+    from my_localmcp.installer.wizard.console import ConsoleWizard
 
     backend = _isolated_preview_backend(tmp_path, monkeypatch)
     wizard = ConsoleWizard(backend, fake=True)
@@ -728,8 +728,8 @@ def test_format_model_table_marks_the_default_row_when_not_current(tmp_path, mon
     """When the default selection differs from the persisted 'current' value
     (e.g. current isn't installed), that row must still be visually distinct
     -- not just silently unmarked -- so the user can see what Enter will pick."""
-    from neo_localmcp.installer.wizard import _ansi
-    from neo_localmcp.installer.wizard.console import ConsoleWizard
+    from my_localmcp.installer.wizard import _ansi
+    from my_localmcp.installer.wizard.console import ConsoleWizard
 
     monkeypatch.setattr(_ansi, "COLOR_ENABLED", True)
     backend = _isolated_preview_backend(tmp_path, monkeypatch)
@@ -751,7 +751,7 @@ def test_fast_model_picker_shows_recommended_section_with_markers(tmp_path, monk
     """The RECOMMENDED FOR YOUR SETUP section must appear above ALL INSTALLED
     MODELS, marking each candidate installed ([x] available) or not ([ ] not
     pulled), while the full installed list stays unabridged below it."""
-    from neo_localmcp.installer.wizard.console import ConsoleWizard
+    from my_localmcp.installer.wizard.console import ConsoleWizard
 
     backend = _isolated_preview_backend(tmp_path, monkeypatch)
     wizard = ConsoleWizard(backend, fake=True)
@@ -776,7 +776,7 @@ def test_fast_model_picker_shows_recommended_section_with_markers(tmp_path, monk
 
 
 def test_embed_model_picker_shows_recommended_section_before_installed_list(tmp_path, monkeypatch, capsys):
-    from neo_localmcp.installer.wizard.console import ConsoleWizard
+    from my_localmcp.installer.wizard.console import ConsoleWizard
 
     backend = _isolated_preview_backend(tmp_path, monkeypatch)
     wizard = ConsoleWizard(backend, fake=True)
@@ -798,7 +798,7 @@ def test_embed_model_picker_shows_recommended_section_before_installed_list(tmp_
 def test_pick_model_recommended_choice_can_select_an_uninstalled_candidate(tmp_path, monkeypatch):
     """A recommended-but-not-installed candidate must still be selectable by its
     numbered choice, even though it never appears in installed_models."""
-    from neo_localmcp.installer.wizard.console import ConsoleWizard
+    from my_localmcp.installer.wizard.console import ConsoleWizard
 
     backend = _isolated_preview_backend(tmp_path, monkeypatch)
     wizard = ConsoleWizard(backend, fake=True)

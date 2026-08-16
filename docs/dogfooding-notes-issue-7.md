@@ -1,24 +1,24 @@
 # Dogfooding notes — Issue #7 (schema migration-safety regression test)
 
-Running log of using neo-localmcp's own CLI (`context`/`lookup`/`file`) to do this task.
+Running log of using my-localmcp's own CLI (`context`/`lookup`/`file`) to do this task.
 
 ## Setup
 
-- `neo-localmcp` on PATH at `/c/users/neel/appdata/roaming/python/python314/scripts/neo-localmcp`.
-- Working in worktree `agent-a1cdf4b932c12982a`. Repo memory is centralized (`~/.neo-localmcp/repo-context.sqlite`), shared across all indexed repos, keyed by repo_id (canonical root + git remote).
+- `my-localmcp` on PATH at `/c/users/kartikeyayadav/appdata/roaming/python/python314/scripts/my-localmcp`.
+- Working in worktree `agent-a1cdf4b932c12982a`. Repo memory is centralized (`~/.my-localmcp/repo-context.sqlite`), shared across all indexed repos, keyed by repo_id (canonical root + git remote).
 
 ## Queries run (chronological)
 
-### Query 1 — `neo-localmcp context "schema evolution and migration in repo memory: init_db, CREATE TABLE, ALTER TABLE ADD COLUMN, INDEXER_VERSION" --repo-root . --token-budget 1500`
+### Query 1 — `my-localmcp context "schema evolution and migration in repo memory: init_db, CREATE TABLE, ALTER TABLE ADD COLUMN, INDEXER_VERSION" --repo-root . --token-budget 1500`
 
 - **Parser behavior:** Strong terms extracted `init_db, TABLE, ALTER, COLUMN, INDEXER_VERSION`; weak terms `schema, evolution, migration, memory`; ignored filler `and, in, repo`. Reasonable split.
-- **Ranking result (friction, worth an issue):** the #1 "Read first" hit was `neo_localmcp/installer/migration.py` (score 263) — a **filesystem-layout** migration module (legacy install dirs), which is semantically unrelated to *SQL schema* migration. It outranked the actual target `neo_localmcp/repo_memory.py` (score 148, ranked #3). The word "migration" is overloaded in this repo, and the ranker keyed on the literal token match in the filename/symbols rather than the schema/SQL terms that pin the real intent. `tests/installer/test_migration.py` (#6) is likewise the wrong "migration."
+- **Ranking result (friction, worth an issue):** the #1 "Read first" hit was `my_localmcp/installer/migration.py` (score 263) — a **filesystem-layout** migration module (legacy install dirs), which is semantically unrelated to *SQL schema* migration. It outranked the actual target `my_localmcp/repo_memory.py` (score 148, ranked #3). The word "migration" is overloaded in this repo, and the ranker keyed on the literal token match in the filename/symbols rather than the schema/SQL terms that pin the real intent. `tests/installer/test_migration.py` (#6) is likewise the wrong "migration."
 - **Did it point me to the right code fast?** Partially. `repo_memory.py` *was* in the top 3 and the guidance explicitly listed `init_db around line 38`, which is exactly right. But the top slot was a false lead; a less careful agent following "Read first: 1." literally would have opened the wrong file first. I already knew from the issue that `repo_memory.py` was the target, so I wasn't misled — but the ranking would mislead someone who didn't.
 - **Line hints:** The `repo_memory.py` hints (`around line 38`, `connect around line 29`, `get_repo_meta around line 152`, `set_repo_meta around line 157`) centered on `init_db` correctly. Good.
 
-### Query 2 — `neo-localmcp lookup "init_db" --repo-root .`
+### Query 2 — `my-localmcp lookup "init_db" --repo-root .`
 
-- **Result:** Clean, exact, fast. Single symbol hit `neo_localmcp/repo_memory.py:init_db` with `start_line: 38, end_line: 118`. This is `lookup` working exactly as intended — a known symbol name resolves precisely. No friction. This is the CLI's strongest surface for this kind of task.
+- **Result:** Clean, exact, fast. Single symbol hit `my_localmcp/repo_memory.py:init_db` with `start_line: 38, end_line: 118`. This is `lookup` working exactly as intended — a known symbol name resolves precisely. No friction. This is the CLI's strongest surface for this kind of task.
 - The `start_line/end_line` (38–118) let me Read exactly the right span had I wanted to; I read the whole file anyway since I needed the full schema + every ALTER/CREATE and the surrounding indexing functions to design a faithful "old schema" seed.
 
 ## Observations / friction summary

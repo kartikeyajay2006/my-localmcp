@@ -1,7 +1,7 @@
 # MCP Agent Integration
 
 This file is the sidecar reference for an AI agent working in a repository
-that neo-localmcp indexes. It has two parts:
+that my-localmcp indexes. It has two parts:
 
 1. A short paste-able snippet for the *downstream* repo's own
    `CLAUDE.md`/`AGENTS.md`, so the instruction persists across sessions.
@@ -11,12 +11,12 @@ that neo-localmcp indexes. It has two parts:
 ## 1. Paste-into-downstream-repo snippet
 
 Paste this into the downstream repo's `CLAUDE.md`/`AGENTS.md` (not this
-repo's) to get an agent to actually discover and use neo-localmcp there,
+repo's) to get an agent to actually discover and use my-localmcp there,
 instead of silently falling back to broad search and full-file reads.
 
 ```text
-This repository is indexed by neo-localmcp, a local MCP server for deterministic
-repository context. Before broad repository search, read neo-localmcp's own
+This repository is indexed by my-localmcp, a local MCP server for deterministic
+repository context. Before broad repository search, read my-localmcp's own
 README/tool docs, then decide concretely where in *this* project it is the right
 tool:
 
@@ -33,7 +33,7 @@ present, is optional advisory context, never authoritative.
 ## 2. Full MCP tool reference
 
 Everything below is retrieval, indexing, ranking, or summarization.
-**neo-localmcp never generates or edits source code**, except applying an
+**my-localmcp never generates or edits source code**, except applying an
 exact, developer-approved unified diff via `apply_patch` — and even that
 defaults to validation-only (`check_only=true`). Administrative commands
 (`index`, `reindex`, `reset-repo`, `reset-all`, `setup`, `servers`, `stop`,
@@ -128,7 +128,7 @@ apply_patch(patch_text: str, repo_root="auto", check_only=true)
 ```
 
 The only tool that can mutate files, and only for an **exact,
-developer-approved** unified diff — neo-localmcp never invents the diff
+developer-approved** unified diff — my-localmcp never invents the diff
 content itself. Defaults to `check_only=true` (runs `git apply --check` and
 reports whether the patch would apply cleanly, without touching disk). Only
 pass `check_only=false` once a human has approved the exact diff text.

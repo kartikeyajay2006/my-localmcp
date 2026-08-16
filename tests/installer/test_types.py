@@ -4,7 +4,7 @@ import dataclasses
 
 import pytest
 
-from neo_localmcp.installer.types import (
+from my_localmcp.installer.types import (
     DetectedState,
     InstallStateKind,
     Operation,

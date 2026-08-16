@@ -8,15 +8,15 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from neo_localmcp import ai_client_config as client_setup
+from my_localmcp import ai_client_config as client_setup
 
 
 def test_strip_marked_block_inverts_replace_marked_block():
     original = '[existing]\nkey = "value"\n'
     with_block = client_setup._replace_marked_block(original, client_setup._codex_block())
-    assert "# BEGIN neo-localmcp" in with_block
+    assert "# BEGIN my-localmcp" in with_block
     stripped = client_setup._strip_marked_block(with_block)
-    assert "neo-localmcp" not in stripped
+    assert "my-localmcp" not in stripped
     assert "[existing]" in stripped
     assert 'key = "value"' in stripped
 
@@ -49,13 +49,13 @@ def test_setup_then_remove_codex_roundtrips_config(tmp_path, monkeypatch):
     monkeypatch.setattr(client_setup, "_codex_cli_config_path", lambda: cfg)
 
     client_setup.setup_codex_cli(apply=True)
-    assert "# BEGIN neo-localmcp" in cfg.read_text(encoding="utf-8")
+    assert "# BEGIN my-localmcp" in cfg.read_text(encoding="utf-8")
 
     result = client_setup.remove_codex(apply=True)
     text = cfg.read_text(encoding="utf-8")
     assert result["block_present"] is True
     assert result["block_present_after"] is False
-    assert "neo-localmcp" not in text
+    assert "my-localmcp" not in text
     assert '[existing]' in text and 'key = "value"' in text
 
 
@@ -99,7 +99,7 @@ def test_remove_claude_code_reports_failed_cli_removal(tmp_path, monkeypatch):
     monkeypatch.setattr(client_setup.shutil, "which", lambda name: "/usr/bin/claude")
     responses = iter(
         (
-            subprocess.CompletedProcess([], 0, "Scope: user\nneo-localmcp", ""),
+            subprocess.CompletedProcess([], 0, "Scope: user\nmy-localmcp", ""),
             subprocess.CompletedProcess([], 1, "", "permission denied"),
         )
     )
@@ -116,14 +116,14 @@ def test_setup_codex_with_injected_launcher_roundtrips(tmp_path, monkeypatch):
     cfg.write_text('[existing]\nkey = "value"\n', encoding="utf-8")
     monkeypatch.setattr(client_setup, "_codex_cli_config_path", lambda: cfg)
     monkeypatch.setattr(client_setup, "ensure_config", lambda *a, **k: None)
-    launcher = tmp_path / ".neo-localmcp" / "venv" / "bin" / "neo-localmcp-server"
+    launcher = tmp_path / ".my-localmcp" / "venv" / "bin" / "my-localmcp-server"
 
     client_setup.setup_codex_cli(apply=True, server_command=launcher)
     assert str(launcher).replace("\\", "\\\\") in cfg.read_text(encoding="utf-8")
 
     client_setup.remove_codex(apply=True)
     text = cfg.read_text(encoding="utf-8")
-    assert "neo-localmcp" not in text
+    assert "my-localmcp" not in text
     assert '[existing]' in text and 'key = "value"' in text
 
 
@@ -141,7 +141,7 @@ def test_setup_then_remove_codex_preserves_crlf_newlines(tmp_path, monkeypatch):
     client_setup.remove_codex(apply=True)
     remaining = cfg.read_bytes()
     assert b"\r\n" in remaining
-    assert b"neo-localmcp" not in remaining
+    assert b"my-localmcp" not in remaining
 
 
 def test_remove_claude_desktop_is_manual_only():

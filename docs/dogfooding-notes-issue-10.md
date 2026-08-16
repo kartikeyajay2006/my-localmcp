@@ -1,6 +1,6 @@
 # Dogfooding Notes — Issue #10 Code Quality Audit (v2 run)
 
-Written as-I-go while using neo-localmcp's own CLI (`context`, `lookup`, `file`,
+Written as-I-go while using my-localmcp's own CLI (`context`, `lookup`, `file`,
 `summarize`) as the primary navigation tool for a module-by-module code-quality
 audit of the repo. Goal: log retrieval quality/friction and a with-MCP vs
 without-MCP token comparison. All token numbers are **estimates** (char-derived,
@@ -40,8 +40,8 @@ right or wrong is itself recorded as a datapoint about the tool's usefulness.
 - **Latency:** 2.5 s wall (deterministic, no Ollama).
 - **MAJOR friction — worktree pollution:** 5 of the top 6 `read_first` results were
   **duplicate `tools.py` copies from OTHER agents' git worktrees**
-  (`.claude/worktrees/agent-a192e4.../neo_localmcp/tools.py`, etc.), each scoring
-  505–568, while the *real* working-tree `neo_localmcp/tools.py` ranked **#6 at
+  (`.claude/worktrees/agent-a192e4.../my_localmcp/tools.py`, etc.), each scoring
+  505–568, while the *real* working-tree `my_localmcp/tools.py` ranked **#6 at
   score 152** — dead last and ~4x lower. This is the same class of ranking
   pollution documented in PROJECT_NOTES 2026-07-03 (2) (the `.venv-phase14` case),
   in a new guise: `config.py`'s default `exclude_dirs` does not exclude `.claude/`
@@ -70,7 +70,7 @@ right or wrong is itself recorded as a datapoint about the tool's usefulness.
   through the symbol index, not FTS). Returned 4 symbol hits + 2 file hits, each
   with file_path + start/end line. This is genuinely the fastest, highest-signal
   MCP command; it does NOT suffer the worktree pollution because it returns the
-  canonical `neo_localmcp/repo_memory.py` symbol directly (worktree copies share
+  canonical `my_localmcp/repo_memory.py` symbol directly (worktree copies share
   the symbol name but `lookup` returned the real path first here).
 - **Retrieval-quality note (not a new bug):** the reported symbol *end_line* is
   imprecise — `index_repo` came back as `258-338` but actually ends at line 310;
@@ -80,7 +80,7 @@ right or wrong is itself recorded as a datapoint about the tool's usefulness.
   `lookup` output and a consumer of line hints should know the end_line is a loose
   upper bound.
 - **with-MCP cost:** ~500 tokens. **without-MCP:** `grep -rn "def index_repo"`
-  across `neo_localmcp/` (~comparable to grep), but `lookup` also gave the line span
+  across `my_localmcp/` (~comparable to grep), but `lookup` also gave the line span
   and other same-name symbols in one call. Slight win; bigger win when the file is
   unknown.
 
@@ -113,7 +113,7 @@ tokens, because the audit reads whole files regardless. The >=30% total-token
 target is a narrow-edit metric, not an audit metric — a benchmark must pick task
 shapes deliberately (see perf log, recommendation #4).
 
-**Net:** neo-localmcp was genuinely useful as a navigator (lookup/file especially),
+**Net:** my-localmcp was genuinely useful as a navigator (lookup/file especially),
 and exercising every command surfaced one real new retrieval bug plus confirmed the
 Ollama fast/slow cost model precisely. The tool ate its own dogfood competently,
 with the worktree-exclusion gap being the one thing actively hurting it in this repo.

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from neo_localmcp import ollama_client
+from my_localmcp import ollama_client
 
 pytestmark = pytest.mark.ollama
 

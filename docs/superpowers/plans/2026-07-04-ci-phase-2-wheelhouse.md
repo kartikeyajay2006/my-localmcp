@@ -87,7 +87,7 @@ Replace exactly that with:
         # each in-test install resolves offline from this dir (wheel-unpacking, no
         # PyPI round-trip). The installer's subprocesses inherit the env vars; no
         # production code changes. Verified locally: 41 wheels, no sdists, offline
-        # source-install of neo-localmcp succeeds (deps + build backend + pip-upgrade).
+        # source-install of my-localmcp succeeds (deps + build backend + pip-upgrade).
         if: github.event_name == 'push' || steps.changes.outputs.code == 'true'
         shell: bash
         run: python -m pip download -d "${{ runner.temp }}/wheelhouse" pip setuptools wheel "mcp[cli]" psutil
@@ -187,7 +187,7 @@ Summarize the measured before/after and the green offline lifecycle run. Do not 
 ## Self-Review
 
 **Spec coverage (Phase 2 section of the design spec):**
-- "build a wheelhouse (neo-localmcp deps + mcp[cli] + psutil), set PIP_NO_INDEX/PIP_FIND_LINKS" → Task 2 Step 1 (adds pip/setuptools/wheel too, required because neo-localmcp installs from source — proven necessary by the local spike). ✅
+- "build a wheelhouse (my-localmcp deps + mcp[cli] + psutil), set PIP_NO_INDEX/PIP_FIND_LINKS" → Task 2 Step 1 (adds pip/setuptools/wheel too, required because my-localmcp installs from source — proven necessary by the local spike). ✅
 - "no production-code change; installer subprocesses inherit the env vars" → Architecture + confirmed via `runtime.py` `subprocess.run` (no `env=`) and the lifecycle `_setup` helper spreading `**os.environ`. ✅
 - "wheelhouse must contain a pip wheel if a cycle upgrades pip under PIP_NO_INDEX" → covered (pip in the download list; spike ran the offline `pip install --upgrade pip` successfully). ✅
 - "confirm venv creation cost separately — not addressed by this phase" → acknowledged in Global Constraints/Task 3 Step 4 (if unchanged, Phase 4 is the lever). ✅

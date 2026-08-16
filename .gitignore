@@ -12,6 +12,7 @@ build/
 .wizard_preview/
 .coverage
 .superpowers/
-neo-localmcp_benchmarks/
+my-localmcp_benchmarks/
 .claude/
 cline_mcp_settings.json
+test_venv/

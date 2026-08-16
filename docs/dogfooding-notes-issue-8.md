@@ -1,6 +1,6 @@
 # Dogfooding notes — issue #8 (summary-cache behavior on Ollama model swap)
 
-Running log of my actual experience using neo-localmcp's own CLI (`context`/`lookup`/`file`)
+Running log of my actual experience using my-localmcp's own CLI (`context`/`lookup`/`file`)
 to research and close issue #8. Written as I go, not reconstructed.
 
 Task shape: this is a *research/decision* task (understand how model-tagged summaries
@@ -12,9 +12,9 @@ to point me at `summary_model` / `section_summaries` handling across `tools.py`,
 
 ## Run log
 
-### 1. `neo-localmcp context "summary_model tagging on section_summaries and files: ..." --token-budget 1200`
+### 1. `my-localmcp context "summary_model tagging on section_summaries and files: ..." --token-budget 1200`
 
-Ranked #1 `neo_localmcp/ollama_client.py` (score 205), then the two `*_PLAN.md`
+Ranked #1 `my_localmcp/ollama_client.py` (score 205), then the two `*_PLAN.md`
 docs, then `installer/ollama.py`, `docs/ARCHITECTURE.md` (Safety model heading —
 useful, that's exactly the section I needed for grounding the decision), then
 `PROJECT_NOTES.md`.
@@ -38,7 +38,7 @@ useful, that's exactly the section I needed for grounding the decision), then
   something. Friction for the token-comparison task: I can't capture the tool's own
   self-estimate, so my with-MCP numbers below are eyeballed from output size.
 
-### 2. `neo-localmcp lookup "section_summaries"` and `lookup "summary_model"`
+### 2. `my-localmcp lookup "section_summaries"` and `lookup "summary_model"`
 
 - `lookup "section_summaries"` → **zero hits, zero symbols.** `section_summaries` is a
   lowercase SQL table name inside a `CREATE TABLE` string literal, not an extracted
@@ -67,7 +67,7 @@ lines:
 **Assessment of retrieval for this task:** `lookup` on a real identifier (`summary_model`)
 was the single best hit of the session. But the two pieces of code that actually decide
 the behavior (the cache-hit conditional and the re-index NULL-reset) were reached by
-grep, not by neo-localmcp — `context` mis-weighted the load-bearing identifiers as weak
+grep, not by my-localmcp — `context` mis-weighted the load-bearing identifiers as weak
 terms, and `lookup` can't see SQL table names at all. For a research/decision task the
 retrieval was a helpful *orientation* layer (pointed me at ARCHITECTURE's Safety model
 and at `set_ollama`) but not sufficient on its own to locate the decisive logic.
@@ -76,7 +76,7 @@ and at `set_ollama`) but not sufficient on its own to locate the decisive logic.
 
 ## Token-cost comparison: with-MCP vs. approximate without-MCP
 
-Caveat up front: these are **estimates, not precise counts.** neo-localmcp's own token
+Caveat up front: these are **estimates, not precise counts.** my-localmcp's own token
 figures are char-derived until real client telemetry exists (a known limitation in
 PROJECT_STATUS.md), and the `context` CLI run here didn't even print its self-estimate
 (see run #1). So the with-MCP side is eyeballed from output size and the without-MCP side
@@ -88,9 +88,9 @@ File sizes (auditable basis for the counterfactual), measured in the worktree:
 
 | File | bytes (`wc -c`) | ≈ tokens (bytes÷4) |
 |---|---|---|
-| `neo_localmcp/repo_memory.py` | 36,418 | ~9,100 |
-| `neo_localmcp/tools.py` | 54,357 | ~13,600 |
-| `neo_localmcp/ollama_client.py` | 17,674 | ~4,400 |
+| `my_localmcp/repo_memory.py` | 36,418 | ~9,100 |
+| `my_localmcp/tools.py` | 54,357 | ~13,600 |
+| `my_localmcp/ollama_client.py` | 17,674 | ~4,400 |
 | `docs/ARCHITECTURE.md` | 3,259 | ~800 |
 
 Reading all four end-to-end (the naive without-MCP way to answer "how do
@@ -122,7 +122,7 @@ Per-retrieval tally:
 - **grep fallbacks (repo_memory + tools)** — these are the without-MCP path I actually
   used to find the answer. Two targeted greps (~30 lines total ≈ ~400 tokens) plus
   reading ~200 focused lines across the two files (~2,500 tokens) ≈ **~2,900 tokens** to
-  reach the two decisive lines. neo-localmcp did not save these — it didn't rank the
+  reach the two decisive lines. my-localmcp did not save these — it didn't rank the
   storage files, so this cost was incurred regardless of the MCP.
 
 **Bottom line (honest):** On the pure orientation question ("where does this subsystem
@@ -137,7 +137,7 @@ positive, well short of the headline ≥50% on *this* task — not because the t
 but because a "which of two documented behaviors is intended, and is the stale artifact
 ever surfaced as authoritative" question is answered by reading specific conditional
 logic and the architecture's framing, not by ranked file discovery, which is what
-neo-localmcp optimizes for. The ≥50%/≥30% targets are stated against *representative
+my-localmcp optimizes for. The ≥50%/≥30% targets are stated against *representative
 coding tasks* (find-and-edit); a decision/documentation task is a genuinely different
 shape and the comparison came out lopsided toward "MCP helps orient, grep finds the
 decisive line." That shape difference is itself the finding.

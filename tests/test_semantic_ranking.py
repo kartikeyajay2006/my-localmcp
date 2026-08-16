@@ -4,10 +4,10 @@ import json
 
 import pytest
 
-from neo_localmcp import config, ollama_client
-from neo_localmcp.installer import configure_models
-from neo_localmcp.retrieval import repo_memory
-from neo_localmcp.mcp import memory
+from my_localmcp import config, ollama_client
+from my_localmcp.installer import configure_models
+from my_localmcp.retrieval import repo_memory
+from my_localmcp.mcp import memory
 
 pytestmark = pytest.mark.retrieval
 

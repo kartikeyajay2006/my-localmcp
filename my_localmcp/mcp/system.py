@@ -1,0 +1,117 @@
+"""System and repository-management MCP tools.
+
+Config and health (``init``, ``status``, ``where``, ``model_status``,
+``doctor``) plus the repository index lifecycle (``repo_index``,
+``repo_reindex``, ``repo_refresh``, ``repo_lookup``, ``reset_repo``,
+``reset_all``). No context ranking or summarization -- those belong to
+``memory`` and ``editing``.
+"""
+
+from __future__ import annotations
+
+from ..retrieval import repo_memory
+from ..config import CONFIG_PATH, ensure_config, load_config
+from ..branding import IDENTITY
+from ..ollama_client import ping
+from ..repo_utils import repo_root_or_cwd
+from ._shared import json_out
+
+
+def init() -> str:
+    # first run: create config if missing -> hand back onboarding steps
+    path = ensure_config()
+    return json_out({
+        "ok": True,
+        "product": IDENTITY.product_name,
+        "config_path": str(path),
+        "next": [
+            "Run client setup once from anywhere: my-localmcp config clients setup --client all",
+            "Then cd into the repo you want analyzed: cd /path/to/your/repo",
+            "Index that repo: my-localmcp index",
+            "Ask for context: my-localmcp context \"debug feature X: KnownSymbol, FileName.cs\"",
+        ],
+    })
+
+
+def status(repo_root: str = "auto") -> str:
+    # identity + repo index status + live ollama ping -> single snapshot
+    return json_out({"product": IDENTITY.as_dict(), "config_path": str(CONFIG_PATH), "repo": repo_memory.status(repo_root), "ollama": ping()})
+
+
+def where(repo_root: str = "auto") -> str:
+    # "auto" -> resolve to cwd; reports concrete paths for user-facing debugging
+    cfg = load_config()
+    root = repo_root_or_cwd(repo_root)
+    return json_out({
+        "product": IDENTITY.product_name,
+        "installed_command_hint": "my-localmcp",
+        "config_path": str(CONFIG_PATH),
+        "current_repo": str(root),
+        "repo_db": str(repo_memory.db_path()),
+        "ollama_base_url": cfg.get("ollama", {}).get("base_url"),
+        "summary_model": cfg.get("ollama", {}).get("summary_model"),
+        "note": "Run index/context from the repo you want analyzed. Client setup (my-localmcp config clients setup) can be run once from anywhere.",
+    })
+
+
+def model_status() -> str:
+    # ollama config + live ping -> quick model-readiness check
+    cfg = load_config()
+    return json_out({
+        "ollama_config": cfg.get("ollama", {}),
+        "ollama_ping": ping(),
+        "note": "Context is deterministic by default in V1. Use --ollama-rank or use_ollama=true for optional Ollama ranking.",
+    })
+
+
+def doctor(repo_root: str = "auto") -> str:
+    # config + ollama + repo status + running servers -> one diagnostic payload
+    from .. import mcp_server_lifecycle as lifecycle  # local: only doctor() needs psutil's process-listing cost
+    cfg = load_config()
+    checks = {
+        "config_exists": CONFIG_PATH.exists(),
+        "db_open": True,
+        "ollama": ping(),
+        "repo": repo_memory.status(repo_root),
+        "running_servers": lifecycle.list_servers(prune=True),
+        "rules": [
+            "my-localmcp retrieves, indexes, summarizes, ranks, and applies exact approved patches.",
+            "my-localmcp does not generate source code or make engineering decisions.",
+            "Claude/Codex reason and create exact patches.",
+            "Context lookup is deterministic by default; Ollama ranking is opt-in with --ollama-rank or MCP use_ollama=true.",
+            "Run `my-localmcp --help` for the full, authoritative command inventory.",
+        ],
+        "config": {"ollama_base_url": cfg.get("ollama", {}).get("base_url"), "summary_model": cfg.get("ollama", {}).get("summary_model"), "db_path": cfg.get("memory", {}).get("db_path")},
+    }
+    return json_out({"ok": True, **checks})
+
+
+def repo_index(repo_root: str = "auto", max_files: int | None = None, force: bool = False) -> str:
+    # entrypoint for indexing this repo into the shared sqlite memory
+    # first index or hash-aware incremental, unless force -> full rebuild
+    return json_out(repo_memory.index_repo(repo_root, max_files=max_files, force=force))
+
+
+def repo_reindex(repo_root: str = "auto", max_files: int | None = None) -> str:
+    # repo_index with force pinned true -> always full rebuild
+    return json_out(repo_memory.index_repo(repo_root, max_files=max_files, force=True))
+
+
+def reset_repo(repo_root: str = "auto") -> str:
+    # wipes this repo's indexed data only; other indexed repos in the shared db are untouched
+    return json_out(repo_memory.reset_repo(repo_root))
+
+
+def reset_all() -> str:
+    # destructive: wipes repo-context.sqlite for every indexed repo, not just this one
+    return json_out(repo_memory.reset_all())
+
+
+def repo_refresh(repo_root: str = "auto", max_files: int | None = None, force: bool = False) -> str:
+    # thin alias: refresh() is hash-aware re-index under the hood, same as repo_index
+    return json_out(repo_memory.refresh(repo_root, force=force, max_files=max_files))
+
+
+def repo_lookup(query: str, repo_root: str = "auto", limit: int = 20) -> str:
+    # read-only FTS probe against indexed symbols/files; hot path, no branch/remote refresh
+    return json_out(repo_memory.lookup(query, repo_root, limit=limit))

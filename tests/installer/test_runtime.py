@@ -8,9 +8,9 @@ from typing import Sequence
 
 import pytest
 
-import neo_localmcp
-from neo_localmcp.installer.paths import ManagedPaths
-from neo_localmcp.installer.runtime import (
+import my_localmcp
+from my_localmcp.installer.paths import ManagedPaths
+from my_localmcp.installer.runtime import (
     CandidateRuntime,
     CommandResult,
     RuntimeValidation,
@@ -31,7 +31,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 def _paths(tmp_path: Path) -> ManagedPaths:
     return ManagedPaths(
-        root=tmp_path / ".neo-localmcp",
+        root=tmp_path / ".my-localmcp",
         platform="posix",
         home=tmp_path,
     )
@@ -47,11 +47,11 @@ def _classify(args: tuple[str, ...]) -> str:
         return "install"
     if "sys.version_info" in joined:
         return "interpreter"
-    if "neo_localmcp.__version__" in joined:
+    if "my_localmcp.__version__" in joined:
         return "package-version"
     if joined.endswith("--help"):
         return "cli-help"
-    if "import neo_localmcp.mcp.server" in joined:
+    if "import my_localmcp.mcp.server" in joined:
         return "server-import"
     return "other"
 
@@ -137,7 +137,7 @@ class RecordingFileSystem:
 def _make_venv_dir(venv: Path) -> Path:
     bindir = venv / "bin"
     bindir.mkdir(parents=True)
-    for name in ("python", "neo-localmcp", "neo-localmcp-server"):
+    for name in ("python", "my-localmcp", "my-localmcp-server"):
         executable = bindir / name
         executable.write_text("#!/bin/sh\n")
         executable.chmod(0o755)
@@ -478,14 +478,14 @@ def test_rehome_scripts_rewrites_staging_shebangs(tmp_path: Path) -> None:
     bindir.mkdir(parents=True)
     old_prefix = "/staging/op-1/venv"
     new_prefix = str(tmp_path / "venv")
-    script = bindir / "neo-localmcp"
+    script = bindir / "my-localmcp"
     script.write_text(f"#!{old_prefix}/bin/python\nprint('hi')\n")
     # A symlinked interpreter must not be rewritten.
     (bindir / "python").symlink_to("/usr/bin/python3")
 
     rehomed = rehome_scripts(bindir, old_prefix, new_prefix)
 
-    assert "neo-localmcp" in rehomed
+    assert "my-localmcp" in rehomed
     assert script.read_text().splitlines()[0] == f"#!{new_prefix}/bin/python"
 
 
@@ -493,7 +493,7 @@ def test_promotion_rehomes_moved_candidate_shebangs(tmp_path: Path) -> None:
     paths = _paths(tmp_path)
     candidate = _candidate(paths)
     # Rewrite the candidate's cli script to a realistic staging-path shebang.
-    cli = candidate.venv / "bin" / "neo-localmcp"
+    cli = candidate.venv / "bin" / "my-localmcp"
     cli.write_text(f"#!{candidate.venv}/bin/python\nprint('cli')\n")
     runner = FakeCommandRunner(version="1.0.9")
     fs = RecordingFileSystem()
@@ -503,7 +503,7 @@ def test_promotion_rehomes_moved_candidate_shebangs(tmp_path: Path) -> None:
     )
 
     assert result.ok is True
-    promoted_cli = paths.venv / "bin" / "neo-localmcp"
+    promoted_cli = paths.venv / "bin" / "my-localmcp"
     assert promoted_cli.read_text().splitlines()[0] == f"#!{paths.venv}/bin/python"
 
 
@@ -548,9 +548,9 @@ def test_remove_runtime_is_noop_when_absent(tmp_path: Path) -> None:
 @pytest.mark.slow
 def test_real_candidate_build_and_promote(tmp_path: Path) -> None:
     platform = "windows" if os.name == "nt" else "posix"
-    paths = ManagedPaths(root=tmp_path / ".neo-localmcp", platform=platform, home=tmp_path)
+    paths = ManagedPaths(root=tmp_path / ".my-localmcp", platform=platform, home=tmp_path)
     paths.ensure_directories()
-    expected_version = neo_localmcp.__version__
+    expected_version = my_localmcp.__version__
 
     candidate = build_candidate(
         paths,

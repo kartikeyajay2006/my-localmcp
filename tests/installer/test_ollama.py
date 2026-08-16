@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from neo_localmcp import config
-from neo_localmcp.installer import configure_models
+from my_localmcp import config
+from my_localmcp.installer import configure_models
 
 
 def test_configure_models_sets_only_given_fields(isolated_config):

@@ -1,4 +1,4 @@
-title = "neo-localmcp gitleaks config"
+title = "my-localmcp gitleaks config"
 
 # Layers gitleaks' built-in secret-detection ruleset (API keys, tokens, private
 # keys, etc.) with project-specific rules below, rather than replacing it.
