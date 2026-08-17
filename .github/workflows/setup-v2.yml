@@ -5,6 +5,17 @@ on:
     branches: [main]
   pull_request:
 
+# The repo's default GITHUB_TOKEN permissions are read-only (contents only).
+# dorny/paths-filter needs pull-requests: read too -- actions/checkout's default
+# shallow fetch leaves the base ref unavailable locally, so paths-filter falls
+# back to the GitHub API to list changed files, which 403s ("Resource not
+# accessible by integration") without this scope. contents: read is kept
+# explicit alongside it since declaring `permissions:` at all drops every
+# undeclared scope to none.
+permissions:
+  contents: read
+  pull-requests: read
+
 concurrency:
   # One in-flight run per ref. A same-repo PR branch now runs the matrix once
   # (pull_request) instead of twice (push + pull_request); pushing a new commit
