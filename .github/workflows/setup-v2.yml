@@ -171,7 +171,11 @@ jobs:
         # source-install of my-localmcp succeeds (deps + build backend + pip-upgrade).
         if: github.event_name == 'push' || (steps.changes.outputs.code == 'true' && steps.installer_changes.outputs.installer == 'true')
         shell: bash
-        run: python -m pip download -d "${{ runner.temp }}/wheelhouse" pip setuptools wheel "mcp[cli]" psutil
+        # mcp[cli] is pinned to the same range as pyproject.toml's dependency (mcp[cli]>=1.27,<2)
+        # -- an unpinned download here grabs PyPI's newest mcp release regardless of what
+        # my-localmcp actually requires, and once mcp 2.0.0 shipped, the offline (--no-index)
+        # candidate-venv install below had no <2 wheel available and failed dependency resolution.
+        run: python -m pip download -d "${{ runner.temp }}/wheelhouse" pip setuptools wheel "mcp[cli]>=1.27,<2" psutil
       - name: Native lifecycle
         if: github.event_name == 'push' || (steps.changes.outputs.code == 'true' && steps.installer_changes.outputs.installer == 'true')
         env:
